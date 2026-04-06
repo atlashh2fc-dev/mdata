@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/db/client'
+import { hasSupabasePublicEnv, supabaseBrowser } from '@/lib/db/client'
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {
@@ -15,6 +15,12 @@ export default function LoginPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
+
+    if (!hasSupabasePublicEnv) {
+      setError('Falta configurar Supabase en Vercel. Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.')
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -62,6 +68,15 @@ export default function LoginPage() {
             </div>
           )}
 
+          {!hasSupabasePublicEnv && (
+            <div className="flex items-center gap-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-5">
+              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+              <p className="text-sm text-amber-300">
+                La app esta desplegada, pero faltan variables publicas de Supabase en Vercel.
+              </p>
+            </div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
@@ -104,7 +119,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading || !email || !password}
+              disabled={loading || !email || !password || !hasSupabasePublicEnv}
               className="btn-primary w-full justify-center py-2.5 mt-2"
             >
               {loading ? (

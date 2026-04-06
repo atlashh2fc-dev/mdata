@@ -3,9 +3,13 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import type { Database } from './database.types'
 
-export const hasSupabaseEnv = Boolean(
+export const hasSupabasePublicEnv = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL &&
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
+
+export const hasSupabaseAdminEnv = Boolean(
+  hasSupabasePublicEnv &&
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 

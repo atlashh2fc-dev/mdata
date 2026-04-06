@@ -1,13 +1,13 @@
 'use server'
 
-import { db, hasSupabaseEnv } from '@/lib/db/supabase'
+import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import type { DashboardStats, CoberturaItem } from '@/types'
 
 /**
  * Obtiene los KPIs principales del dashboard desde la vista materializada
  */
 export async function getDashboardKPIs(): Promise<DashboardStats> {
-  if (!hasSupabaseEnv) {
+  if (!hasSupabaseAdminEnv) {
     return {
       total_ruts: 0,
       con_nombre: 0,
@@ -135,7 +135,7 @@ export async function getCoberturaData(): Promise<CoberturaItem[]> {
  * Obtiene actividad reciente de ingesta
  */
 export async function getRecentActivity(limit = 10) {
-  if (!hasSupabaseEnv) {
+  if (!hasSupabaseAdminEnv) {
     return []
   }
 
@@ -161,7 +161,7 @@ export async function getRecentActivity(limit = 10) {
  * Refresca la vista materializada de stats
  */
 export async function refreshStats(): Promise<void> {
-  if (!hasSupabaseEnv) {
+  if (!hasSupabaseAdminEnv) {
     return
   }
 

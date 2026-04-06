@@ -2,33 +2,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const hasSupabasePublicEnv = Boolean(supabaseUrl && supabaseAnonKey)
   const { pathname } = request.nextUrl
 
   // Rutas protegidas
@@ -41,15 +17,58 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/exportar') ||
     pathname.startsWith('/logs')
 
-  if (isProtectedRoute && !user) {
-    return NextResponse.redirect(new URL('/login', request.url))
+  if (!hasSupabasePublicEnv) {
+    return isProtectedRoute
+      ? NextResponse.redirect(new URL('/login', request.url))
+      : NextResponse.next({ request })
   }
 
-  if ((pathname === '/login') && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
-  }
+  let supabaseResponse = NextResponse.next({ request })
 
-  return supabaseResponse
+  try {
+    const supabase = createServerClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) =>
+              request.cookies.set(name, value)
+            )
+            supabaseResponse = NextResponse.next({ request })
+            cookiesToSet.forEach(({ name, value, options }) =>
+              supabaseResponse.cookies.set(name, value, options)
+            )
+          },
+        },
+      }
+    )
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (isProtectedRoute && !user) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+
+    if (pathname === '/login' && user) {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
+    }
+
+    return supabaseResponse
+  } catch (error) {
+    console.error('[middleware] Supabase auth check failed', error)
+
+    if (isProtectedRoute) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+
+    return NextResponse.next({ request })
+  }
 }
 
 export const config = {

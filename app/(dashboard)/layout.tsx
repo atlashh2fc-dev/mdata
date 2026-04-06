@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/db/supabase'
+import { createSupabaseServerClient, hasSupabasePublicEnv } from '@/lib/db/supabase'
 import { Sidebar } from '@/components/layout/Sidebar'
 
 export const dynamic = 'force-dynamic'
@@ -9,16 +9,21 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  if (!hasSupabaseEnv) {
+  if (!hasSupabasePublicEnv) {
     redirect('/login')
   }
 
-  const supabase = await createSupabaseServerClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  try {
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
-  if (!user) {
+    if (!user) {
+      redirect('/login')
+    }
+  } catch (error) {
+    console.error('[dashboard/layout] Supabase auth check failed', error)
     redirect('/login')
   }
 

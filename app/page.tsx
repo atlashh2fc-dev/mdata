@@ -1,14 +1,19 @@
 import { redirect } from 'next/navigation'
-import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/db/supabase'
+import { createSupabaseServerClient, hasSupabasePublicEnv } from '@/lib/db/supabase'
 
 export const dynamic = 'force-dynamic'
 
 export default async function HomePage() {
-  if (!hasSupabaseEnv) {
+  if (!hasSupabasePublicEnv) {
     redirect('/login')
   }
 
-  const supabase = await createSupabaseServerClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  redirect(user ? '/dashboard' : '/login')
+  try {
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    redirect(user ? '/dashboard' : '/login')
+  } catch (error) {
+    console.error('[app/page] Supabase auth check failed', error)
+    redirect('/login')
+  }
 }
