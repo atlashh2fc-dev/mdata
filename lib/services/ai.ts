@@ -1,7 +1,10 @@
 'use server'
 
 import { supabaseAdmin } from '@/lib/db/supabase'
+import type { Database } from '@/lib/db/database.types'
 import type { AIAnalysisRequest, AIAnalysisResponse, AIAnalysisType } from '@/types'
+
+type Json = Database['public']['Tables']['ai_analysis_logs']['Insert']['input_data']
 
 const INCEPTION_API_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
 const INCEPTION_MODEL = 'mercury-2'
@@ -111,8 +114,8 @@ export async function analyzeWithAI(
   if (userId) {
     await supabaseAdmin.from('ai_analysis_logs').insert({
       analysis_type: request.type,
-      input_data: request.data as Record<string, unknown>,
-      output_data: result,
+      input_data: request.data as unknown as Json,
+      output_data: result as unknown as Json,
       model: INCEPTION_MODEL,
       tokens_used: tokens,
       duration_ms: durationMs,

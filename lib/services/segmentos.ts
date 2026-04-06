@@ -101,7 +101,7 @@ export async function createSegmento(
     .insert({
       name,
       description,
-      filters: filters as unknown as Record<string, unknown>,
+      filters: filters as unknown as import('@/lib/db/database.types').Json,
       sql_query: sqlQuery,
       created_by: userId,
     })
@@ -125,15 +125,17 @@ export async function updateSegmento(
   id: string,
   updates: Partial<Pick<Segmento, 'name' | 'description' | 'filters' | 'is_active'>>
 ): Promise<Segmento | null> {
-  const payload: Record<string, unknown> = { ...updates }
-
-  if (updates.filters) {
-    payload.sql_query = `SELECT * FROM master_personas_view WHERE ${buildWhereClause(updates.filters)}`
-  }
-
   const { data, error } = await supabaseAdmin
     .from('segmentos')
-    .update(payload)
+    .update({
+      ...(updates.name !== undefined && { name: updates.name }),
+      ...(updates.description !== undefined && { description: updates.description }),
+      ...(updates.is_active !== undefined && { is_active: updates.is_active }),
+      ...(updates.filters !== undefined && {
+        filters: updates.filters as unknown as import('@/lib/db/database.types').Json,
+        sql_query: `SELECT * FROM master_personas_view WHERE ${buildWhereClause(updates.filters)}`,
+      }),
+    })
     .eq('id', id)
     .select()
     .single()
