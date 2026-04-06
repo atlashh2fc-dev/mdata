@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   // -------------------------------------------------------
   if (action === 'detect_columns') {
     const { rows } = body as { rows: Record<string, string>[] }
-    const columns = detectColumns(rows, 30)
+    const columns = await detectColumns(rows, 30)
     return NextResponse.json({ success: true, data: columns })
   }
 

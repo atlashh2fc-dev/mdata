@@ -203,10 +203,10 @@ export async function saveColumnMappings(
 // COLUMN DETECTION
 // ============================================================
 
-export function detectColumns(
+export async function detectColumns(
   rows: Record<string, string>[],
   sampleSize = 20
-): DetectedColumn[] {
+): Promise<DetectedColumn[]> {
   if (!rows || rows.length === 0) return []
 
   const headers = Object.keys(rows[0])

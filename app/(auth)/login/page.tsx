@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/db/supabase'
+import { supabaseBrowser } from '@/lib/db/client'
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {

@@ -15,7 +15,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/formatters'
-import { supabaseBrowser } from '@/lib/db/supabase'
+import { supabaseBrowser } from '@/lib/db/client'
 import { useRouter } from 'next/navigation'
 
 const NAV_ITEMS = [
