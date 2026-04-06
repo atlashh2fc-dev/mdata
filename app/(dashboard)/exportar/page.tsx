@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
 import { LoadingState, EmptyState, Spinner } from '@/components/ui/Spinner'
-import type { Segmento, PersonaView } from '@/types'
-import { Download, FileText, Table2, ChevronRight, Check, AlertCircle } from 'lucide-react'
+import type { Segmento } from '@/types'
+import { Download, FileText, Table2, ChevronRight, Check } from 'lucide-react'
 import { formatNumber } from '@/lib/utils/formatters'
 
 export default function ExportarPage() {
@@ -29,56 +29,45 @@ export default function ExportarPage() {
     if (!selectedSeg) return
     setExporting(true)
     setExportDone(false)
+    try {
+      if (exportFormat === 'csv') {
+        const res = await fetch('/api/segmentos/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ segment_id: selectedSeg.id }),
+        })
 
-    // Fetch all pages
-    let page = 1
-    const allRows: PersonaView[] = []
-    let hasMore = true
+        if (!res.ok) {
+          throw new Error('No se pudo generar el CSV')
+        }
 
-    while (hasMore) {
-      const res = await fetch(
-        `/api/segmentos?execute=${selectedSeg.id}&exec_page=${page}&exec_page_size=1000`
-      )
-      const json = await res.json()
-      allRows.push(...(json.data ?? []))
-      if (json.data?.length < 1000 || page >= json.total_pages) {
-        hasMore = false
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${selectedSeg.name}.csv`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        const res = await fetch(
+          `/api/segmentos?execute=${selectedSeg.id}&exec_page=1&exec_page_size=5000`
+        )
+        const json = await res.json()
+        const blob = new Blob([JSON.stringify(json.data ?? [], null, 2)], {
+          type: 'application/json',
+        })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${selectedSeg.name}.json`
+        a.click()
+        URL.revokeObjectURL(url)
       }
-      page++
+
+      setExportDone(true)
+    } finally {
+      setExporting(false)
     }
-
-    // Generate file
-    if (exportFormat === 'csv') {
-      const headers = [
-        'RUT', 'Nombre', 'Email', 'Teléfono', 'Región', 'Comuna',
-        'Autos', 'Empresa', 'Bienes Raíces', 'Total Avalúos', 'Score',
-      ]
-      const rows = allRows.map(r => [
-        r.rutid, r.nombre_completo, r.email, r.fono_cel,
-        r.region_part, r.comuna_part, r.n_autos,
-        r.razon_social_empresa, r.n_bienes_raices,
-        r.totalavaluos, r.score_patrimonial,
-      ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
-
-      const csv = [headers.join(','), ...rows].join('\n')
-      downloadBlob(csv, `${selectedSeg.name}.csv`, 'text/csv')
-    } else {
-      const json = JSON.stringify(allRows, null, 2)
-      downloadBlob(json, `${selectedSeg.name}.json`, 'application/json')
-    }
-
-    setExporting(false)
-    setExportDone(true)
-  }
-
-  function downloadBlob(content: string, filename: string, type: string) {
-    const blob = new Blob([content], { type })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   return (

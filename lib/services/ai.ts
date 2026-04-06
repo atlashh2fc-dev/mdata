@@ -1,6 +1,6 @@
 'use server'
 
-import { supabaseAdmin, db } from '@/lib/db/supabase'
+import { db } from '@/lib/db/supabase'
 import type { Database } from '@/lib/db/database.types'
 import type { AIAnalysisRequest, AIAnalysisResponse, AIAnalysisType } from '@/types'
 

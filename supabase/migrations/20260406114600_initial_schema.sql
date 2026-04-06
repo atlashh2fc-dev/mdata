@@ -1,17 +1,11 @@
 -- ============================================================
--- RUT INTELLIGENCE PLATFORM — SUPABASE SCHEMA
--- Version: 1.0.0
--- Capas: raw → staging → normalized → summary → master_view
+-- RUT INTELLIGENCE PLATFORM — INITIAL SCHEMA
+-- Basado en supabase/schema.sql
 -- ============================================================
 
--- Extensions
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE EXTENSION IF NOT EXISTS "unaccent";
-
--- ============================================================
--- CAPA 1: TABLAS NORMALIZADAS (Migradas desde MySQL)
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS master_personas (
   rutid        VARCHAR(20) PRIMARY KEY,
@@ -21,7 +15,6 @@ CREATE TABLE IF NOT EXISTS master_personas (
 
 CREATE INDEX IF NOT EXISTS idx_master_personas_rutid ON master_personas (rutid);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS pernat_resumen (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   rutid        VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
@@ -42,11 +35,10 @@ CREATE INDEX IF NOT EXISTS idx_pernat_nombres   ON pernat_resumen USING gin(nomb
 CREATE INDEX IF NOT EXISTS idx_pernat_region    ON pernat_resumen (region_part);
 CREATE INDEX IF NOT EXISTS idx_pernat_comuna    ON pernat_resumen (comuna_part);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS autos_resumen (
-  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  rutid    VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
-  n_autos  INTEGER DEFAULT 0,
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rutid      VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
+  n_autos    INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -54,33 +46,30 @@ CREATE TABLE IF NOT EXISTS autos_resumen (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_autos_rutid ON autos_resumen (rutid);
 CREATE INDEX IF NOT EXISTS idx_autos_n_autos      ON autos_resumen (n_autos);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS empresa_resumen (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  rutid               VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rutid                VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
   razon_social_empresa VARCHAR(500),
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_empresa_rutid          ON empresa_resumen (rutid);
-CREATE INDEX IF NOT EXISTS idx_empresa_razon_social   ON empresa_resumen USING gin(razon_social_empresa gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_empresa_rutid        ON empresa_resumen (rutid);
+CREATE INDEX IF NOT EXISTS idx_empresa_razon_social ON empresa_resumen USING gin(razon_social_empresa gin_trgm_ops);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS domicilio_resumen (
-  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  rutid    VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
-  comuna   VARCHAR(100),
-  region   VARCHAR(100),
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rutid      VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
+  comuna     VARCHAR(100),
+  region     VARCHAR(100),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_domicilio_rutid   ON domicilio_resumen (rutid);
-CREATE INDEX IF NOT EXISTS idx_domicilio_region  ON domicilio_resumen (region);
-CREATE INDEX IF NOT EXISTS idx_domicilio_comuna  ON domicilio_resumen (comuna);
+CREATE INDEX IF NOT EXISTS idx_domicilio_rutid  ON domicilio_resumen (rutid);
+CREATE INDEX IF NOT EXISTS idx_domicilio_region ON domicilio_resumen (region);
+CREATE INDEX IF NOT EXISTS idx_domicilio_comuna ON domicilio_resumen (comuna);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS acumulado_resumen (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   rutid            VARCHAR(20) NOT NULL REFERENCES master_personas(rutid) ON DELETE CASCADE,
@@ -90,19 +79,13 @@ CREATE TABLE IF NOT EXISTS acumulado_resumen (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_acumulado_rutid             ON acumulado_resumen (rutid);
-CREATE INDEX IF NOT EXISTS idx_acumulado_n_bienes_raices          ON acumulado_resumen (n_bienes_raices);
-CREATE INDEX IF NOT EXISTS idx_acumulado_totalavaluos             ON acumulado_resumen (totalavaluos);
-
--- ============================================================
--- MASTER VIEW (Vista consolidada 360°)
--- ============================================================
+CREATE UNIQUE INDEX IF NOT EXISTS idx_acumulado_rutid    ON acumulado_resumen (rutid);
+CREATE INDEX IF NOT EXISTS idx_acumulado_n_bienes_raices ON acumulado_resumen (n_bienes_raices);
+CREATE INDEX IF NOT EXISTS idx_acumulado_totalavaluos    ON acumulado_resumen (totalavaluos);
 
 CREATE OR REPLACE VIEW master_personas_view AS
 SELECT
   mp.rutid,
-
-  -- Datos personales
   pr.nombres,
   pr.paterno,
   pr.materno,
@@ -111,25 +94,15 @@ SELECT
   pr.fono_cel,
   pr.comuna_part,
   pr.region_part,
-
-  -- Autos
-  COALESCE(ar.n_autos, 0)              AS n_autos,
+  COALESCE(ar.n_autos, 0) AS n_autos,
   CASE WHEN ar.n_autos > 0 THEN TRUE ELSE FALSE END AS tiene_autos,
-
-  -- Empresa
   er.razon_social_empresa,
   CASE WHEN er.razon_social_empresa IS NOT NULL THEN TRUE ELSE FALSE END AS tiene_empresa,
-
-  -- Domicilio
-  dr.comuna  AS domicilio_comuna,
-  dr.region  AS domicilio_region,
-
-  -- Bienes raíces
-  COALESCE(ac.n_bienes_raices, 0)   AS n_bienes_raices,
-  COALESCE(ac.totalavaluos, 0)      AS totalavaluos,
+  dr.comuna AS domicilio_comuna,
+  dr.region AS domicilio_region,
+  COALESCE(ac.n_bienes_raices, 0) AS n_bienes_raices,
+  COALESCE(ac.totalavaluos, 0) AS totalavaluos,
   CASE WHEN ac.n_bienes_raices > 0 THEN TRUE ELSE FALSE END AS tiene_bienes_raices,
-
-  -- Score patrimonial compuesto
   (
     COALESCE(ar.n_autos, 0) * 10 +
     COALESCE(ac.n_bienes_raices, 0) * 20 +
@@ -137,32 +110,26 @@ SELECT
     CASE WHEN pr.email IS NOT NULL THEN 5 ELSE 0 END +
     CASE WHEN pr.fono_cel IS NOT NULL THEN 5 ELSE 0 END
   )::INTEGER AS score_patrimonial,
-
-  -- Cobertura de datos (campos no nulos / total posibles)
   (
-    (CASE WHEN pr.nombres IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN pr.email IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN pr.fono_cel IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN pr.region_part IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN ar.n_autos IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN er.razon_social_empresa IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN dr.region IS NOT NULL THEN 1 ELSE 0 END +
-     CASE WHEN ac.n_bienes_raices IS NOT NULL THEN 1 ELSE 0 END)::FLOAT / 8.0 * 100
+    (
+      CASE WHEN pr.nombres IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN pr.email IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN pr.fono_cel IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN pr.region_part IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN ar.n_autos IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN er.razon_social_empresa IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN dr.region IS NOT NULL THEN 1 ELSE 0 END +
+      CASE WHEN ac.n_bienes_raices IS NOT NULL THEN 1 ELSE 0 END
+    )::FLOAT / 8.0 * 100
   )::INTEGER AS cobertura_pct,
-
   mp.created_at,
   mp.updated_at
-
 FROM master_personas mp
-LEFT JOIN pernat_resumen    pr ON pr.rutid = mp.rutid
-LEFT JOIN autos_resumen     ar ON ar.rutid = mp.rutid
-LEFT JOIN empresa_resumen   er ON er.rutid = mp.rutid
+LEFT JOIN pernat_resumen pr ON pr.rutid = mp.rutid
+LEFT JOIN autos_resumen ar ON ar.rutid = mp.rutid
+LEFT JOIN empresa_resumen er ON er.rutid = mp.rutid
 LEFT JOIN domicilio_resumen dr ON dr.rutid = mp.rutid
 LEFT JOIN acumulado_resumen ac ON ac.rutid = mp.rutid;
-
--- ============================================================
--- CAPA 2: METADATOS DE INGESTA Y PIPELINE
--- ============================================================
 
 CREATE TYPE ingestion_status AS ENUM (
   'pending', 'processing', 'validating', 'merging', 'completed', 'failed', 'cancelled'
@@ -186,7 +153,6 @@ CREATE TABLE IF NOT EXISTS data_sources (
 
 CREATE INDEX IF NOT EXISTS idx_data_sources_active ON data_sources (is_active);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source_id       UUID REFERENCES data_sources(id),
@@ -211,71 +177,63 @@ CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status     ON ingestion_jobs (stat
 CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_source     ON ingestion_jobs (source_id);
 CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_created_at ON ingestion_jobs (created_at DESC);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ingestion_logs (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id      UUID NOT NULL REFERENCES ingestion_jobs(id) ON DELETE CASCADE,
-  level       VARCHAR(10) NOT NULL DEFAULT 'info', -- info | warn | error
+  level       VARCHAR(10) NOT NULL DEFAULT 'info',
   message     TEXT NOT NULL,
   row_number  INTEGER,
   raw_data    JSONB,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ingestion_logs_job    ON ingestion_logs (job_id);
-CREATE INDEX IF NOT EXISTS idx_ingestion_logs_level  ON ingestion_logs (level);
-CREATE INDEX IF NOT EXISTS idx_ingestion_logs_ts     ON ingestion_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ingestion_logs_job   ON ingestion_logs (job_id);
+CREATE INDEX IF NOT EXISTS idx_ingestion_logs_level ON ingestion_logs (level);
+CREATE INDEX IF NOT EXISTS idx_ingestion_logs_ts    ON ingestion_logs (created_at DESC);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS source_column_mappings (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  source_id       UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
-  source_column   VARCHAR(255) NOT NULL,
-  target_table    VARCHAR(100) NOT NULL,
-  target_column   VARCHAR(100) NOT NULL,
-  transform_fn    VARCHAR(100),  -- 'uppercase', 'lowercase', 'trim', 'rut_format', etc.
-  is_rut_column   BOOLEAN NOT NULL DEFAULT FALSE,
-  is_required     BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id     UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+  source_column VARCHAR(255) NOT NULL,
+  target_table  VARCHAR(100) NOT NULL,
+  target_column VARCHAR(100) NOT NULL,
+  transform_fn  VARCHAR(100),
+  is_rut_column BOOLEAN NOT NULL DEFAULT FALSE,
+  is_required   BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (source_id, source_column)
 );
 
 CREATE INDEX IF NOT EXISTS idx_mappings_source ON source_column_mappings (source_id);
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS merge_rules (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  source_id       UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
-  target_table    VARCHAR(100) NOT NULL,
-  on_conflict     VARCHAR(20) NOT NULL DEFAULT 'update', -- 'update' | 'skip' | 'append'
-  condition_sql   TEXT,
-  priority        INTEGER NOT NULL DEFAULT 0,
-  is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id     UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+  target_table  VARCHAR(100) NOT NULL,
+  on_conflict   VARCHAR(20) NOT NULL DEFAULT 'update',
+  condition_sql TEXT,
+  priority      INTEGER NOT NULL DEFAULT 0,
+  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS staging_data (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  job_id          UUID NOT NULL REFERENCES ingestion_jobs(id) ON DELETE CASCADE,
-  row_number      INTEGER NOT NULL,
-  raw_data        JSONB NOT NULL,
-  mapped_data     JSONB,
-  rutid           VARCHAR(20),
-  is_valid_rut    BOOLEAN,
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id            UUID NOT NULL REFERENCES ingestion_jobs(id) ON DELETE CASCADE,
+  row_number        INTEGER NOT NULL,
+  raw_data          JSONB NOT NULL,
+  mapped_data       JSONB,
+  rutid             VARCHAR(20),
+  is_valid_rut      BOOLEAN,
   validation_errors JSONB DEFAULT '[]',
-  status          VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending | valid | invalid | merged
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_staging_job_id ON staging_data (job_id);
 CREATE INDEX IF NOT EXISTS idx_staging_rutid  ON staging_data (rutid);
 CREATE INDEX IF NOT EXISTS idx_staging_status ON staging_data (status);
-
--- ============================================================
--- CAPA 3: SEGMENTOS
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS segmentos (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -307,13 +265,9 @@ CREATE TABLE IF NOT EXISTS segment_exports (
   completed_at TIMESTAMPTZ
 );
 
--- ============================================================
--- CAPA 4: AI ANALYSIS LOGS
--- ============================================================
-
 CREATE TABLE IF NOT EXISTS ai_analysis_logs (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  analysis_type VARCHAR(50) NOT NULL, -- 'enrichment' | 'classification' | 'scoring' | 'dataset'
+  analysis_type VARCHAR(50) NOT NULL,
   input_data    JSONB,
   output_data   JSONB,
   model         VARCHAR(100) DEFAULT 'mercury-2',
@@ -325,10 +279,6 @@ CREATE TABLE IF NOT EXISTS ai_analysis_logs (
 
 CREATE INDEX IF NOT EXISTS idx_ai_logs_type ON ai_analysis_logs (analysis_type);
 CREATE INDEX IF NOT EXISTS idx_ai_logs_ts   ON ai_analysis_logs (created_at DESC);
-
--- ============================================================
--- AUDIT LOG
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -343,49 +293,36 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_user_id   ON audit_logs (user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_entity    ON audit_logs (entity, entity_id);
-CREATE INDEX IF NOT EXISTS idx_audit_created   ON audit_logs (created_at DESC);
-
--- ============================================================
--- ROW LEVEL SECURITY
--- ============================================================
+CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs (user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_entity  ON audit_logs (entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs (created_at DESC);
 
 ALTER TABLE data_sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ingestion_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE segmentos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Solo usuarios autenticados pueden ver data_sources
 CREATE POLICY "authenticated_read_sources" ON data_sources
   FOR SELECT USING (auth.role() = 'authenticated');
 
 CREATE POLICY "authenticated_write_sources" ON data_sources
   FOR ALL USING (auth.role() = 'authenticated');
 
--- Ingestion jobs
 CREATE POLICY "authenticated_read_jobs" ON ingestion_jobs
   FOR SELECT USING (auth.role() = 'authenticated');
 
 CREATE POLICY "authenticated_write_jobs" ON ingestion_jobs
   FOR ALL USING (auth.role() = 'authenticated');
 
--- Segmentos
 CREATE POLICY "authenticated_read_segmentos" ON segmentos
   FOR SELECT USING (auth.role() = 'authenticated');
 
 CREATE POLICY "authenticated_write_segmentos" ON segmentos
   FOR ALL USING (auth.role() = 'authenticated');
 
--- Audit logs: solo lectura para usuarios autenticados
 CREATE POLICY "authenticated_read_audit" ON audit_logs
   FOR SELECT USING (auth.role() = 'authenticated');
 
--- ============================================================
--- FUNCIONES ÚTILES
--- ============================================================
-
--- Función para validar RUT chileno
 CREATE OR REPLACE FUNCTION validate_rut_cl(rut TEXT)
 RETURNS BOOLEAN AS $$
 DECLARE
@@ -416,7 +353,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
--- Función para formatear RUT a forma estándar (XXXXXXXX-X)
 CREATE OR REPLACE FUNCTION format_rut_cl(rut TEXT)
 RETURNS TEXT AS $$
 DECLARE
@@ -428,7 +364,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
--- Trigger para updated_at automático
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -437,7 +372,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Aplicar trigger a tablas principales
 DO $$
 DECLARE
   t TEXT;
@@ -447,39 +381,35 @@ BEGIN
     'empresa_resumen', 'domicilio_resumen', 'acumulado_resumen',
     'data_sources', 'ingestion_jobs', 'segmentos', 'source_column_mappings'
   ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_%1$s_updated_at ON %1$s', t);
     EXECUTE format(
-      'CREATE OR REPLACE TRIGGER trg_%s_updated_at
-       BEFORE UPDATE ON %s
+      'CREATE TRIGGER trg_%1$s_updated_at
+       BEFORE UPDATE ON %1$s
        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
-      t, t
+      t
     );
   END LOOP;
 END $$;
 
--- ============================================================
--- ESTADÍSTICAS MATERIALIZADAS (para dashboard KPIs)
--- ============================================================
-
 CREATE MATERIALIZED VIEW IF NOT EXISTS dashboard_stats AS
 SELECT
-  (SELECT COUNT(*) FROM master_personas)                              AS total_ruts,
-  (SELECT COUNT(*) FROM pernat_resumen WHERE nombres IS NOT NULL)     AS con_nombre,
-  (SELECT COUNT(*) FROM pernat_resumen WHERE email IS NOT NULL)       AS con_email,
-  (SELECT COUNT(*) FROM pernat_resumen WHERE fono_cel IS NOT NULL)    AS con_fono,
-  (SELECT COUNT(*) FROM autos_resumen WHERE n_autos > 0)             AS con_autos,
-  (SELECT SUM(n_autos) FROM autos_resumen)                           AS total_autos,
+  (SELECT COUNT(*) FROM master_personas) AS total_ruts,
+  (SELECT COUNT(*) FROM pernat_resumen WHERE nombres IS NOT NULL) AS con_nombre,
+  (SELECT COUNT(*) FROM pernat_resumen WHERE email IS NOT NULL) AS con_email,
+  (SELECT COUNT(*) FROM pernat_resumen WHERE fono_cel IS NOT NULL) AS con_fono,
+  (SELECT COUNT(*) FROM autos_resumen WHERE n_autos > 0) AS con_autos,
+  (SELECT SUM(n_autos) FROM autos_resumen) AS total_autos,
   (SELECT COUNT(*) FROM empresa_resumen WHERE razon_social_empresa IS NOT NULL) AS con_empresa,
-  (SELECT COUNT(*) FROM domicilio_resumen WHERE region IS NOT NULL)  AS con_domicilio,
+  (SELECT COUNT(*) FROM domicilio_resumen WHERE region IS NOT NULL) AS con_domicilio,
   (SELECT COUNT(*) FROM acumulado_resumen WHERE n_bienes_raices > 0) AS con_bienes_raices,
-  (SELECT SUM(totalavaluos) FROM acumulado_resumen)                  AS total_avaluos,
-  (SELECT COUNT(*) FROM ingestion_jobs WHERE status = 'completed')   AS jobs_completados,
-  (SELECT COUNT(*) FROM ingestion_jobs WHERE status = 'failed')      AS jobs_fallidos,
-  (SELECT COUNT(*) FROM segmentos WHERE is_active = TRUE)            AS total_segmentos,
-  NOW()                                                               AS last_refreshed;
+  (SELECT SUM(totalavaluos) FROM acumulado_resumen) AS total_avaluos,
+  (SELECT COUNT(*) FROM ingestion_jobs WHERE status = 'completed') AS jobs_completados,
+  (SELECT COUNT(*) FROM ingestion_jobs WHERE status = 'failed') AS jobs_fallidos,
+  (SELECT COUNT(*) FROM segmentos WHERE is_active = TRUE) AS total_segmentos,
+  NOW() AS last_refreshed;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dashboard_stats ON dashboard_stats ((1));
 
--- Función para refrescar stats
 CREATE OR REPLACE FUNCTION refresh_dashboard_stats()
 RETURNS VOID AS $$
 BEGIN

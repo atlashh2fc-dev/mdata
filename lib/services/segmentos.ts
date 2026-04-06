@@ -1,46 +1,214 @@
 'use server'
 
 import { supabaseAdmin, db } from '@/lib/db/supabase'
-import type {
-  Segmento,
-  SegmentFilter,
-  FilterCondition,
-  PersonaView,
-  PaginatedResponse,
+import {
+  FILTER_FIELDS,
+  type Segmento,
+  type SegmentFilter,
+  type FilterCondition,
+  type PersonaView,
+  type PaginatedResponse,
 } from '@/types'
 
-/**
- * Construye cláusula WHERE desde filtros del segmentador
- */
-function buildWhereClause(filters: SegmentFilter): string {
-  if (!filters.conditions || filters.conditions.length === 0) return '1=1'
+const ALLOWED_FIELDS = new Set(FILTER_FIELDS.map(field => field.key))
+const NUMERIC_FIELDS = new Set(
+  FILTER_FIELDS.filter(field => field.type === 'number').map(field => field.key)
+)
+const BOOLEAN_FIELDS = new Set(
+  FILTER_FIELDS.filter(field => field.type === 'boolean').map(field => field.key)
+)
 
-  const clauses = filters.conditions.map(buildConditionClause).filter(Boolean)
-  return clauses.join(` ${filters.logic} `)
+function assertAllowedField(field: string): string {
+  if (!ALLOWED_FIELDS.has(field as keyof PersonaView)) {
+    throw new Error(`Campo de filtro no permitido: ${field}`)
+  }
+  return field
 }
 
-function buildConditionClause(cond: FilterCondition): string {
-  const { field, operator, value, value2 } = cond
+function normalizeFilterValue(field: string, value: unknown): string | number | boolean | null {
+  if (value === null || value === undefined || value === '') return null
 
-  // Sanitización básica (no interpolación directa de valores del usuario en prod)
-  const safeField = field.replace(/[^a-zA-Z0-9_]/g, '')
-
-  switch (operator) {
-    case 'eq':       return `${safeField} = '${value}'`
-    case 'neq':      return `${safeField} != '${value}'`
-    case 'gt':       return `${safeField} > ${value}`
-    case 'gte':      return `${safeField} >= ${value}`
-    case 'lt':       return `${safeField} < ${value}`
-    case 'lte':      return `${safeField} <= ${value}`
-    case 'between':  return `${safeField} BETWEEN ${value} AND ${value2}`
-    case 'in':       return `${safeField} IN (${String(value).split(',').map(v => `'${v.trim()}'`).join(',')})`
-    case 'not_in':   return `${safeField} NOT IN (${String(value).split(',').map(v => `'${v.trim()}'`).join(',')})`
-    case 'is_null':  return `${safeField} IS NULL`
-    case 'is_not_null': return `${safeField} IS NOT NULL`
-    case 'contains': return `${safeField} ILIKE '%${value}%'`
-    case 'starts_with': return `${safeField} ILIKE '${value}%'`
-    default:         return ''
+  if (NUMERIC_FIELDS.has(field as keyof PersonaView)) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
   }
+
+  if (BOOLEAN_FIELDS.has(field as keyof PersonaView)) {
+    if (typeof value === 'boolean') return value
+    if (value === 'true') return true
+    if (value === 'false') return false
+    return null
+  }
+
+  return String(value).trim()
+}
+
+function escapeSqlLiteral(value: string | number | boolean | null): string {
+  if (value === null) return 'NULL'
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+  return `'${String(value).replace(/'/g, "''")}'`
+}
+
+function buildConditionPreview(cond: FilterCondition): string {
+  const field = assertAllowedField(cond.field)
+  const value = normalizeFilterValue(field, cond.value)
+  const value2 = normalizeFilterValue(field, cond.value2)
+
+  switch (cond.operator) {
+    case 'eq':
+      return `${field} = ${escapeSqlLiteral(value)}`
+    case 'neq':
+      return `${field} != ${escapeSqlLiteral(value)}`
+    case 'gt':
+      return `${field} > ${escapeSqlLiteral(value)}`
+    case 'gte':
+      return `${field} >= ${escapeSqlLiteral(value)}`
+    case 'lt':
+      return `${field} < ${escapeSqlLiteral(value)}`
+    case 'lte':
+      return `${field} <= ${escapeSqlLiteral(value)}`
+    case 'between':
+      return `${field} BETWEEN ${escapeSqlLiteral(value)} AND ${escapeSqlLiteral(value2)}`
+    case 'in':
+      return `${field} IN (${String(cond.value)
+        .split(',')
+        .map(item => escapeSqlLiteral(normalizeFilterValue(field, item.trim())))
+        .join(', ')})`
+    case 'not_in':
+      return `${field} NOT IN (${String(cond.value)
+        .split(',')
+        .map(item => escapeSqlLiteral(normalizeFilterValue(field, item.trim())))
+        .join(', ')})`
+    case 'is_null':
+      return `${field} IS NULL`
+    case 'is_not_null':
+      return `${field} IS NOT NULL`
+    case 'contains':
+      return `${field} ILIKE ${escapeSqlLiteral(`%${value ?? ''}%`)}`
+    case 'starts_with':
+      return `${field} ILIKE ${escapeSqlLiteral(`${value ?? ''}%`)}`
+    default:
+      return '1=1'
+  }
+}
+
+function buildSegmentPreview(filters: SegmentFilter): string {
+  const conditions = filters.conditions ?? []
+  if (conditions.length === 0) {
+    return 'SELECT * FROM master_personas_current'
+  }
+
+  const logic = filters.logic === 'OR' ? 'OR' : 'AND'
+  const where = conditions.map(buildConditionPreview).join(` ${logic} `)
+  return `SELECT * FROM master_personas_current WHERE ${where}`
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function applyFilterToQuery(query: any, cond: FilterCondition): any {
+  const field = assertAllowedField(cond.field)
+  const value = normalizeFilterValue(field, cond.value)
+  const value2 = normalizeFilterValue(field, cond.value2)
+
+  switch (cond.operator) {
+    case 'eq':
+      return query.eq(field, value)
+    case 'neq':
+      return query.neq(field, value)
+    case 'gt':
+      return query.gt(field, value)
+    case 'gte':
+      return query.gte(field, value)
+    case 'lt':
+      return query.lt(field, value)
+    case 'lte':
+      return query.lte(field, value)
+    case 'between':
+      return query.gte(field, value).lte(field, value2)
+    case 'in': {
+      const items = String(cond.value)
+        .split(',')
+        .map(item => normalizeFilterValue(field, item.trim()))
+        .filter(item => item !== null)
+      return query.in(field, items)
+    }
+    case 'not_in': {
+      const items = String(cond.value)
+        .split(',')
+        .map(item => normalizeFilterValue(field, item.trim()))
+        .filter(item => item !== null)
+      return query.not(field, 'in', `(${items.join(',')})`)
+    }
+    case 'is_null':
+      return query.is(field, null)
+    case 'is_not_null':
+      return query.not(field, 'is', null)
+    case 'contains':
+      return query.ilike(field, `%${String(value ?? '')}%`)
+    case 'starts_with':
+      return query.ilike(field, `${String(value ?? '')}%`)
+    default:
+      return query
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function applySegmentFilters(query: any, filters: SegmentFilter): any {
+  const conditions = filters.conditions ?? []
+  if (conditions.length === 0) return query
+
+  const logic = filters.logic === 'OR' ? 'OR' : 'AND'
+
+  if (logic === 'AND') {
+    return conditions.reduce((currentQuery, condition) => {
+      return applyFilterToQuery(currentQuery, condition)
+    }, query)
+  }
+
+  const orClauses = conditions.map(cond => {
+    const field = assertAllowedField(cond.field)
+    const value = normalizeFilterValue(field, cond.value)
+    const value2 = normalizeFilterValue(field, cond.value2)
+
+    switch (cond.operator) {
+      case 'eq':
+        return `${field}.eq.${value}`
+      case 'neq':
+        return `${field}.neq.${value}`
+      case 'gt':
+        return `${field}.gt.${value}`
+      case 'gte':
+        return `${field}.gte.${value}`
+      case 'lt':
+        return `${field}.lt.${value}`
+      case 'lte':
+        return `${field}.lte.${value}`
+      case 'between':
+        return `and(${field}.gte.${value},${field}.lte.${value2})`
+      case 'in': {
+        const items = String(cond.value)
+          .split(',')
+          .map(item => normalizeFilterValue(field, item.trim()))
+          .filter(item => item !== null)
+        return `${field}.in.(${items.join(',')})`
+      }
+      case 'not_in':
+        return ''
+      case 'is_null':
+        return `${field}.is.null`
+      case 'is_not_null':
+        return `${field}.not.is.null`
+      case 'contains':
+        return `${field}.ilike.%${String(value ?? '')}%`
+      case 'starts_with':
+        return `${field}.ilike.${String(value ?? '')}%`
+      default:
+        return ''
+    }
+  }).filter(Boolean)
+
+  if (orClauses.length === 0) return query
+  return query.or(orClauses.join(','))
 }
 
 /**
@@ -94,10 +262,10 @@ export async function createSegmento(
   filters: SegmentFilter,
   userId: string
 ): Promise<Segmento | null> {
-  const sqlQuery = `SELECT * FROM master_personas_view WHERE ${buildWhereClause(filters)}`
+  const sqlQuery = buildSegmentPreview(filters)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (db)
+  const { data, error } = await (db as any)
     .from('segmentos')
     .insert({
       name,
@@ -114,7 +282,6 @@ export async function createSegmento(
     return null
   }
 
-  // Computar conteo inmediatamente
   await computeSegmentoCount(data.id)
   return data as Segmento
 }
@@ -126,15 +293,16 @@ export async function updateSegmento(
   id: string,
   updates: Partial<Pick<Segmento, 'name' | 'description' | 'filters' | 'is_active'>>
 ): Promise<Segmento | null> {
+  const payload: Partial<Segmento> & { sql_query?: string } = { ...updates }
+
+  if (updates.filters) {
+    payload.sql_query = buildSegmentPreview(updates.filters)
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (db)
+  const { data, error } = await (db as any)
     .from('segmentos')
-    .update({
-      ...updates,
-      ...(updates.filters !== undefined && {
-        sql_query: `SELECT * FROM master_personas_view WHERE ${buildWhereClause(updates.filters)}`,
-      }),
-    })
+    .update(payload)
     .eq('id', id)
     .select()
     .single()
@@ -155,19 +323,23 @@ export async function computeSegmentoCount(id: string): Promise<number> {
   const segmento = await getSegmentoById(id)
   if (!segmento) return 0
 
-  const whereClause = buildWhereClause(segmento.filters as SegmentFilter)
-
-  // Usamos count en la vista
-  const { count, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('master_personas_view')
     .select('rutid', { count: 'exact', head: true })
 
-  if (error) return 0
+  query = applySegmentFilters(query, segmento.filters as SegmentFilter)
+
+  const { count, error } = await query
+
+  if (error) {
+    console.error('[computeSegmentoCount]', error)
+    return 0
+  }
 
   const rowCount = count ?? 0
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (db)
+  await (db as any)
     .from('segmentos')
     .update({ row_count: rowCount, last_computed: new Date().toISOString() })
     .eq('id', id)
@@ -191,16 +363,11 @@ export async function executeSegmento(
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
-  // Aplicar filtros directamente via Supabase filters
-  const filters = segmento.filters as SegmentFilter
   let query = supabaseAdmin
     .from('master_personas_view')
     .select('*', { count: 'exact' })
 
-  // Aplicar condiciones
-  for (const cond of filters.conditions ?? []) {
-    query = applyFilterToQuery(query, cond)
-  }
+  query = applySegmentFilters(query, segmento.filters as SegmentFilter)
 
   const { data, error, count } = await query
     .order('score_patrimonial', { ascending: false })
@@ -220,26 +387,33 @@ export async function executeSegmento(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyFilterToQuery(query: any, cond: FilterCondition): any {
-  const { field, operator, value, value2 } = cond
+/**
+ * Carga un batch de filas para exportacion server-side
+ */
+export async function getSegmentoBatch(
+  id: string,
+  from = 0,
+  pageSize = 5000
+): Promise<PersonaView[]> {
+  const segmento = await getSegmentoById(id)
+  if (!segmento) return []
 
-  switch (operator) {
-    case 'eq':          return query.eq(field, value)
-    case 'neq':         return query.neq(field, value)
-    case 'gt':          return query.gt(field, value)
-    case 'gte':         return query.gte(field, value)
-    case 'lt':          return query.lt(field, value)
-    case 'lte':         return query.lte(field, value)
-    case 'between':     return query.gte(field, value).lte(field, value2)
-    case 'in':          return query.in(field, String(value).split(',').map(v => v.trim()))
-    case 'not_in':      return query.not(field, 'in', `(${String(value).split(',').map(v => v.trim()).join(',')})`)
-    case 'is_null':     return query.is(field, null)
-    case 'is_not_null': return query.not(field, 'is', null)
-    case 'contains':    return query.ilike(field, `%${value}%`)
-    case 'starts_with': return query.ilike(field, `${value}%`)
-    default:            return query
+  let query = supabaseAdmin
+    .from('master_personas_view')
+    .select('*')
+
+  query = applySegmentFilters(query, segmento.filters as SegmentFilter)
+
+  const { data, error } = await query
+    .order('score_patrimonial', { ascending: false })
+    .range(from, from + pageSize - 1)
+
+  if (error) {
+    console.error('[getSegmentoBatch]', error)
+    return []
   }
+
+  return (data ?? []) as PersonaView[]
 }
 
 /**
@@ -247,7 +421,7 @@ function applyFilterToQuery(query: any, cond: FilterCondition): any {
  */
 export async function deleteSegmento(id: string): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (db)
+  const { error } = await (db as any)
     .from('segmentos')
     .update({ is_active: false })
     .eq('id', id)

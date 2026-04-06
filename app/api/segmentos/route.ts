@@ -5,7 +5,6 @@ import {
   createSegmento,
   executeSegmento,
   deleteSegmento,
-  computeSegmentoCount,
 } from '@/lib/services/segmentos'
 import type { SegmentFilter } from '@/types'
 

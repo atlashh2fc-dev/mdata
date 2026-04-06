@@ -139,13 +139,53 @@ export type SourceType = 'csv' | 'xlsx' | 'json' | 'api' | 'mysql' | 'postgres'
 export interface DataSource {
   id: string
   name: string
+  slug?: string | null
   description: string | null
   source_type: SourceType
   is_active: boolean
   config: Record<string, unknown>
+  canonical_table?: string | null
+  source_table_name?: string | null
+  primary_key_column?: string | null
+  supports_incremental?: boolean
+  record_count?: number
+  coverage_pct?: number | null
+  last_loaded_at?: string | null
+  last_job_status?: string | null
+  last_error_message?: string | null
+  latest_version_id?: string | null
+  latest_version_label?: string | null
+  latest_load_mode?: string | null
+  latest_source_row_count?: number | null
+  latest_loaded_row_count?: number | null
+  latest_new_rows?: number | null
+  latest_updated_rows?: number | null
+  latest_failed_rows?: number | null
+  latest_version_status?: string | null
+  latest_version_completed_at?: string | null
   created_by: string | null
   created_at: string
   updated_at: string
+}
+
+export interface SourceVersion {
+  id: string
+  source_id: string
+  version_label: string
+  load_mode: string
+  source_row_count: number
+  loaded_row_count: number
+  new_rows: number
+  updated_rows: number
+  failed_rows: number
+  checksum: string | null
+  source_snapshot_at: string | null
+  started_at: string
+  completed_at: string | null
+  status: string
+  notes: string | null
+  metadata: Record<string, unknown>
+  created_at: string
 }
 
 export interface IngestionJob {

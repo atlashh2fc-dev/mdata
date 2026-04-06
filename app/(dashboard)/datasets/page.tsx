@@ -5,10 +5,9 @@ import { Header } from '@/components/layout/Header'
 import { LoadingState, EmptyState } from '@/components/ui/Spinner'
 import type { DataSource } from '@/types'
 import {
-  Plus, Database, MoreHorizontal, Pencil, Trash2,
-  Activity, FileText, Globe, Table2,
+  Plus, Database, FileText, Globe, Table2,
 } from 'lucide-react'
-import { formatDatetime, formatRelativeTime } from '@/lib/utils/formatters'
+import { formatDatetime, formatNumber, formatRelativeTime } from '@/lib/utils/formatters'
 
 const SOURCE_TYPE_ICONS: Record<string, React.ElementType> = {
   csv: FileText,
@@ -117,10 +116,47 @@ export default function DatasetsPage() {
                     <p className="text-xs text-slate-500 mb-3">{fuente.description}</p>
                   )}
 
+                  <div className="space-y-1.5 text-[11px] text-slate-500">
+                    {fuente.source_table_name && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Tabla origen</span>
+                        <span className="font-mono text-slate-400">{fuente.source_table_name}</span>
+                      </div>
+                    )}
+                    {fuente.canonical_table && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Tabla canónica</span>
+                        <span className="font-mono text-slate-400">{fuente.canonical_table}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Registros</span>
+                      <span className="text-slate-300">
+                        {formatNumber(fuente.latest_loaded_row_count ?? fuente.record_count ?? 0)}
+                      </span>
+                    </div>
+                    {(fuente.latest_version_status || fuente.last_job_status) && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Última carga</span>
+                        <span className="text-slate-300">
+                          {fuente.latest_version_status ?? fuente.last_job_status}
+                        </span>
+                      </div>
+                    )}
+                    {(fuente.latest_version_label || fuente.latest_version_completed_at || fuente.last_loaded_at) && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Versión</span>
+                        <span className="text-slate-300">
+                          {fuente.latest_version_label ?? formatDatetime(fuente.latest_version_completed_at ?? fuente.last_loaded_at)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#253357]/50">
                     <SourceTypeLabel type={fuente.source_type} />
                     <span className="text-[10px] text-slate-600">
-                      {formatRelativeTime(fuente.created_at)}
+                      {formatRelativeTime(fuente.last_loaded_at ?? fuente.created_at)}
                     </span>
                   </div>
                 </div>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { SearchBar } from '@/components/personas/SearchBar'
 import { PersonasTable } from '@/components/personas/PersonasTable'
@@ -9,10 +9,7 @@ import { PersonaProfile } from '@/components/personas/PersonaProfile'
 import { LoadingState } from '@/components/ui/Spinner'
 import type { PersonaView, PaginatedResponse } from '@/types'
 import { validateRut } from '@/lib/utils/rut'
-import {
-  SlidersHorizontal, X, Filter,
-  Car, Building2, Home, ChevronDown,
-} from 'lucide-react'
+import { X, Filter } from 'lucide-react'
 
 interface Filters {
   region: string

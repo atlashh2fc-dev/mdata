@@ -54,18 +54,56 @@ export type Database = {
       data_sources: {
         Row: {
           id: string; name: string; description: string | null; source_type: string
-          is_active: boolean; config: Json; created_by: string | null
+          is_active: boolean; config: Json; slug: string | null
+          canonical_table: string | null; source_table_name: string | null
+          primary_key_column: string | null; supports_incremental: boolean
+          record_count: number; coverage_pct: number | null
+          last_loaded_at: string | null; last_job_status: string | null
+          last_error_message: string | null; created_by: string | null
           created_at: string; updated_at: string
         }
         Insert: {
           id?: string; name: string; description?: string | null; source_type?: string
-          is_active?: boolean; config?: Json; created_by?: string | null
+          is_active?: boolean; config?: Json; slug?: string | null
+          canonical_table?: string | null; source_table_name?: string | null
+          primary_key_column?: string | null; supports_incremental?: boolean
+          record_count?: number; coverage_pct?: number | null
+          last_loaded_at?: string | null; last_job_status?: string | null
+          last_error_message?: string | null; created_by?: string | null
           created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; name?: string; description?: string | null; source_type?: string
-          is_active?: boolean; config?: Json; created_by?: string | null
+          is_active?: boolean; config?: Json; slug?: string | null
+          canonical_table?: string | null; source_table_name?: string | null
+          primary_key_column?: string | null; supports_incremental?: boolean
+          record_count?: number; coverage_pct?: number | null
+          last_loaded_at?: string | null; last_job_status?: string | null
+          last_error_message?: string | null; created_by?: string | null
           created_at?: string; updated_at?: string
+        }
+      }
+      source_versions: {
+        Row: {
+          id: string; source_id: string; version_label: string; load_mode: string
+          source_row_count: number; loaded_row_count: number; new_rows: number
+          updated_rows: number; failed_rows: number; checksum: string | null
+          source_snapshot_at: string | null; started_at: string; completed_at: string | null
+          status: string; notes: string | null; metadata: Json; created_at: string
+        }
+        Insert: {
+          id?: string; source_id: string; version_label: string; load_mode?: string
+          source_row_count?: number; loaded_row_count?: number; new_rows?: number
+          updated_rows?: number; failed_rows?: number; checksum?: string | null
+          source_snapshot_at?: string | null; started_at?: string; completed_at?: string | null
+          status?: string; notes?: string | null; metadata?: Json; created_at?: string
+        }
+        Update: {
+          id?: string; source_id?: string; version_label?: string; load_mode?: string
+          source_row_count?: number; loaded_row_count?: number; new_rows?: number
+          updated_rows?: number; failed_rows?: number; checksum?: string | null
+          source_snapshot_at?: string | null; started_at?: string; completed_at?: string | null
+          status?: string; notes?: string | null; metadata?: Json
         }
       }
       ingestion_jobs: {
@@ -184,6 +222,20 @@ export type Database = {
       }
     }
     Views: {
+      master_personas_current: {
+        Row: {
+          rutid: string | null; nombres: string | null; paterno: string | null
+          materno: string | null; nombre_completo: string | null; email: string | null
+          fono_cel: string | null; comuna_part: string | null; region_part: string | null
+          n_autos: number | null; tiene_autos: boolean | null
+          razon_social_empresa: string | null; tiene_empresa: boolean | null
+          domicilio_comuna: string | null; domicilio_region: string | null
+          n_bienes_raices: number | null; totalavaluos: number | null
+          tiene_bienes_raices: boolean | null; score_patrimonial: number | null
+          cobertura_pct: number | null; region_canonica: string | null
+          comuna_canonica: string | null; created_at: string | null; updated_at: string | null
+        }
+      }
       master_personas_view: {
         Row: {
           rutid: string | null; nombres: string | null; paterno: string | null
@@ -194,7 +246,8 @@ export type Database = {
           domicilio_comuna: string | null; domicilio_region: string | null
           n_bienes_raices: number | null; totalavaluos: number | null
           tiene_bienes_raices: boolean | null; score_patrimonial: number | null
-          cobertura_pct: number | null; created_at: string | null; updated_at: string | null
+          cobertura_pct: number | null; region_canonica: string | null
+          comuna_canonica: string | null; created_at: string | null; updated_at: string | null
         }
       }
       dashboard_stats: {
@@ -206,11 +259,50 @@ export type Database = {
           jobs_fallidos: number | null; total_segmentos: number | null; last_refreshed: string | null
         }
       }
+      dataset_overview: {
+        Row: {
+          id: string | null; name: string | null; slug: string | null; description: string | null
+          source_type: string | null; is_active: boolean | null; config: Json | null
+          created_by: string | null; created_at: string | null; updated_at: string | null
+          canonical_table: string | null; source_table_name: string | null
+          primary_key_column: string | null; supports_incremental: boolean | null
+          record_count: number | null; coverage_pct: number | null
+          last_loaded_at: string | null; last_job_status: string | null
+          last_error_message: string | null; latest_version_id: string | null
+          latest_version_label: string | null; latest_load_mode: string | null
+          latest_source_row_count: number | null; latest_loaded_row_count: number | null
+          latest_new_rows: number | null; latest_updated_rows: number | null
+          latest_failed_rows: number | null; latest_version_status: string | null
+          latest_version_completed_at: string | null
+        }
+      }
+      stats_por_region: {
+        Row: { region: string | null; total: number | null; con_email: number | null; con_fono: number | null }
+      }
+      stats_score_dist: {
+        Row: { range: string | null; count: number | null }
+      }
     }
     Functions: {
       validate_rut_cl: { Args: { rut: string }; Returns: boolean }
       format_rut_cl: { Args: { rut: string }; Returns: string }
       refresh_dashboard_stats: { Args: Record<never, never>; Returns: void }
+      finalize_source_version: {
+        Args: {
+          p_source_slug: string
+          p_version_label: string
+          p_load_mode: string
+          p_source_row_count: number
+          p_loaded_row_count: number
+          p_new_rows: number
+          p_updated_rows: number
+          p_failed_rows: number
+          p_status: string
+          p_notes?: string | null
+          p_metadata?: Json
+        }
+        Returns: string
+      }
     }
   }
 }

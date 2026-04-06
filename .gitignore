@@ -22,6 +22,7 @@ yarn-error.log*
 
 # Vercel
 .vercel
+supabase/.temp/
 
 # TypeScript
 *.tsbuildinfo

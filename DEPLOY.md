@@ -1,124 +1,189 @@
-# RUT Intelligence Platform — Guía de Deployment
+# RUT Intelligence Platform - Deployment y Operacion
 
-## Prerequisitos
+## Estado real del repo
 
-- Node.js 18+
-- Cuenta Supabase (https://supabase.com)
-- API Key de Inception AI
+El proyecto ya incluye:
 
----
+- Next.js App Router + TypeScript
+- Auth con Supabase
+- Buscador, perfil 360, dashboard, datasets, ingesta, segmentos y exportacion
+- Integracion backend con Inception AI
+- Schema inicial para producto y metadata operativa
 
-## 1. Configuración Supabase
+Lo que faltaba para operar con datos reales era:
 
-### 1.1 Crear proyecto
-1. Ir a https://app.supabase.com → Nuevo proyecto
-2. Guardar URL y API keys (anon + service_role)
-
-### 1.2 Ejecutar schema
-En Supabase SQL Editor, ejecutar en orden:
-1. `supabase/schema.sql`
-2. `supabase/migrations.sql`
-
-### 1.3 Habilitar autenticación
-- Authentication → Settings → Email confirmations: OFF (para ambiente interno)
+- cerrar el schema de produccion para cargas grandes
+- dejar scripts reales de sincronizacion MySQL -> Postgres/Supabase
+- endurecer consultas y segmentos
+- alinear la documentacion con lo que existe en el repo
 
 ---
 
-## 2. Variables de entorno
+## 1. Variables de entorno
 
-Copiar `.env.local.example` a `.env.local` y configurar:
+Copiar `.env.local.example` a `.env.local`:
 
 ```bash
 cp .env.local.example .env.local
 ```
 
-Llenar:
-```
+Variables requeridas:
+
+```bash
 NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
-INCEPTION_API_KEY=sk-...
+SUPABASE_DB_URL=postgresql://postgres:password@db.xxxx.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres:password@db.xxxx.supabase.co:5432/postgres
+INCEPTION_API_KEY=...
 ```
 
----
-
-## 3. Migración desde MySQL
-
-Para migrar los datos de `master_test` a Supabase, hay dos opciones:
-
-### Opción A: Via script Node.js
-```bash
-# Instalar driver MySQL
-npm install mysql2
-
-# Ejecutar script de migración
-node scripts/migrate-mysql.js
-```
-
-### Opción B: Via CSV export + ingesta
-1. Exportar cada tabla como CSV desde MySQL:
-   ```sql
-   SELECT * FROM master_personas INTO OUTFILE '/tmp/master_personas.csv'
-   FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"' LINES TERMINATED BY '\n';
-   ```
-2. Usar el módulo de Ingesta de la plataforma para cargar cada CSV
-3. Configurar mappings correspondientes
-
----
-
-## 4. Instalación y ejecución
+Para sincronizar desde MySQL local:
 
 ```bash
-# Instalar dependencias
-npm install
-
-# Desarrollo
-npm run dev
-
-# Producción
-npm run build
-npm run start
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DATABASE=master_test
+MYSQL_USER=root
+MYSQL_PASSWORD=...
 ```
 
 ---
 
-## 5. Primer usuario
+## 2. Migraciones de Supabase
 
-En Supabase Dashboard → Authentication → Users → Invite user
+Ruta recomendada:
 
-O via SQL:
-```sql
--- Esto es solo para testing, usar el dashboard en producción
-SELECT auth.create_user(
-  '{"email": "admin@empresa.cl", "password": "TuPassword123!", "email_confirm": true}'::jsonb
-);
+```bash
+supabase link --project-ref <project-ref>
+supabase db push --include-all
 ```
 
+Las migraciones reales quedaron versionadas en:
+
+1. [supabase/migrations/20260406114600_initial_schema.sql](/Users/hh/Documents/Claude/Projects/Master%20Base/rut-intelligence/supabase/migrations/20260406114600_initial_schema.sql)
+2. [supabase/migrations/20260406114700_analytics_and_audit.sql](/Users/hh/Documents/Claude/Projects/Master%20Base/rut-intelligence/supabase/migrations/20260406114700_analytics_and_audit.sql)
+3. [supabase/migrations/20260406114800_production_upgrade.sql](/Users/hh/Documents/Claude/Projects/Master%20Base/rut-intelligence/supabase/migrations/20260406114800_production_upgrade.sql)
+
+Los archivos base siguen quedando como referencia o fallback manual:
+
+1. [supabase/schema.sql](/Users/hh/Documents/Claude/Projects/Master%20Base/rut-intelligence/supabase/schema.sql)
+2. [supabase/migrations.sql](/Users/hh/Documents/Claude/Projects/Master%20Base/rut-intelligence/supabase/migrations.sql)
+3. [supabase/production_upgrade.sql](/Users/hh/Documents/Claude/Projects/Master%20Base/rut-intelligence/supabase/production_upgrade.sql)
+
+El upgrade agrega:
+
+- `master_personas_current` como capa canonica
+- metadata operativa (`source_versions`, `dataset_overview`)
+- seeds de las fuentes reales
+- indices y unicidad por `rutid` en tablas resumen 1:1
+
 ---
 
-## 6. Refresh de estadísticas
+## 3. Estrategia correcta para cargar la base maestra
 
-Las estadísticas del dashboard están en una vista materializada.
-Refrescar manualmente desde el dashboard o configurar un cron:
+No usar navegador para la carga inicial. La ruta correcta para este tamano es:
 
-```sql
-SELECT refresh_all_stats();
+1. leer desde MySQL local
+2. exportar por tabla resumen a CSV canonico
+3. hacer `COPY` a Postgres/Supabase
+4. hacer merge/upsert por `rutid`
+5. registrar metadata de version de fuente
+6. refrescar stats materializadas
+
+El repo ahora trae un script real para esto:
+
+```bash
+pnpm ops:sync:master
 ```
 
+Modo inicial full refresh:
+
+```bash
+pnpm ops:sync:master:replace
+```
+
+Opciones:
+
+```bash
+node scripts/master-sync/sync-master-data.mjs --tables=master_personas,pernat_resumen
+node scripts/master-sync/sync-master-data.mjs --mode=upsert
+node scripts/master-sync/sync-master-data.mjs --mode=replace --export-dir=./tmp/master-sync
+```
+
+Tablas reales soportadas por el sync:
+
+- `master_personas`
+- `pernat_resumen`
+- `autos_resumen`
+- `empresa_resumen`
+- `domicilio_resumen`
+- `acumulado_resumen`
+
+Notas:
+
+- `replace` exige sincronizar el set completo canonico.
+- `upsert` es la ruta para cargas incrementales futuras.
+- el script intenta resolver alias como `RUT` / `RUTID` para normalizar a `rutid`.
+
 ---
 
-## 7. Performance con 9.5M registros
+## 4. Operacion incremental futura
 
-- Todos los índices están creados en el schema
-- Las consultas usan `LIMIT` + `OFFSET` para paginación
-- La vista `master_personas_view` usa LEFT JOINs optimizados
-- `dashboard_stats` es una vista materializada (no recalcula en cada request)
-- Supabase Postgres soporta millones de filas nativamente
+Hay dos flujos distintos y complementarios:
+
+### 4.1 Flujo bulk serio
+
+Usar `scripts/master-sync/sync-master-data.mjs` cuando actualices tus tablas resumen desde MySQL local.
+
+Esto es lo correcto para:
+
+- millones de filas
+- refrescos masivos
+- sincronizacion operacional controlada
+
+### 4.2 Flujo UI de ingesta
+
+La pantalla de ingesta queda para:
+
+- CSV/XLSX pequenos o medianos
+- validacion/mapeo manual
+- cargas incrementales puntuales
+- trazabilidad de jobs
+
+No es la ruta recomendada para la carga inicial de 9.5M+ filas.
 
 ---
 
-## Stack de producción recomendado
+## 5. Auth y primer usuario
 
-- Supabase Pro (o Self-hosted en VPS con Postgres 16)
-- Vercel o Railway para Next.js
-- Vercel Edge para el middleware de auth
+Crear usuarios en:
+
+- Supabase -> Authentication -> Users
+
+Requisitos:
+
+- Email provider habilitado
+- dominio Vercel agregado en Authentication -> URL Configuration
+
+---
+
+## 6. Verificacion operativa
+
+Antes de considerar el sistema listo:
+
+1. login funcional contra Supabase Auth
+2. `/dashboard` con `dashboard_stats`
+3. `/buscar` devolviendo datos reales por `rutid`
+4. `/segmentos` creando y ejecutando filtros reales
+5. `/exportar` descargando CSV server-side
+6. `/datasets` mostrando metadata y ultima carga
+
+---
+
+## 7. Stack recomendado
+
+- Supabase Pro o superior para la base productiva
+- Vercel para el frontend
+- sincronizacion bulk desde una maquina con acceso a MySQL local
+- cargas incrementales grandes via script, no via browser

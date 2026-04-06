@@ -10,10 +10,9 @@ import type {
 } from '@/types'
 import { FILTER_FIELDS } from '@/types'
 import {
-  Plus, X, Play, Trash2, ChevronDown, ChevronUp,
-  Users, Save, Filter, RefreshCw, Download,
+  Plus, X, Play, Trash2, Users, Save, Filter,
 } from 'lucide-react'
-import { formatNumber, formatDatetime, formatRelativeTime } from '@/lib/utils/formatters'
+import { formatNumber, formatRelativeTime } from '@/lib/utils/formatters'
 
 const OPERATORS: { value: FilterOperator; label: string }[] = [
   { value: 'eq', label: 'igual a' },

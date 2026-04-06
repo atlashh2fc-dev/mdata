@@ -1,6 +1,6 @@
 'use server'
 
-import { supabaseAdmin, db } from '@/lib/db/supabase'
+import { db } from '@/lib/db/supabase'
 import { validateRut, normalizeRut, detectRutColumn } from '@/lib/utils/rut'
 import type {
   DataSource,
@@ -17,14 +17,26 @@ import type {
 // ============================================================
 
 export async function getFuentes(): Promise<DataSource[]> {
-  const { data, error } = await db
-    .from('data_sources')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const datasetOverview = (db as any)
+    .from('dataset_overview')
     .select('*')
     .order('created_at', { ascending: false })
 
+  const { data, error } = await datasetOverview
+
   if (error) {
-    console.error('[getFuentes]', error)
-    return []
+    const fallback = await db
+      .from('data_sources')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (fallback.error) {
+      console.error('[getFuentes]', fallback.error)
+      return []
+    }
+
+    return (fallback.data ?? []) as DataSource[]
   }
   return (data ?? []) as DataSource[]
 }
@@ -35,9 +47,21 @@ export async function createFuente(
   description: string | null,
   userId: string
 ): Promise<DataSource | null> {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
   const { data, error } = await db
     .from('data_sources')
-    .insert({ name, source_type: sourceType, description, created_by: userId })
+    .insert({
+      name,
+      slug,
+      source_type: sourceType,
+      description,
+      created_by: userId,
+    })
     .select()
     .single()
 
@@ -70,7 +94,12 @@ export async function getIngestionJobs(
     return { data: [], total: 0 }
   }
 
-  return { data: (data ?? []) as IngestionJob[], total: count ?? 0 }
+  const normalized = (data ?? []).map((row: Record<string, unknown>) => ({
+    ...row,
+    data_source: row.data_sources ?? null,
+  }))
+
+  return { data: normalized as IngestionJob[], total: count ?? 0 }
 }
 
 export async function getIngestionJobById(id: string): Promise<IngestionJob | null> {
@@ -81,7 +110,10 @@ export async function getIngestionJobById(id: string): Promise<IngestionJob | nu
     .single()
 
   if (error || !data) return null
-  return data as IngestionJob
+  return {
+    ...(data as Record<string, unknown>),
+    data_source: (data as Record<string, unknown>).data_sources ?? null,
+  } as IngestionJob
 }
 
 export async function createIngestionJob(
@@ -346,18 +378,18 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       if (!row.rutid) continue
 
       const mapped = row.mapped_data as Record<string, unknown> ?? {}
+      const existingMaster = await db
+        .from('master_personas')
+        .select('rutid')
+        .eq('rutid', row.rutid)
+        .maybeSingle()
 
       // 1. Upsert master_personas
       await db
         .from('master_personas')
         .upsert({ rutid: row.rutid }, { onConflict: 'rutid', ignoreDuplicates: true })
 
-      let isNew = false
-      const { count } = await db
-        .from('master_personas')
-        .select('rutid', { count: 'exact', head: true })
-        .eq('rutid', row.rutid)
-      isNew = (count ?? 0) === 0
+      const isNew = !existingMaster.data
 
       // 2. Upsert pernat_resumen
       const pernatData = extractTableData(mapped, 'pernat_resumen')

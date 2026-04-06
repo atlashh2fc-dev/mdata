@@ -1,8 +1,26 @@
 'use server'
 
-import { supabaseAdmin, db } from '@/lib/db/supabase'
+import { db } from '@/lib/db/supabase'
 import type { PersonaView, PaginatedResponse, PersonaSearchParams } from '@/types'
 import { normalizeRut } from '@/lib/utils/rut'
+
+const PERSONA_SORT_FIELDS = new Set([
+  'rutid',
+  'nombre_completo',
+  'email',
+  'region_part',
+  'comuna_part',
+  'n_autos',
+  'n_bienes_raices',
+  'totalavaluos',
+  'score_patrimonial',
+  'cobertura_pct',
+])
+
+function getSafeSortField(field?: string): string {
+  if (!field) return 'score_patrimonial'
+  return PERSONA_SORT_FIELDS.has(field) ? field : 'score_patrimonial'
+}
 
 /**
  * Obtiene el perfil 360 completo de una persona por RUT
@@ -30,7 +48,7 @@ export async function searchPersonas(
     q,
     page = 1,
     page_size = 50,
-    sort_by = 'score_patrimonial',
+    sort_by,
     sort_order = 'desc',
     region,
     comuna,
@@ -45,6 +63,7 @@ export async function searchPersonas(
   const to = from + page_size - 1
 
   let query = db.from('master_personas_view').select('*', { count: 'exact' })
+  const safeSortBy = getSafeSortField(sort_by)
 
   // Búsqueda por texto libre (RUT, nombre, email)
   if (q && q.trim()) {
@@ -68,7 +87,7 @@ export async function searchPersonas(
   if (score_max !== undefined) query = query.lte('score_patrimonial', score_max)
 
   const { data, error, count } = await query
-    .order(sort_by, { ascending: sort_order === 'asc' })
+    .order(safeSortBy, { ascending: sort_order === 'asc' })
     .range(from, to)
 
   if (error) {
@@ -92,15 +111,30 @@ export async function searchPersonas(
 export async function getPersonasByRegion(): Promise<
   { region: string; count: number }[]
 > {
-  const { data, error } = await db
+  // Primero intentamos usar la vista materializada si existe.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const statsView = (db as any)
+    .from('stats_por_region')
+    .select('region, total')
+    .order('total', { ascending: false })
+
+  const { data, error } = await statsView
+  if (!error && Array.isArray(data)) {
+    return data.map((row: { region: string; total: number }) => ({
+      region: row.region,
+      count: row.total,
+    }))
+  }
+
+  const fallback = await db
     .from('pernat_resumen')
     .select('region_part')
     .not('region_part', 'is', null)
 
-  if (error || !data) return []
+  if (fallback.error || !fallback.data) return []
 
   const counts: Record<string, number> = {}
-  for (const row of data) {
+  for (const row of fallback.data) {
     const r = row.region_part ?? 'Sin región'
     counts[r] = (counts[r] ?? 0) + 1
   }
@@ -116,10 +150,20 @@ export async function getPersonasByRegion(): Promise<
 export async function getScoreDistribution(): Promise<
   { range: string; count: number }[]
 > {
-  const { data, error } = await db.rpc('refresh_dashboard_stats')
-  if (error) console.error('[getScoreDistribution]', error)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const statsView = (db as any)
+    .from('stats_score_dist')
+    .select('range, count')
+    .order('range', { ascending: true })
 
-  // Consulta directa con rangos
+  const { data, error } = await statsView
+  if (!error && Array.isArray(data)) {
+    return data.map((row: { range: string; count: number }) => ({
+      range: row.range,
+      count: row.count,
+    }))
+  }
+
   const { data: rows } = await db
     .from('master_personas_view')
     .select('score_patrimonial')
