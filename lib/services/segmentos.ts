@@ -105,7 +105,7 @@ function buildSegmentPreview(filters: SegmentFilter): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function applyFilterToQuery(query: any, cond: FilterCondition): any {
+function applyFilterToQuery(query: any, cond: FilterCondition): any {
   const field = assertAllowedField(cond.field)
   const value = normalizeFilterValue(field, cond.value)
   const value2 = normalizeFilterValue(field, cond.value2)
@@ -153,7 +153,7 @@ export function applyFilterToQuery(query: any, cond: FilterCondition): any {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function applySegmentFilters(query: any, filters: SegmentFilter): any {
+function applySegmentFilters(query: any, filters: SegmentFilter): any {
   const conditions = filters.conditions ?? []
   if (conditions.length === 0) return query
 
