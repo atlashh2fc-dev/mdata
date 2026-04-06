@@ -17,7 +17,7 @@ import type {
 // ============================================================
 
 export async function getFuentes(): Promise<DataSource[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('data_sources')
     .select('*')
     .order('created_at', { ascending: false })
@@ -35,7 +35,7 @@ export async function createFuente(
   description: string | null,
   userId: string
 ): Promise<DataSource | null> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('data_sources')
     .insert({ name, source_type: sourceType, description, created_by: userId })
     .select()
@@ -59,7 +59,7 @@ export async function getIngestionJobs(
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
-  const { data, error, count } = await supabaseAdmin
+  const { data, error, count } = await db
     .from('ingestion_jobs')
     .select(`*, data_sources (name, source_type)`, { count: 'exact' })
     .order('created_at', { ascending: false })
@@ -74,7 +74,7 @@ export async function getIngestionJobs(
 }
 
 export async function getIngestionJobById(id: string): Promise<IngestionJob | null> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('ingestion_jobs')
     .select(`*, data_sources (name, source_type)`)
     .eq('id', id)
@@ -90,7 +90,7 @@ export async function createIngestionJob(
   fileSize: number,
   userId: string
 ): Promise<IngestionJob | null> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('ingestion_jobs')
     .insert({
       source_id: sourceId,
@@ -128,7 +128,7 @@ export async function updateJobStatus(
 // ============================================================
 
 export async function getJobLogs(jobId: string): Promise<IngestionLog[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('ingestion_logs')
     .select('*')
     .eq('job_id', jobId)
@@ -160,7 +160,7 @@ export async function addLog(
 // ============================================================
 
 export async function getColumnMappings(sourceId: string): Promise<SourceColumnMapping[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('source_column_mappings')
     .select('*')
     .eq('source_id', sourceId)
@@ -175,7 +175,7 @@ export async function saveColumnMappings(
   mappings: ColumnMappingDraft[]
 ): Promise<void> {
   // Eliminar mappings anteriores de esta fuente
-  await supabaseAdmin
+  await db
     .from('source_column_mappings')
     .delete()
     .eq('source_id', sourceId)
@@ -329,7 +329,7 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
   let hasMore = true
 
   while (hasMore) {
-    const { data: stagingRows, error } = await supabaseAdmin
+    const { data: stagingRows, error } = await db
       .from('staging_data')
       .select('*')
       .eq('job_id', jobId)
@@ -348,12 +348,12 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       const mapped = row.mapped_data as Record<string, unknown> ?? {}
 
       // 1. Upsert master_personas
-      await supabaseAdmin
+      await db
         .from('master_personas')
         .upsert({ rutid: row.rutid }, { onConflict: 'rutid', ignoreDuplicates: true })
 
       let isNew = false
-      const { count } = await supabaseAdmin
+      const { count } = await db
         .from('master_personas')
         .select('rutid', { count: 'exact', head: true })
         .eq('rutid', row.rutid)
@@ -362,19 +362,19 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       // 2. Upsert pernat_resumen
       const pernatData = extractTableData(mapped, 'pernat_resumen')
       if (Object.keys(pernatData).length > 0) {
-        const existing = await supabaseAdmin
+        const existing = await db
           .from('pernat_resumen')
           .select('id')
           .eq('rutid', row.rutid)
           .single()
 
         if (existing.data) {
-          await supabaseAdmin
+          await db
             .from('pernat_resumen')
             .update(pernatData)
             .eq('rutid', row.rutid)
         } else {
-          await supabaseAdmin
+          await db
             .from('pernat_resumen')
             .insert({ rutid: row.rutid, ...pernatData })
         }
@@ -383,7 +383,7 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       // 3. Upsert autos_resumen
       const autosData = extractTableData(mapped, 'autos_resumen')
       if (Object.keys(autosData).length > 0) {
-        await supabaseAdmin
+        await db
           .from('autos_resumen')
           .upsert({ rutid: row.rutid, ...autosData }, { onConflict: 'rutid' })
       }
@@ -391,7 +391,7 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       // 4. Upsert empresa_resumen
       const empresaData = extractTableData(mapped, 'empresa_resumen')
       if (Object.keys(empresaData).length > 0) {
-        const ex = await supabaseAdmin
+        const ex = await db
           .from('empresa_resumen')
           .select('id')
           .eq('rutid', row.rutid)
@@ -406,7 +406,7 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       // 5. Upsert domicilio_resumen
       const domicilioData = extractTableData(mapped, 'domicilio_resumen')
       if (Object.keys(domicilioData).length > 0) {
-        const ex = await supabaseAdmin
+        const ex = await db
           .from('domicilio_resumen')
           .select('id')
           .eq('rutid', row.rutid)
@@ -421,13 +421,13 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
       // 6. Upsert acumulado_resumen
       const acumuladoData = extractTableData(mapped, 'acumulado_resumen')
       if (Object.keys(acumuladoData).length > 0) {
-        await supabaseAdmin
+        await db
           .from('acumulado_resumen')
           .upsert({ rutid: row.rutid, ...acumuladoData }, { onConflict: 'rutid' })
       }
 
       // Marcar como merged
-      await supabaseAdmin
+      await db
         .from('staging_data')
         .update({ status: 'merged' })
         .eq('id', row.id)
@@ -462,7 +462,7 @@ function extractTableData(
 // ============================================================
 
 export async function getEstadisticas() {
-  const { data: jobs } = await supabaseAdmin
+  const { data: jobs } = await db
     .from('ingestion_jobs')
     .select('status, total_rows, valid_rows, invalid_rows, merged_rows, new_rows, created_at')
     .order('created_at', { ascending: false })
