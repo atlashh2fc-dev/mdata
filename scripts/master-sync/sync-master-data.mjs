@@ -491,6 +491,37 @@ async function syncMetadataViaApi(supabase, config, metrics, mode) {
   }
 }
 
+function isStatementTimeoutError(error) {
+  const message = String(error?.message ?? '').toLowerCase()
+  return message.includes('statement timeout') || message.includes('canceling statement due to statement timeout')
+}
+
+async function upsertRowsViaSupabaseApi(supabase, config, rows, minBatchSize) {
+  if (rows.length === 0) return
+
+  const query = config.targetTable === 'master_personas'
+    ? supabase.from(config.targetTable).upsert(rows, { onConflict: 'rutid', ignoreDuplicates: true })
+    : supabase.from(config.targetTable).upsert(rows, { onConflict: 'rutid' })
+
+  const { error } = await query
+  if (!error) return
+
+  if (rows.length <= minBatchSize || !isStatementTimeoutError(error)) {
+    throw new Error(`[${config.slug}] upsert API fallo: ${error.message}`)
+  }
+
+  const midpoint = Math.ceil(rows.length / 2)
+  const left = rows.slice(0, midpoint)
+  const right = rows.slice(midpoint)
+
+  console.warn(
+    `[${config.slug}] timeout en batch de ${rows.length}. Reintentando en bloques de ${left.length} y ${right.length}...`
+  )
+
+  await upsertRowsViaSupabaseApi(supabase, config, left, minBatchSize)
+  await upsertRowsViaSupabaseApi(supabase, config, right, minBatchSize)
+}
+
 async function loadRowsViaSupabaseApi(supabase, config, rowIterator, mode) {
   if (mode === 'replace') {
     throw new Error(
@@ -498,7 +529,8 @@ async function loadRowsViaSupabaseApi(supabase, config, rowIterator, mode) {
     )
   }
 
-  const chunkSize = 1000
+  const chunkSize = Number(process.env.SUPABASE_API_BATCH_SIZE ?? 1000)
+  const minBatchSize = Number(process.env.SUPABASE_API_MIN_BATCH_SIZE ?? 100)
   let sourceRowCount = 0
   let loadedRowCount = 0
   let batch = []
@@ -506,15 +538,7 @@ async function loadRowsViaSupabaseApi(supabase, config, rowIterator, mode) {
   const flush = async () => {
     if (batch.length === 0) return
 
-    const query = config.targetTable === 'master_personas'
-      ? supabase.from(config.targetTable).upsert(batch, { onConflict: 'rutid', ignoreDuplicates: true })
-      : supabase.from(config.targetTable).upsert(batch, { onConflict: 'rutid' })
-
-    const { error } = await query
-    if (error) {
-      throw new Error(`[${config.slug}] upsert API fallo: ${error.message}`)
-    }
-
+    await upsertRowsViaSupabaseApi(supabase, config, batch, minBatchSize)
     loadedRowCount += batch.length
     batch = []
   }
