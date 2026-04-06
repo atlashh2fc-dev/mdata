@@ -8,8 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "ops:sync:master": "node scripts/master-sync/sync-master-data.mjs",
-    "ops:sync:master:replace": "node scripts/master-sync/sync-master-data.mjs --mode=replace"
+    "ops:sync:master": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs",
+    "ops:sync:master:replace": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs --mode=replace"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",

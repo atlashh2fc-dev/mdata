@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import mysql from 'mysql2'
 import { Client } from 'pg'
 import { from as copyFrom } from 'pg-copy-streams'
+import { createClient } from '@supabase/supabase-js'
 
 import {
   SOURCE_TABLES,
@@ -87,6 +88,14 @@ function normalizeCell(column, value) {
   if (INTEGER_COLUMNS.has(column)) return normalizeInteger(value)
   if (NUMERIC_COLUMNS.has(column)) return normalizeNumeric(value)
   return normalizeText(value)
+}
+
+function toSupabaseValue(column, value) {
+  const normalized = normalizeCell(column, value)
+  if (normalized === '') return null
+  if (INTEGER_COLUMNS.has(column)) return Number(normalized)
+  if (NUMERIC_COLUMNS.has(column)) return Number(normalized)
+  return normalized
 }
 
 function csvEscape(value) {
@@ -170,6 +179,39 @@ async function exportTableFromMySql(mysqlConnection, config, exportDir) {
   await once(writer, 'finish')
 
   return { outputPath, rowCount }
+}
+
+async function* streamNormalizedRowsFromMySql(mysqlConnection, config) {
+  const [columnsResult] = await mysqlConnection
+    .promise()
+    .query(`SHOW COLUMNS FROM \`${config.mysqlTable}\``)
+
+  const mysqlColumns = columnsResult.map(column => column.Field)
+  const mappings = resolveColumnMap(config, mysqlColumns)
+
+  const selectList = mappings.map(mapping => {
+    if (!mapping.sourceColumn) {
+      return `NULL AS \`${mapping.targetColumn}\``
+    }
+
+    return `\`${mapping.sourceColumn}\` AS \`${mapping.targetColumn}\``
+  }).join(', ')
+
+  const selectSql = config.targetTable === 'master_personas'
+    ? `SELECT DISTINCT ${selectList} FROM \`${config.mysqlTable}\``
+    : `SELECT ${selectList} FROM \`${config.mysqlTable}\``
+
+  const queryStream = mysqlConnection.query(selectSql).stream({ highWaterMark: 500 })
+
+  for await (const row of queryStream) {
+    const normalizedRow = Object.fromEntries(
+      config.targetColumns.map(column => [column, toSupabaseValue(column, row[column])])
+    )
+
+    if (!normalizedRow.rutid) continue
+
+    yield normalizedRow
+  }
 }
 
 async function scalar(pgClient, sql, params = []) {
@@ -393,6 +435,111 @@ async function refreshStats(pgClient) {
   }
 }
 
+async function refreshStatsViaApi(supabase) {
+  const candidates = ['refresh_all_stats', 'refresh_dashboard_stats']
+
+  for (const fn of candidates) {
+    try {
+      const { error } = await supabase.rpc(fn)
+      if (!error) return
+    } catch {
+      // try next
+    }
+  }
+}
+
+async function syncMetadataViaApi(supabase, config, metrics, mode) {
+  try {
+    await supabase
+      .from('data_sources')
+      .upsert(
+        {
+          name: config.slug.replace(/_/g, ' '),
+          slug: config.slug,
+          source_type: 'mysql',
+          canonical_table: config.targetTable,
+          source_table_name: config.mysqlTable,
+          primary_key_column: 'rutid',
+          supports_incremental: true,
+          record_count: metrics.loadedRowCount,
+          last_loaded_at: new Date().toISOString(),
+          last_job_status: 'completed',
+        },
+        { onConflict: 'slug' }
+      )
+      .throwOnError()
+
+    await supabase.rpc('finalize_source_version', {
+      p_source_slug: config.slug,
+      p_version_label: `${config.slug}-${new Date().toISOString()}`,
+      p_load_mode: mode,
+      p_source_row_count: metrics.sourceRowCount,
+      p_loaded_row_count: metrics.loadedRowCount,
+      p_new_rows: metrics.newRows,
+      p_updated_rows: metrics.updatedRows,
+      p_failed_rows: metrics.failedRows,
+      p_status: 'completed',
+      p_notes: null,
+      p_metadata: {
+        mysql_table: config.mysqlTable,
+        target_table: config.targetTable,
+        transport: 'supabase-js',
+      },
+    }).throwOnError()
+  } catch (error) {
+    console.warn(`[metadata] No se pudo registrar metadata para ${config.slug}: ${error.message}`)
+  }
+}
+
+async function loadRowsViaSupabaseApi(supabase, config, rowIterator, mode) {
+  if (mode === 'replace') {
+    throw new Error(
+      'El modo replace requiere DATABASE_URL/SUPABASE_DB_URL. Sin password de Postgres usa ops:sync:master (upsert).'
+    )
+  }
+
+  const chunkSize = 1000
+  let sourceRowCount = 0
+  let loadedRowCount = 0
+  let batch = []
+
+  const flush = async () => {
+    if (batch.length === 0) return
+
+    const query = config.targetTable === 'master_personas'
+      ? supabase.from(config.targetTable).upsert(batch, { onConflict: 'rutid', ignoreDuplicates: true })
+      : supabase.from(config.targetTable).upsert(batch, { onConflict: 'rutid' })
+
+    const { error } = await query
+    if (error) {
+      throw new Error(`[${config.slug}] upsert API fallo: ${error.message}`)
+    }
+
+    loadedRowCount += batch.length
+    batch = []
+  }
+
+  for await (const row of rowIterator) {
+    batch.push(row)
+    sourceRowCount += 1
+
+    if (batch.length >= chunkSize) {
+      await flush()
+      console.log(`[${config.slug}] API upsert ${loadedRowCount} filas...`)
+    }
+  }
+
+  await flush()
+
+  return {
+    sourceRowCount,
+    loadedRowCount,
+    newRows: loadedRowCount,
+    updatedRows: 0,
+    failedRows: Math.max(sourceRowCount - loadedRowCount, 0),
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const selectedConfigs = SOURCE_TABLES.filter(table => args.tables.includes(table.slug))
@@ -410,37 +557,80 @@ async function main() {
     charset: 'utf8mb4',
   })
 
-  const pgClient = new Client({
-    connectionString: process.env.DATABASE_URL ?? process.env.SUPABASE_DB_URL,
-    ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-  })
-
   if (!process.env.MYSQL_HOST || !process.env.MYSQL_USER || !process.env.MYSQL_DATABASE) {
     throw new Error('Faltan variables MYSQL_HOST, MYSQL_USER o MYSQL_DATABASE.')
   }
 
-  if (!process.env.DATABASE_URL && !process.env.SUPABASE_DB_URL) {
-    throw new Error('Falta DATABASE_URL o SUPABASE_DB_URL para Postgres/Supabase.')
-  }
+  const databaseUrl = process.env.DATABASE_URL ?? process.env.SUPABASE_DB_URL
 
-  await pgClient.connect()
+  if (databaseUrl) {
+    const pgClient = new Client({
+      connectionString: databaseUrl,
+      ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
+    })
 
-  try {
-    if (args.mode === 'replace') {
-      await prepareReplaceMode(pgClient, selectedConfigs)
+    await pgClient.connect()
+
+    try {
+      if (args.mode === 'replace') {
+        await prepareReplaceMode(pgClient, selectedConfigs)
+      }
+
+      for (const config of selectedConfigs) {
+        console.log(`\n[${config.slug}] Exportando desde MySQL...`)
+        const exportResult = await exportTableFromMySql(mysqlConnection, config, args.exportDir)
+        console.log(`[${config.slug}] CSV listo: ${exportResult.outputPath} (${exportResult.rowCount} filas)`)
+
+        console.log(`[${config.slug}] Cargando en Postgres (${args.mode})...`)
+        const metrics = await loadCsvIntoPostgres(
+          pgClient,
+          config,
+          exportResult.outputPath,
+          exportResult.rowCount,
+          args.mode
+        )
+
+        console.log(
+          `[${config.slug}] OK source=${metrics.sourceRowCount} loaded=${metrics.loadedRowCount} new=${metrics.newRows} updated=${metrics.updatedRows}`
+        )
+
+        await syncMetadata(pgClient, config, metrics, args.mode)
+      }
+
+      await refreshStats(pgClient)
+      console.log('\nSincronizacion completada.')
+    } finally {
+      mysqlConnection.end()
+      await pgClient.end()
     }
 
-    for (const config of selectedConfigs) {
-      console.log(`\n[${config.slug}] Exportando desde MySQL...`)
-      const exportResult = await exportTableFromMySql(mysqlConnection, config, args.exportDir)
-      console.log(`[${config.slug}] CSV listo: ${exportResult.outputPath} (${exportResult.rowCount} filas)`)
+    return
+  }
 
-      console.log(`[${config.slug}] Cargando en Postgres (${args.mode})...`)
-      const metrics = await loadCsvIntoPostgres(
-        pgClient,
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error(
+      'Falta DATABASE_URL/SUPABASE_DB_URL y tampoco existen NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY para fallback API.'
+    )
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  )
+
+  try {
+    for (const config of selectedConfigs) {
+      console.log(`\n[${config.slug}] Leyendo desde MySQL y cargando por API...`)
+      const metrics = await loadRowsViaSupabaseApi(
+        supabase,
         config,
-        exportResult.outputPath,
-        exportResult.rowCount,
+        streamNormalizedRowsFromMySql(mysqlConnection, config),
         args.mode
       )
 
@@ -448,14 +638,13 @@ async function main() {
         `[${config.slug}] OK source=${metrics.sourceRowCount} loaded=${metrics.loadedRowCount} new=${metrics.newRows} updated=${metrics.updatedRows}`
       )
 
-      await syncMetadata(pgClient, config, metrics, args.mode)
+      await syncMetadataViaApi(supabase, config, metrics, args.mode)
     }
 
-    await refreshStats(pgClient)
-    console.log('\nSincronizacion completada.')
+    await refreshStatsViaApi(supabase)
+    console.log('\nSincronizacion completada por API.')
   } finally {
     mysqlConnection.end()
-    await pgClient.end()
   }
 }
 
