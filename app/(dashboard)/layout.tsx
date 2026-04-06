@@ -1,12 +1,18 @@
 import { redirect } from 'next/navigation'
-import { createSupabaseServerClient } from '@/lib/db/supabase'
+import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/db/supabase'
 import { Sidebar } from '@/components/layout/Sidebar'
+
+export const dynamic = 'force-dynamic'
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  if (!hasSupabaseEnv) {
+    redirect('/login')
+  }
+
   const supabase = await createSupabaseServerClient()
   const {
     data: { user },

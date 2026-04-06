@@ -8,6 +8,8 @@ import { LoadingState } from '@/components/ui/Spinner'
 import { formatDatetime } from '@/lib/utils/formatters'
 import { RefreshCw, Database } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 async function DashboardContent() {
   const [stats, cobertura, activity] = await Promise.all([
     getDashboardKPIs(),
