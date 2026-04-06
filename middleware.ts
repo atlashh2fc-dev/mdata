@@ -4,7 +4,6 @@ import { createServerClient } from '@supabase/ssr'
 export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  const hasSupabasePublicEnv = Boolean(supabaseUrl && supabaseAnonKey)
   const { pathname } = request.nextUrl
 
   // Rutas protegidas
@@ -17,7 +16,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/exportar') ||
     pathname.startsWith('/logs')
 
-  if (!hasSupabasePublicEnv) {
+  if (!supabaseUrl || !supabaseAnonKey) {
     return isProtectedRoute
       ? NextResponse.redirect(new URL('/login', request.url))
       : NextResponse.next({ request })
