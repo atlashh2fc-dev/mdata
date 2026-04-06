@@ -1,6 +1,6 @@
 'use server'
 
-import { supabaseAdmin } from '@/lib/db/supabase'
+import { supabaseAdmin, db } from '@/lib/db/supabase'
 import type { Database } from '@/lib/db/database.types'
 import type { AIAnalysisRequest, AIAnalysisResponse, AIAnalysisType } from '@/types'
 
@@ -110,12 +110,13 @@ export async function analyzeWithAI(
     result = { text: content }
   }
 
-  // Log en BD
+  // Log en BD (usamos cast para evitar conflicto de tipos con supabase-js v2.101+)
   if (userId) {
-    await supabaseAdmin.from('ai_analysis_logs').insert({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db).from('ai_analysis_logs').insert({
       analysis_type: request.type,
-      input_data: request.data as unknown as Json,
-      output_data: result as unknown as Json,
+      input_data: request.data,
+      output_data: result,
       model: INCEPTION_MODEL,
       tokens_used: tokens,
       duration_ms: durationMs,

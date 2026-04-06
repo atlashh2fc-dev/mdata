@@ -44,3 +44,8 @@ export const supabaseAdmin = createClient<Database>(
     },
   }
 )
+
+// Alias sin tipado estricto para operaciones de escritura complejas
+// que el compilador de TS no puede resolver correctamente con supabase-js v2.101+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const db = supabaseAdmin as any

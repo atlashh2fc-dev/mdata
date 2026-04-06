@@ -1,6 +1,6 @@
 'use server'
 
-import { supabaseAdmin } from '@/lib/db/supabase'
+import { supabaseAdmin, db } from '@/lib/db/supabase'
 import { validateRut, normalizeRut, detectRutColumn } from '@/lib/utils/rut'
 import type {
   DataSource,
@@ -120,7 +120,7 @@ export async function updateJobStatus(
     payload.completed_at = new Date().toISOString()
   }
 
-  await supabaseAdmin.from('ingestion_jobs').update(payload).eq('id', jobId)
+  await db.from('ingestion_jobs').update(payload).eq('id', jobId)
 }
 
 // ============================================================
@@ -146,7 +146,7 @@ export async function addLog(
   rowNumber?: number,
   rawData?: Record<string, unknown>
 ): Promise<void> {
-  await supabaseAdmin.from('ingestion_logs').insert({
+  await db.from('ingestion_logs').insert({
     job_id: jobId,
     level,
     message,
@@ -195,7 +195,7 @@ export async function saveColumnMappings(
     }))
 
   if (rows.length > 0) {
-    await supabaseAdmin.from('source_column_mappings').insert(rows)
+    await db.from('source_column_mappings').insert(rows)
   }
 }
 
@@ -294,7 +294,7 @@ export async function insertStagingBatch(
       }
     })
 
-    await supabaseAdmin.from('staging_data').insert(stagingRows)
+    await db.from('staging_data').insert(stagingRows)
   }
 
   return { valid, invalid }
@@ -397,9 +397,9 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
           .eq('rutid', row.rutid)
           .single()
         if (ex.data) {
-          await supabaseAdmin.from('empresa_resumen').update(empresaData).eq('rutid', row.rutid)
+          await db.from('empresa_resumen').update(empresaData).eq('rutid', row.rutid)
         } else {
-          await supabaseAdmin.from('empresa_resumen').insert({ rutid: row.rutid, ...empresaData })
+          await db.from('empresa_resumen').insert({ rutid: row.rutid, ...empresaData })
         }
       }
 
@@ -412,9 +412,9 @@ export async function mergeStagingToMaster(jobId: string): Promise<{
           .eq('rutid', row.rutid)
           .single()
         if (ex.data) {
-          await supabaseAdmin.from('domicilio_resumen').update(domicilioData).eq('rutid', row.rutid)
+          await db.from('domicilio_resumen').update(domicilioData).eq('rutid', row.rutid)
         } else {
-          await supabaseAdmin.from('domicilio_resumen').insert({ rutid: row.rutid, ...domicilioData })
+          await db.from('domicilio_resumen').insert({ rutid: row.rutid, ...domicilioData })
         }
       }
 

@@ -1,6 +1,6 @@
 'use server'
 
-import { supabaseAdmin } from '@/lib/db/supabase'
+import { supabaseAdmin, db } from '@/lib/db/supabase'
 import type {
   Segmento,
   SegmentFilter,
@@ -96,12 +96,13 @@ export async function createSegmento(
 ): Promise<Segmento | null> {
   const sqlQuery = `SELECT * FROM master_personas_view WHERE ${buildWhereClause(filters)}`
 
-  const { data, error } = await supabaseAdmin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db)
     .from('segmentos')
     .insert({
       name,
       description,
-      filters: filters as unknown as import('@/lib/db/database.types').Json,
+      filters,
       sql_query: sqlQuery,
       created_by: userId,
     })
@@ -125,14 +126,12 @@ export async function updateSegmento(
   id: string,
   updates: Partial<Pick<Segmento, 'name' | 'description' | 'filters' | 'is_active'>>
 ): Promise<Segmento | null> {
-  const { data, error } = await supabaseAdmin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db)
     .from('segmentos')
     .update({
-      ...(updates.name !== undefined && { name: updates.name }),
-      ...(updates.description !== undefined && { description: updates.description }),
-      ...(updates.is_active !== undefined && { is_active: updates.is_active }),
+      ...updates,
       ...(updates.filters !== undefined && {
-        filters: updates.filters as unknown as import('@/lib/db/database.types').Json,
         sql_query: `SELECT * FROM master_personas_view WHERE ${buildWhereClause(updates.filters)}`,
       }),
     })
@@ -167,7 +166,8 @@ export async function computeSegmentoCount(id: string): Promise<number> {
 
   const rowCount = count ?? 0
 
-  await supabaseAdmin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (db)
     .from('segmentos')
     .update({ row_count: rowCount, last_computed: new Date().toISOString() })
     .eq('id', id)
@@ -246,7 +246,8 @@ function applyFilterToQuery(query: any, cond: FilterCondition): any {
  * Elimina (desactiva) un segmento
  */
 export async function deleteSegmento(id: string): Promise<boolean> {
-  const { error } = await supabaseAdmin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (db)
     .from('segmentos')
     .update({ is_active: false })
     .eq('id', id)
