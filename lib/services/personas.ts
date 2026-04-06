@@ -1,6 +1,6 @@
 'use server'
 
-import { supabaseAdmin } from '@/lib/db/supabase'
+import { supabaseAdmin, db } from '@/lib/db/supabase'
 import type { PersonaView, PaginatedResponse, PersonaSearchParams } from '@/types'
 import { normalizeRut } from '@/lib/utils/rut'
 
@@ -10,7 +10,7 @@ import { normalizeRut } from '@/lib/utils/rut'
 export async function getPersonaByRut(rut: string): Promise<PersonaView | null> {
   const rutNorm = normalizeRut(rut)
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('master_personas_view')
     .select('*')
     .eq('rutid', rutNorm)
@@ -44,7 +44,7 @@ export async function searchPersonas(
   const from = (page - 1) * page_size
   const to = from + page_size - 1
 
-  let query = supabaseAdmin.from('master_personas_view').select('*', { count: 'exact' })
+  let query = db.from('master_personas_view').select('*', { count: 'exact' })
 
   // Búsqueda por texto libre (RUT, nombre, email)
   if (q && q.trim()) {
@@ -92,7 +92,7 @@ export async function searchPersonas(
 export async function getPersonasByRegion(): Promise<
   { region: string; count: number }[]
 > {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('pernat_resumen')
     .select('region_part')
     .not('region_part', 'is', null)
@@ -116,11 +116,11 @@ export async function getPersonasByRegion(): Promise<
 export async function getScoreDistribution(): Promise<
   { range: string; count: number }[]
 > {
-  const { data, error } = await supabaseAdmin.rpc('refresh_dashboard_stats')
+  const { data, error } = await db.rpc('refresh_dashboard_stats')
   if (error) console.error('[getScoreDistribution]', error)
 
   // Consulta directa con rangos
-  const { data: rows } = await supabaseAdmin
+  const { data: rows } = await db
     .from('master_personas_view')
     .select('score_patrimonial')
     .limit(100000)
@@ -149,7 +149,7 @@ export async function getScoreDistribution(): Promise<
  */
 export async function rutExists(rut: string): Promise<boolean> {
   const rutNorm = normalizeRut(rut)
-  const { count } = await supabaseAdmin
+  const { count } = await db
     .from('master_personas')
     .select('rutid', { count: 'exact', head: true })
     .eq('rutid', rutNorm)

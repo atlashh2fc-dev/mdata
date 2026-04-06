@@ -1,13 +1,13 @@
 'use server'
 
-import { supabaseAdmin } from '@/lib/db/supabase'
+import { supabaseAdmin, db } from '@/lib/db/supabase'
 import type { DashboardStats, CoberturaItem } from '@/types'
 
 /**
  * Obtiene los KPIs principales del dashboard desde la vista materializada
  */
 export async function getDashboardKPIs(): Promise<DashboardStats> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('dashboard_stats')
     .select('*')
     .single()
@@ -116,7 +116,7 @@ export async function getCoberturaData(): Promise<CoberturaItem[]> {
  * Obtiene actividad reciente de ingesta
  */
 export async function getRecentActivity(limit = 10) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from('ingestion_jobs')
     .select(`
       id, file_name, status, total_rows, valid_rows,
@@ -138,5 +138,5 @@ export async function getRecentActivity(limit = 10) {
  * Refresca la vista materializada de stats
  */
 export async function refreshStats(): Promise<void> {
-  await supabaseAdmin.rpc('refresh_dashboard_stats')
+  await db.rpc('refresh_dashboard_stats')
 }
