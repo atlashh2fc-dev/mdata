@@ -7,7 +7,7 @@ import {
   Home, Landmark, Zap, BarChart3, Shield,
   ChevronDown, ChevronUp,
 } from 'lucide-react'
-import { formatNumber, formatCurrency, formatRut, displayRut } from '@/lib/utils/formatters'
+import { formatNumber, formatCurrency, formatRut } from '@/lib/utils/formatters'
 import { formatRut as fmtRut } from '@/lib/utils/rut'
 
 // Re-export since formatters.ts has formatRut too
