@@ -38,6 +38,7 @@ const NAV_ITEMS = [
     group: 'AI & Análisis',
     items: [
       { href: '/ai', label: 'Cerebro de Negocios', icon: BrainCircuit },
+      { href: '/universos', label: 'Explorador Universos', icon: Database },
       { href: '/segmentos', label: 'Segmentador Visual', icon: Users },
       { href: '/exportar', label: 'Exportar Base', icon: Download },
     ],
