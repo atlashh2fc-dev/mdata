@@ -44,11 +44,15 @@
 
 @layer components {
   .card {
-    @apply bg-[#1e293b] border border-[#334155] rounded-xl shadow-elevation-1;
+    @apply bg-[#1e293b]/80 backdrop-blur-md border border-[#334155]/80 rounded-xl shadow-elevation-1;
   }
 
   .card-hover {
-    @apply card transition-all duration-200 hover:border-brand-500/50 hover:shadow-elevation-3;
+    @apply card transition-all duration-300 hover:border-brand-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:bg-[#1e293b];
+  }
+
+  .glass-panel {
+    @apply bg-[#0f172a]/70 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl;
   }
 
   .input-base {
@@ -158,4 +162,27 @@
   .animate-fade-in {
     animation: fadeIn 0.3s ease-out;
   }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-glow {
+    animation: glowPulse 2s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes glowPulse {
+  from { box-shadow: 0 0 10px rgba(6, 182, 212, 0.2); }
+  to { box-shadow: 0 0 20px rgba(6, 182, 212, 0.6); }
 }

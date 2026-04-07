@@ -9,10 +9,11 @@ import {
   Upload,
   Users,
   Download,
-  Activity,
   ChevronRight,
+  Activity,
   Zap,
   LogOut,
+  BrainCircuit,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/formatters'
 import { supabaseBrowser } from '@/lib/db/client'
@@ -34,10 +35,11 @@ const NAV_ITEMS = [
     ],
   },
   {
-    group: 'Inteligencia',
+    group: 'AI & Análisis',
     items: [
-      { href: '/segmentos', label: 'Segmentos', icon: Users },
-      { href: '/exportar', label: 'Exportar', icon: Download },
+      { href: '/ai', label: 'Cerebro de Negocios', icon: BrainCircuit },
+      { href: '/segmentos', label: 'Segmentador Visual', icon: Users },
+      { href: '/exportar', label: 'Exportar Base', icon: Download },
     ],
   },
   {
@@ -86,13 +88,16 @@ export function Sidebar() {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      'sidebar-item',
-                      isActive && 'active'
+                      'sidebar-item relative overflow-hidden transition-all duration-300',
+                      isActive ? 'active shadow-[0_0_10px_rgba(6,182,212,0.15)] bg-[#1e293b]/50 border border-slate-700/50' : 'hover:bg-slate-800/40'
                     )}
                   >
-                    <Icon className="w-4 h-4 flex-shrink-0" />
-                    <span className="flex-1">{item.label}</span>
-                    {isActive && <ChevronRight className="w-3 h-3 opacity-50" />}
+                    {isActive && (
+                      <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-transparent pointer-events-none" />
+                    )}
+                    <Icon className={cn("w-4 h-4 flex-shrink-0 relative z-10", isActive ? "text-cyan-400" : "")} />
+                    <span className="flex-1 relative z-10">{item.label}</span>
+                    {isActive && <ChevronRight className="w-3 h-3 opacity-80 text-cyan-500 relative z-10 animate-pulse" />}
                   </Link>
                 )
               })}
