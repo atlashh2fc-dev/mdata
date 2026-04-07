@@ -89,20 +89,23 @@ FROM personas_master;
 
 CREATE UNIQUE INDEX idx_dashboard_stats ON dashboard_stats ((1));
 
--- 3. Stats por región
+-- 3. Stats por región (CTE para evitar mismatch entre GROUP BY y SELECT)
 DROP MATERIALIZED VIEW IF EXISTS stats_por_region;
 CREATE MATERIALIZED VIEW stats_por_region AS
+WITH base AS (
+  SELECT
+    COALESCE(NULLIF(TRIM(region_part), ''), domicilio_region, 'Sin región') AS region,
+    email,
+    fono_cel
+  FROM personas_master
+)
 SELECT
-  COALESCE(
-    NULLIF(TRIM(region_part), ''),
-    domicilio_region,
-    'Sin región'
-  ) AS region,
+  region,
   COUNT(*)                                                        AS total,
   COUNT(*) FILTER (WHERE NULLIF(TRIM(email), '') IS NOT NULL)    AS con_email,
   COUNT(*) FILTER (WHERE NULLIF(TRIM(fono_cel), '') IS NOT NULL) AS con_fono
-FROM personas_master
-GROUP BY COALESCE(NULLIF(TRIM(region_part), ''), domicilio_region)
+FROM base
+GROUP BY region
 ORDER BY COUNT(*) DESC;
 
 CREATE UNIQUE INDEX idx_stats_por_region ON stats_por_region (region);
