@@ -28,12 +28,14 @@ function getSafeSortField(field?: string): string {
  * Consulta master_personas_view (que transforma personas_master).
  */
 export async function getPersonaByRut(rut: string): Promise<PersonaView | null> {
-  const rutNorm = normalizeRut(rut)
+  // DB stores RUT zero-padded, no dash: e.g. "12345678-9" → "0123456789"
+  // We clean the input (remove dots/dashes) then use ILIKE suffix match
+  const cleaned = rut.replace(/[.\-\s]/g, '').toUpperCase()
 
   const { data, error } = await db
     .from('master_personas_view')
     .select('*')
-    .eq('rutid', rutNorm)
+    .ilike('rutid', `%${cleaned}`)
     .limit(1)
     .single()
 
@@ -76,11 +78,13 @@ export async function searchPersonas(
   // Búsqueda por texto libre (RUT, nombre, email)
   if (q && q.trim()) {
     const term = q.trim()
-    // Si parece RUT (empieza con dígito)
+    // Si parece RUT (empieza con dígito o tiene formato chileno con puntos/guión)
     if (/^\d[\d.\-kK]*$/.test(term)) {
-      query = query.ilike('rutid', `%${normalizeRut(term)}%`)
+      // DB almacena sin puntos ni guión, zero-padded a 10 chars.
+      // Ejemplo: "12.345.678-9" → "123456789" → ILIKE "%123456789" (sufijo exacto)
+      const cleaned = term.replace(/[.\-\s]/g, '').toUpperCase()
+      query = query.ilike('rutid', `%${cleaned}`)
     } else {
-      // Buscar en nombre_completo o email (columnas de la vista)
       query = query.or(
         `nombre_completo.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
       )
