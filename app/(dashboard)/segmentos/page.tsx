@@ -245,7 +245,7 @@ export default function SegmentosPage() {
                       className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
                         logic === l
                           ? 'bg-brand-600 text-white'
-                          : 'bg-[#111827] text-slate-400 hover:text-white border border-[#253357]'
+                          : 'bg-[#0f172a] text-slate-400 hover:text-white border border-[#334155]'
                       }`}
                     >
                       {l}
@@ -360,7 +360,7 @@ export default function SegmentosPage() {
         {/* Segment Results */}
         {selectedSegment && (
           <div className="card overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-[#253357]">
+            <div className="flex items-center justify-between p-4 border-b border-[#334155]">
               <div>
                 <h3 className="text-sm font-semibold text-slate-200">
                   {selectedSegment.name}

@@ -123,7 +123,7 @@ const COLUMNS: Column[] = [
       const c = row.cobertura_pct ?? 0
       return (
         <div className="flex items-center gap-2">
-          <div className="w-16 h-1.5 bg-[#253357] rounded-full overflow-hidden">
+          <div className="w-16 h-1.5 bg-[#334155] rounded-full overflow-hidden">
             <div
               className="h-full bg-brand-500 rounded-full"
               style={{ width: `${c}%` }}

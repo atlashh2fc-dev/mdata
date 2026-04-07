@@ -35,7 +35,7 @@ function ScoreMeter({ score, max = 100, label }: ScoreMeterProps) {
         <span className="text-xs text-slate-400">{label}</span>
         <span className="text-xs font-bold text-white">{score}</span>
       </div>
-      <div className="h-2 bg-[#253357] rounded-full overflow-hidden">
+      <div className="h-2 bg-[#334155] rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-700 ${color}`}
           style={{ width: `${pct}%` }}
@@ -54,7 +54,7 @@ interface DataRowProps {
 
 function DataRow({ label, value, icon: Icon, highlight }: DataRowProps) {
   return (
-    <div className="flex items-center justify-between py-2.5 border-b border-[#253357]/50 last:border-0">
+    <div className="flex items-center justify-between py-2.5 border-b border-[#334155]/50 last:border-0">
       <div className="flex items-center gap-2.5">
         {Icon && <Icon className="w-3.5 h-3.5 text-slate-500" />}
         <span className="text-xs text-slate-400">{label}</span>
@@ -176,7 +176,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
             />
           )}
 
-          <div className="mt-4 pt-4 border-t border-[#253357]/50 space-y-3">
+          <div className="mt-4 pt-4 border-t border-[#334155]/50 space-y-3">
             <ScoreMeter
               score={persona.score_patrimonial ?? 0}
               max={100}
@@ -200,7 +200,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
           <DataRow label="Región" value={persona.domicilio_region} />
 
           {/* Datos de contactabilidad */}
-          <div className="mt-4 pt-4 border-t border-[#253357]/50">
+          <div className="mt-4 pt-4 border-t border-[#334155]/50">
             <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-600 mb-3">
               Contactabilidad
             </h4>

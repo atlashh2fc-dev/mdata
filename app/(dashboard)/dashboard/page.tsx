@@ -1,8 +1,10 @@
 import { Suspense } from 'react'
 import { Header } from '@/components/layout/Header'
-import { getDashboardKPIs, getCoberturaData, getRecentActivity } from '@/lib/services/dashboard'
+import { getDashboardKPIs, getCoberturaData, getRecentActivity, getScoreDistribution, getStatsPorRegion } from '@/lib/services/dashboard'
 import { KPIGrid } from '@/components/dashboard/KPIGrid'
 import { CoberturaChart } from '@/components/dashboard/CoberturaChart'
+import { ScoreDonutChart } from '@/components/dashboard/ScoreDonutChart'
+import { RegionChart } from '@/components/dashboard/RegionChart'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
 import { LoadingState } from '@/components/ui/Spinner'
 import { formatDatetime } from '@/lib/utils/formatters'
@@ -11,9 +13,11 @@ import { RefreshCw, Database } from 'lucide-react'
 export const dynamic = 'force-dynamic'
 
 async function DashboardContent() {
-  const [stats, cobertura, activity] = await Promise.all([
+  const [stats, cobertura, scoreDist, regionStats, activity] = await Promise.all([
     getDashboardKPIs(),
     getCoberturaData(),
+    getScoreDistribution(),
+    getStatsPorRegion(10),
     getRecentActivity(8),
   ])
 
@@ -45,10 +49,18 @@ async function DashboardContent() {
       {/* KPIs */}
       <KPIGrid stats={stats} />
 
-      {/* Cobertura + Activity */}
+      {/* Charts Row 1 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <CoberturaChart items={cobertura} />
-        <ActivityFeed items={activity as Parameters<typeof ActivityFeed>[0]['items']} />
+        <ScoreDonutChart data={scoreDist} />
+      </div>
+
+      {/* Charts Row 2 */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <RegionChart data={regionStats} />
+        <div className="xl:col-span-1">
+          <ActivityFeed items={activity as Parameters<typeof ActivityFeed>[0]['items']} />
+        </div>
       </div>
     </div>
   )

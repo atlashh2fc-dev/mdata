@@ -58,15 +58,15 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 flex flex-col bg-[#0d1529] border-r border-[#1e2d4a] z-30">
+    <aside className="fixed left-0 top-0 h-screen w-64 flex flex-col bg-[#0f172a] border-r border-[#334155] z-30">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-5 h-16 border-b border-[#1e2d4a]">
-        <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center glow-brand">
+      <div className="flex items-center gap-3 px-5 h-16 border-b border-[#334155]">
+        <div className="w-8 h-8 rounded-lg bg-[#06b6d4] flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
           <Zap className="w-4 h-4 text-white" />
         </div>
         <div>
           <p className="text-sm font-bold text-white leading-none">RUT Intelligence</p>
-          <p className="text-[10px] text-slate-500 mt-0.5">Data Platform</p>
+          <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wider">Data Platform</p>
         </div>
       </div>
 

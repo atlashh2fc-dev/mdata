@@ -158,6 +158,30 @@ export async function getRecentActivity(limit = 10) {
 }
 
 /**
+ * Obtiene la distribución de score patrimonial
+ */
+export async function getScoreDistribution() {
+  if (!hasSupabaseAdminEnv) return []
+  const { data, error } = await db.from('stats_score_dist').select('*').order('range')
+  if (error) console.error('[getScoreDistribution]', error)
+  return data ?? []
+}
+
+/**
+ * Obtiene el top de regiones por volumen
+ */
+export async function getStatsPorRegion(limit = 10) {
+  if (!hasSupabaseAdminEnv) return []
+  const { data, error } = await db
+    .from('stats_por_region')
+    .select('*')
+    .order('total', { ascending: false })
+    .limit(limit)
+  if (error) console.error('[getStatsPorRegion]', error)
+  return data ?? []
+}
+
+/**
  * Refresca la vista materializada de stats
  */
 export async function refreshStats(): Promise<void> {
