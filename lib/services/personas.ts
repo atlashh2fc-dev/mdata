@@ -28,14 +28,14 @@ function getSafeSortField(field?: string): string {
  * Consulta master_personas_view (que transforma personas_master).
  */
 export async function getPersonaByRut(rut: string): Promise<PersonaView | null> {
-  // DB stores RUT zero-padded, no dash: e.g. "12345678-9" → "0123456789"
-  // We clean the input (remove dots/dashes) then use ILIKE suffix match
-  const cleaned = rut.replace(/[.\-\s]/g, '').toUpperCase()
+  // DB stores RUT zero-padded to 10 chars, no dots/dashes: "12.345.678-9" → "0123456789"
+  // Using exact PK match (padStart) to hit the PRIMARY KEY index — instant on 9.5M rows
+  const padded = rut.replace(/[.\-\s]/g, '').toUpperCase().padStart(10, '0')
 
   const { data, error } = await db
     .from('master_personas_view')
     .select('*')
-    .ilike('rutid', `%${cleaned}`)
+    .eq('rutid', padded)
     .limit(1)
     .single()
 
@@ -81,9 +81,9 @@ export async function searchPersonas(
     // Si parece RUT (empieza con dígito o tiene formato chileno con puntos/guión)
     if (/^\d[\d.\-kK]*$/.test(term)) {
       // DB almacena sin puntos ni guión, zero-padded a 10 chars.
-      // Ejemplo: "12.345.678-9" → "123456789" → ILIKE "%123456789" (sufijo exacto)
-      const cleaned = term.replace(/[.\-\s]/g, '').toUpperCase()
-      query = query.ilike('rutid', `%${cleaned}`)
+      // Búsqueda exacta por PK: "12.345.678-9" → "0123456789" → eq() usa el índice PRIMARY KEY
+      const padded = term.replace(/[.\-\s]/g, '').toUpperCase().padStart(10, '0')
+      query = query.eq('rutid', padded)
     } else {
       query = query.or(
         `nombre_completo.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
