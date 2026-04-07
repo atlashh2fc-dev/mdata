@@ -42,6 +42,7 @@ export default function LoginPage() {
     }
 
     // refresh() first so the middleware sees the session cookie, then navigate
+    setLoading(false)
     router.refresh()
     router.push('/dashboard')
   }
