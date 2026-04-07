@@ -4,12 +4,13 @@ import { db } from '@/lib/db/supabase'
 import type { PersonaView, PaginatedResponse, PersonaSearchParams } from '@/types'
 import { normalizeRut } from '@/lib/utils/rut'
 
+// Columnas permitidas para ordenar (usan los nombres de la vista)
 const PERSONA_SORT_FIELDS = new Set([
   'rutid',
   'nombre_completo',
   'email',
-  'region_part',
-  'comuna_part',
+  'region_canonica',
+  'comuna_canonica',
   'n_autos',
   'n_bienes_raices',
   'totalavaluos',
@@ -23,7 +24,8 @@ function getSafeSortField(field?: string): string {
 }
 
 /**
- * Obtiene el perfil 360 completo de una persona por RUT
+ * Obtiene el perfil 360 completo de una persona por RUT.
+ * Consulta master_personas_view (que transforma personas_master).
  */
 export async function getPersonaByRut(rut: string): Promise<PersonaView | null> {
   const rutNorm = normalizeRut(rut)
@@ -32,6 +34,7 @@ export async function getPersonaByRut(rut: string): Promise<PersonaView | null> 
     .from('master_personas_view')
     .select('*')
     .eq('rutid', rutNorm)
+    .limit(1)
     .single()
 
   if (error || !data) return null
@@ -39,7 +42,8 @@ export async function getPersonaByRut(rut: string): Promise<PersonaView | null> 
 }
 
 /**
- * Búsqueda de personas con filtros avanzados y paginación
+ * Búsqueda de personas con filtros avanzados y paginación.
+ * Consulta master_personas_view para aprovechar las columnas computadas.
  */
 export async function searchPersonas(
   params: PersonaSearchParams
@@ -62,27 +66,38 @@ export async function searchPersonas(
   const from = (page - 1) * page_size
   const to = from + page_size - 1
 
-  let query = db.from('master_personas_view').select('*', { count: 'exact' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query = (db as any)
+    .from('master_personas_view')
+    .select('*', { count: 'exact' })
+
   const safeSortBy = getSafeSortField(sort_by)
 
   // Búsqueda por texto libre (RUT, nombre, email)
   if (q && q.trim()) {
     const term = q.trim()
-    // Si parece RUT
+    // Si parece RUT (empieza con dígito)
     if (/^\d[\d.\-kK]*$/.test(term)) {
       query = query.ilike('rutid', `%${normalizeRut(term)}%`)
     } else {
+      // Buscar en nombre_completo o email (columnas de la vista)
       query = query.or(
         `nombre_completo.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
       )
     }
   }
 
-  if (region) query = query.ilike('region_part', `%${region}%`)
-  if (comuna) query = query.ilike('comuna_part', `%${comuna}%`)
+  // Filtros por ubicación
+  if (region) query = query.ilike('region_canonica', `%${region}%`)
+  if (comuna) query = query.ilike('comuna_canonica', `%${comuna}%`)
+
+  // Filtros booleanos (columna computada en la vista)
   if (tiene_autos !== undefined) query = query.eq('tiene_autos', tiene_autos)
   if (tiene_empresa !== undefined) query = query.eq('tiene_empresa', tiene_empresa)
-  if (tiene_bienes_raices !== undefined) query = query.eq('tiene_bienes_raices', tiene_bienes_raices)
+  if (tiene_bienes_raices !== undefined)
+    query = query.eq('tiene_bienes_raices', tiene_bienes_raices)
+
+  // Filtro por score
   if (score_min !== undefined) query = query.gte('score_patrimonial', score_min)
   if (score_max !== undefined) query = query.lte('score_patrimonial', score_max)
 
@@ -106,19 +121,17 @@ export async function searchPersonas(
 }
 
 /**
- * Obtiene estadísticas por región (para mapas y gráficos)
+ * Obtiene estadísticas por región.
  */
 export async function getPersonasByRegion(): Promise<
   { region: string; count: number }[]
 > {
-  // Primero intentamos usar la vista materializada si existe.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const statsView = (db as any)
+  const { data, error } = await (db as any)
     .from('stats_por_region')
     .select('region, total')
     .order('total', { ascending: false })
 
-  const { data, error } = await statsView
   if (!error && Array.isArray(data)) {
     return data.map((row: { region: string; total: number }) => ({
       region: row.region,
@@ -126,37 +139,22 @@ export async function getPersonasByRegion(): Promise<
     }))
   }
 
-  const fallback = await db
-    .from('pernat_resumen')
-    .select('region_part')
-    .not('region_part', 'is', null)
-
-  if (fallback.error || !fallback.data) return []
-
-  const counts: Record<string, number> = {}
-  for (const row of fallback.data) {
-    const r = row.region_part ?? 'Sin región'
-    counts[r] = (counts[r] ?? 0) + 1
-  }
-
-  return Object.entries(counts)
-    .map(([region, count]) => ({ region, count }))
-    .sort((a, b) => b.count - a.count)
+  console.warn('[getPersonasByRegion] stats_por_region not available:', error?.message)
+  return []
 }
 
 /**
- * Obtiene distribución de score patrimonial
+ * Obtiene distribución de score patrimonial.
  */
 export async function getScoreDistribution(): Promise<
   { range: string; count: number }[]
 > {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const statsView = (db as any)
+  const { data, error } = await (db as any)
     .from('stats_score_dist')
     .select('range, count')
     .order('range', { ascending: true })
 
-  const { data, error } = await statsView
   if (!error && Array.isArray(data)) {
     return data.map((row: { range: string; count: number }) => ({
       range: row.range,
@@ -164,37 +162,18 @@ export async function getScoreDistribution(): Promise<
     }))
   }
 
-  const { data: rows } = await db
-    .from('master_personas_view')
-    .select('score_patrimonial')
-    .limit(100000)
-
-  if (!rows) return []
-
-  const ranges = [
-    { label: '0', min: 0, max: 0 },
-    { label: '1-20', min: 1, max: 20 },
-    { label: '21-40', min: 21, max: 40 },
-    { label: '41-60', min: 41, max: 60 },
-    { label: '61-80', min: 61, max: 80 },
-    { label: '81+', min: 81, max: Infinity },
-  ]
-
-  return ranges.map(r => ({
-    range: r.label,
-    count: rows.filter(
-      row => (row.score_patrimonial ?? 0) >= r.min && (row.score_patrimonial ?? 0) <= r.max
-    ).length,
-  }))
+  console.warn('[getScoreDistribution] stats_score_dist not available:', error?.message)
+  return []
 }
 
 /**
- * Verifica si un RUT existe en master_personas
+ * Verifica si un RUT existe en personas_master.
  */
 export async function rutExists(rut: string): Promise<boolean> {
   const rutNorm = normalizeRut(rut)
-  const { count } = await db
-    .from('master_personas')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { count } = await (db as any)
+    .from('personas_master')
     .select('rutid', { count: 'exact', head: true })
     .eq('rutid', rutNorm)
   return (count ?? 0) > 0

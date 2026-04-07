@@ -11,6 +11,30 @@ export type Database = {
         Insert: { rutid: string; created_at?: string; updated_at?: string }
         Update: { rutid?: string; created_at?: string; updated_at?: string }
       }
+      personas_master: {
+        Row: {
+          rutid: string; nombres: string | null; paterno: string | null
+          materno: string | null; email: string | null; fono_cel: string | null
+          comuna_part: string | null; region_part: string | null
+          n_autos: number; razon_social_empresa: string | null
+          domicilio_comuna: string | null; domicilio_region: string | null
+          n_bienes_raices: number; totalavaluos: number; loaded_at: string
+        }
+        Insert: {
+          rutid: string; nombres?: string | null; paterno?: string | null
+          materno?: string | null; email?: string | null; fono_cel?: string | null
+          comuna_part?: string | null; region_part?: string | null
+          n_autos?: number; razon_social_empresa?: string | null
+          domicilio_comuna?: string | null; domicilio_region?: string | null
+          n_bienes_raices?: number; totalavaluos?: number; loaded_at?: string
+        }
+        Update: {
+          rutid?: string; nombres?: string | null; paterno?: string | null
+          materno?: string | null; email?: string | null; fono_cel?: string | null
+          n_autos?: number; razon_social_empresa?: string | null
+          n_bienes_raices?: number; totalavaluos?: number
+        }
+      }
       pernat_resumen: {
         Row: {
           id: string; rutid: string; nombres: string | null; paterno: string | null
