@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
-import { BrainCircuit, Send, Sparkles, Globe, Target, Building2, ChevronRight, UserCircle2, Bot } from 'lucide-react'
+import { BrainCircuit, Send, Sparkles, Globe, Target, Building2, ChevronRight, UserCircle2, Bot, Database } from 'lucide-react'
 
 type Message = {
   role: 'user' | 'assistant' | 'tool'
@@ -107,7 +107,7 @@ export default function CerebroDeNegociosPage() {
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6 z-10 scrollbar-thin">
             {messages.map((msg, idx) => (
-              <div key={idx} className={\`flex gap-4 \${msg.role === 'user' ? 'flex-row-reverse' : ''}\`}>
+              <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 <div className="flex-shrink-0">
                   {msg.role === 'user' ? (
                     <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
@@ -119,11 +119,11 @@ export default function CerebroDeNegociosPage() {
                     </div>
                   )}
                 </div>
-                <div className={\`max-w-[80%] rounded-2xl p-4 \${
+                <div className={`max-w-[80%] rounded-2xl p-4 ${
                   msg.role === 'user' 
                     ? 'bg-brand-600 text-white rounded-tr-sm shadow-md' 
                     : 'bg-[#1e293b]/80 border border-slate-700/50 text-slate-200 rounded-tl-sm shadow-[0_4px_20px_rgba(0,0,0,0.2)]'
-                }\`}>
+                }`}>
                   <div className="text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
                   </div>
@@ -187,7 +187,7 @@ export default function CerebroDeNegociosPage() {
               ].map((sug, i) => (
                 <button 
                   key={i}
-                  onClick={() => setInput(\`Analiza el \${sug.title.toLowerCase()}: \${sug.desc}\`)}
+                  onClick={() => setInput(`Analiza el ${sug.title.toLowerCase()}: ${sug.desc}`)}
                   className="w-full text-left p-3 rounded-lg border border-slate-700/50 bg-[#1e293b]/40 hover:bg-[#1e293b] hover:border-cyan-500/50 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-1">
