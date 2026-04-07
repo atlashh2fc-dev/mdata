@@ -159,11 +159,11 @@ export default function UniversosPage() {
                  <button
                     key={dim.key}
                     onClick={() => toggleFilter(dim.key)}
-                    className={\`p-4 rounded-xl border transition-all duration-200 text-left flex items-start justify-between min-h-[5rem] \${stateClass}\`}
+                    className={`p-4 rounded-xl border transition-all duration-200 text-left flex items-start justify-between min-h-[5rem] ${stateClass}`}
                  >
                    <div className="flex items-center gap-3">
-                      <div className={\`w-10 h-10 rounded-lg flex items-center justify-center \${dim.bg}\`}>
-                        <Icon className={\`w-5 h-5 \${dim.color}\`} />
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${dim.bg}`}>
+                        <Icon className={`w-5 h-5 ${dim.color}`} />
                       </div>
                       <div>
                         <h4 className="text-sm font-semibold text-white">{dim.label}</h4>
@@ -172,7 +172,7 @@ export default function UniversosPage() {
                         </p>
                       </div>
                    </div>
-                   <div className={\`w-6 h-6 rounded-full flex items-center justify-center bg-black/20 border border-white/5 \${stateColor}\`}>
+                   <div className={`w-6 h-6 rounded-full flex items-center justify-center bg-black/20 border border-white/5 ${stateColor}`}>
                      <StateIcon className="w-3.5 h-3.5" />
                    </div>
                  </button>
@@ -214,7 +214,7 @@ export default function UniversosPage() {
                    </div>
                  </div>
                  
-                 <button className={\`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all \${activeCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}\`}>
+                 <button className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all ${activeCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>
                     {activeCount > 0 ? 'Exportar este segmento exacto' : 'Aplica filtros para exportar'}
                  </button>
                </>
