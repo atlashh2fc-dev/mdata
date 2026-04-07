@@ -34,6 +34,8 @@ export async function middleware(request: NextRequest) {
             return request.cookies.getAll()
           },
           setAll(cookiesToSet) {
+            // IMPORTANT: must set cookies on both request AND response
+            // Do NOT recreate supabaseResponse here — that drops the cookies
             cookiesToSet.forEach(({ name, value }) =>
               request.cookies.set(name, value)
             )
@@ -46,16 +48,27 @@ export async function middleware(request: NextRequest) {
       }
     )
 
+    // IMPORTANT: use getUser() not getSession() — validates the token server-side
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
     if (isProtectedRoute && !user) {
-      return NextResponse.redirect(new URL('/login', request.url))
+      const redirectUrl = new URL('/login', request.url)
+      const redirectResponse = NextResponse.redirect(redirectUrl)
+      // Copy over any session cookies Supabase may have set
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
     }
 
     if (pathname === '/login' && user) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
+      const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url))
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
     }
 
     return supabaseResponse

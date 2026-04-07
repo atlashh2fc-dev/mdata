@@ -30,13 +30,20 @@ export default function LoginPage() {
     })
 
     if (authError) {
-      setError('Credenciales inválidas. Verifica tu email y contraseña.')
+      // Log the real error for debugging
+      console.error('[login] Auth error:', authError.message, authError.status)
+      setError(
+        authError.status === 400
+          ? 'Credenciales inválidas. Verifica tu email y contraseña.'
+          : `Error de autenticación: ${authError.message}`
+      )
       setLoading(false)
       return
     }
 
-    router.push('/dashboard')
+    // refresh() first so the middleware sees the session cookie, then navigate
     router.refresh()
+    router.push('/dashboard')
   }
 
   return (

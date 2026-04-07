@@ -8,9 +8,16 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+    "ops:export:csv": "node --env-file=.env.local scripts/master-sync/export-mysql-to-csv.mjs",
+    "ops:load:csv": "node --env-file=.env.local scripts/master-sync/load-csv-to-postgres.mjs",
     "ops:sync:master": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs",
     "ops:sync:master:replace": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs --mode=replace",
-    "ops:import:csv": "node --env-file=.env.local scripts/master-sync/import-csv-to-supabase.mjs"
+    "ops:import:csv": "node --env-file=.env.local scripts/master-sync/import-csv-to-supabase.mjs",
+    "ops:consolidado": "node --env-file=.env.local scripts/master-sync/export-consolidado.mjs",
+    "ops:consolidado:replace": "node --env-file=.env.local scripts/master-sync/export-consolidado.mjs --mode=replace",
+    "ops:consolidado:rest": "node --env-file=.env.local scripts/master-sync/export-consolidado-rest.mjs",
+    "ops:consolidado:rest:replace": "node --env-file=.env.local scripts/master-sync/export-consolidado-rest.mjs --mode=replace",
+    "ops:verify": "node --env-file=.env.local scripts/master-sync/verify-migration.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
