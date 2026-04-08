@@ -23,13 +23,23 @@ import {
 } from '@/lib/utils/formatters'
 import { validateRut } from '@/lib/utils/rut'
 
-const DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
+const PERSON_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
   'nombre_completo',
   'email',
   'fono_cel',
   'comuna_canonica',
   'region_canonica',
 ]
+
+const COMPANY_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
+  'razon_social_empresa',
+  'email',
+  'fono_cel',
+  'comuna_canonica',
+  'region_canonica',
+]
+
+const MAX_AUTO_WEB_PASSES = 20
 
 const CATEGORY_LABELS: Record<BaseBuilderFieldDefinition['category'], string> = {
   contacto: 'Contacto',
@@ -316,7 +326,8 @@ export function PoblarBasePage() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv')
   const [selectedMatchMode, setSelectedMatchMode] = useState<BaseBuilderMatchMode>('rut')
   const [enrichMissingContactsWithWeb, setEnrichMissingContactsWithWeb] = useState(false)
-  const [selectedFields, setSelectedFields] = useState<BaseBuilderFieldKey[]>(DEFAULT_FIELDS)
+  const [selectedFields, setSelectedFields] = useState<BaseBuilderFieldKey[]>(PERSON_DEFAULT_FIELDS)
+  const [didCustomizeFields, setDidCustomizeFields] = useState(false)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [parsedUpload, setParsedUpload] = useState<ParsedUpload>({
     headers: [],
@@ -327,6 +338,7 @@ export function PoblarBasePage() {
   const [selectedMatchColumn, setSelectedMatchColumn] = useState<string>('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeStatus, setAnalyzeStatus] = useState<string>('Cruzando...')
   const [exporting, setExporting] = useState(false)
   const [exportDone, setExportDone] = useState(false)
   const [analysis, setAnalysis] = useState<BaseBuilderAnalysisResult | null>(null)
@@ -361,6 +373,7 @@ export function PoblarBasePage() {
   function toggleField(field: BaseBuilderFieldKey) {
     setExportDone(false)
     setAnalysis(null)
+    setDidCustomizeFields(true)
     setSelectedFields(prev => (
       prev.includes(field)
         ? prev.filter(item => item !== field)
@@ -392,6 +405,9 @@ export function PoblarBasePage() {
       const nextMode: BaseBuilderMatchMode = parsed.detectedRutColumn ? 'rut' : 'razon_social'
       setUploadedFile(file)
       setParsedUpload(parsed)
+      if (!didCustomizeFields) {
+        setSelectedFields(parsed.detectedCompanyColumn ? COMPANY_DEFAULT_FIELDS : PERSON_DEFAULT_FIELDS)
+      }
       setSelectedMatchMode(nextMode)
       setSelectedMatchColumn(
         nextMode === 'rut'
@@ -427,6 +443,7 @@ export function PoblarBasePage() {
     }
 
     setAnalyzing(true)
+    setAnalyzeStatus('Cruzando...')
     setError(null)
     setExportDone(false)
 
@@ -455,43 +472,61 @@ export function PoblarBasePage() {
         return compactRow
       })
 
-      const res = await fetch('/api/base-builder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rows: compactRows,
-          match_mode: selectedMatchMode,
-          match_column: selectedMatchColumn,
-          company_column: companyColumnForPayload,
-          enrich_missing_contacts_with_web: enrichMissingContactsWithWeb,
-          selected_fields: selectedFields,
-        }),
-      })
+      async function runAnalysisPass() {
+        const res = await fetch('/api/base-builder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rows: compactRows,
+            match_mode: selectedMatchMode,
+            match_column: selectedMatchColumn,
+            company_column: companyColumnForPayload,
+            enrich_missing_contacts_with_web: enrichMissingContactsWithWeb,
+            selected_fields: selectedFields,
+          }),
+        })
 
-      const contentType = res.headers.get('content-type') ?? ''
-      const payload = contentType.includes('application/json')
-        ? await res.json()
-        : await res.text()
+        const contentType = res.headers.get('content-type') ?? ''
+        const payload = contentType.includes('application/json')
+          ? await res.json()
+          : await res.text()
 
-      if (!res.ok) {
-        const message = typeof payload === 'string'
-          ? payload
-          : payload?.error
+        if (!res.ok) {
+          const message = typeof payload === 'string'
+            ? payload
+            : payload?.error
 
-        throw new Error(message ?? 'No se pudo poblar la base.')
+          throw new Error(message ?? 'No se pudo poblar la base.')
+        }
+
+        if (typeof payload === 'string' || !payload?.data) {
+          throw new Error('El servidor devolvió una respuesta inválida.')
+        }
+
+        return payload.data as BaseBuilderAnalysisResult
       }
 
-      if (typeof payload === 'string' || !payload?.data) {
-        throw new Error('El servidor devolvió una respuesta inválida.')
+      let latestAnalysis = await runAnalysisPass()
+      let webPass = 1
+
+      while (
+        enrichMissingContactsWithWeb &&
+        latestAnalysis.web_enrichment?.enabled &&
+        latestAnalysis.web_enrichment.limited &&
+        webPass < MAX_AUTO_WEB_PASSES
+      ) {
+        webPass += 1
+        setAnalyzeStatus(`Enriqueciendo web (${webPass})...`)
+        latestAnalysis = await runAnalysisPass()
       }
 
       const mergedRows = parsedUpload.rows.map((row, index) => ({
         ...row,
-        ...(payload.data.rows[index] ?? {}),
+        ...(latestAnalysis.rows[index] ?? {}),
       }))
 
       setAnalysis({
-        ...payload.data,
+        ...latestAnalysis,
         rows: mergedRows,
         original_columns: parsedUpload.headers,
         match_mode: selectedMatchMode,
@@ -503,6 +538,7 @@ export function PoblarBasePage() {
       setError(err instanceof Error ? err.message : 'No se pudo poblar la base.')
     } finally {
       setAnalyzing(false)
+      setAnalyzeStatus('Cruzando...')
     }
   }
 
@@ -708,7 +744,7 @@ export function PoblarBasePage() {
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
                       Usa búsqueda web + IA para intentar encontrar contactos cuando el maestro no los trae.
-                      Guarda cache para próximas corridas y procesa hasta 25 empresas nuevas por corrida.
+                      El RUT sigue siendo la llave del match; para empresas, la búsqueda usa la razón social detectada en tu archivo y avanza en tandas automáticas.
                     </p>
                     {!contactFieldSelected && (
                       <p className="text-xs text-amber-300 mt-2">
@@ -822,7 +858,7 @@ export function PoblarBasePage() {
                 {analyzing ? (
                   <>
                     <Spinner size="sm" />
-                    Cruzando...
+                    {analyzeStatus}
                   </>
                 ) : (
                   <>
