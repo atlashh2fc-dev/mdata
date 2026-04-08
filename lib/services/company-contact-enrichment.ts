@@ -277,48 +277,67 @@ async function enrichOneCompany(
   rutid?: string | null
 ): Promise<CompanyContactEnrichment> {
   const matchKey = normalizeCompanyName(companyName)
-  const searchQuery = `${companyName} contacto telefono email sitio oficial chile`
-  const result = await search(searchQuery, { safeSearch: SafeSearchType.OFF })
-  const topResults = result.results.slice(0, SEARCH_RESULTS_PER_COMPANY)
+  try {
+    const searchQuery = `${companyName} contacto telefono email sitio oficial chile`
+    const result = await search(searchQuery, { safeSearch: SafeSearchType.OFF })
+    const topResults = result.results.slice(0, SEARCH_RESULTS_PER_COMPANY)
 
-  const snippets = topResults.map(item => `${item.title}\n${item.url}\n${item.description}`)
-  const sourceUrls = uniq(topResults.map(item => item.url)).slice(0, FETCH_RESULTS_PER_COMPANY)
+    const snippets = topResults.map(item => `${item.title}\n${item.url}\n${item.description}`)
+    const sourceUrls = uniq(topResults.map(item => item.url)).slice(0, FETCH_RESULTS_PER_COMPANY)
 
-  let emails = uniq(topResults.flatMap(item => extractEmails(`${item.title} ${item.description}`)))
-  let phones = uniq(topResults.flatMap(item => extractPhones(`${item.title} ${item.description}`)))
+    let emails = uniq(topResults.flatMap(item => extractEmails(`${item.title} ${item.description}`)))
+    let phones = uniq(topResults.flatMap(item => extractPhones(`${item.title} ${item.description}`)))
 
-  for (const url of sourceUrls) {
-    const pageText = await fetchPageText(url)
-    emails = uniq([...emails, ...extractEmails(pageText)])
-    phones = uniq([...phones, ...extractPhones(pageText)])
-  }
+    for (const url of sourceUrls) {
+      const pageText = await fetchPageText(url)
+      emails = uniq([...emails, ...extractEmails(pageText)])
+      phones = uniq([...phones, ...extractPhones(pageText)])
+    }
 
-  const aiPick = await chooseBestWithAI(companyName, {
-    websites: sourceUrls,
-    emails,
-    phones,
-    snippets,
-  })
+    const aiPick = await chooseBestWithAI(companyName, {
+      websites: sourceUrls,
+      emails,
+      phones,
+      snippets,
+    })
 
-  const bestWebsite = aiPick?.website && sourceUrls.includes(aiPick.website)
-    ? aiPick.website
-    : sourceUrls[0] ?? null
-  const bestEmail = aiPick?.email && emails.includes(aiPick.email)
-    ? aiPick.email
-    : pickBest(emails, email => scoreEmail(email, bestWebsite))
-  const bestPhone = aiPick?.phone && phones.includes(aiPick.phone)
-    ? aiPick.phone
-    : pickBest(phones, scorePhone)
+    const bestWebsite = aiPick?.website && sourceUrls.includes(aiPick.website)
+      ? aiPick.website
+      : sourceUrls[0] ?? null
+    const bestEmail = aiPick?.email && emails.includes(aiPick.email)
+      ? aiPick.email
+      : pickBest(emails, email => scoreEmail(email, bestWebsite))
+    const bestPhone = aiPick?.phone && phones.includes(aiPick.phone)
+      ? aiPick.phone
+      : pickBest(phones, scorePhone)
 
-  return {
-    matchKey,
-    rutid: rutid ?? null,
-    companyName,
-    website: bestWebsite,
-    emails: bestEmail ? [bestEmail, ...emails.filter(item => item !== bestEmail)] : emails,
-    phones: bestPhone ? [bestPhone, ...phones.filter(item => item !== bestPhone)] : phones,
-    sourceUrls,
-    source: aiPick ? 'web_ai' : (emails.length > 0 || phones.length > 0 || bestWebsite ? 'web' : 'none'),
+    return {
+      matchKey,
+      rutid: rutid ?? null,
+      companyName,
+      website: bestWebsite,
+      emails: bestEmail ? [bestEmail, ...emails.filter(item => item !== bestEmail)] : emails,
+      phones: bestPhone ? [bestPhone, ...phones.filter(item => item !== bestPhone)] : phones,
+      sourceUrls,
+      source: aiPick ? 'web_ai' : (emails.length > 0 || phones.length > 0 || bestWebsite ? 'web' : 'none'),
+    }
+  } catch (error) {
+    console.error('[company-contact-enrichment:search]', {
+      companyName,
+      rutid: rutid ?? null,
+      error: error instanceof Error ? error.message : String(error),
+    })
+
+    return {
+      matchKey,
+      rutid: rutid ?? null,
+      companyName,
+      website: null,
+      emails: [],
+      phones: [],
+      sourceUrls: [],
+      source: 'none',
+    }
   }
 }
 
