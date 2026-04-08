@@ -14,6 +14,7 @@ import {
   type BaseBuilderFieldDefinition,
   type BaseBuilderFieldKey,
   type BaseBuilderMatchMode,
+  type BaseBuilderWebEnrichmentResult,
 } from '@/types/base-builder'
 import {
   cn,
@@ -39,7 +40,7 @@ const COMPANY_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
   'region_canonica',
 ]
 
-const MAX_AUTO_WEB_PASSES = 20
+const MAX_AUTO_WEB_PASSES = 50
 
 type AnalyzeProgress = {
   pass: number
@@ -48,6 +49,16 @@ type AnalyzeProgress = {
   attempted: number
   fromCache: number
   limited: boolean
+}
+
+function emptyProviderMetrics(): NonNullable<BaseBuilderWebEnrichmentResult['providers']> {
+  return {
+    brave: 0,
+    duckduckgo: 0,
+    bing: 0,
+    none: 0,
+    error: 0,
+  }
 }
 
 const CATEGORY_LABELS: Record<BaseBuilderFieldDefinition['category'], string> = {
@@ -381,23 +392,6 @@ export function PoblarBasePage() {
     setAnalyzeProgress(null)
   }
 
-  function updateAnalyzeProgress(nextAnalysis: BaseBuilderAnalysisResult, pass: number) {
-    const web = nextAnalysis.web_enrichment
-    if (!web?.enabled) {
-      setAnalyzeProgress(null)
-      return
-    }
-
-    setAnalyzeProgress({
-      pass,
-      totalCandidates: web.candidates,
-      processed: Math.min(web.candidates, web.from_cache + web.attempted),
-      attempted: web.attempted,
-      fromCache: web.from_cache,
-      limited: web.limited,
-    })
-  }
-
   function toggleField(field: BaseBuilderFieldKey) {
     setExportDone(false)
     setAnalysis(null)
@@ -521,7 +515,7 @@ export function PoblarBasePage() {
             match_mode: selectedMatchMode,
             match_column: selectedMatchColumn,
             company_column: companyColumnForPayload,
-            enrich_missing_contacts_with_web: enrichMissingContactsWithWeb,
+            enrich_missing_contacts_with_web: false,
             selected_fields: selectedFields,
           }),
         })
@@ -546,27 +540,93 @@ export function PoblarBasePage() {
         return payload.data as BaseBuilderAnalysisResult
       }
 
-      let latestAnalysis = await runAnalysisPass()
-      let webPass = 1
-      updateAnalyzeProgress(latestAnalysis, webPass)
+      async function runWebEnrichmentPass() {
+        const res = await fetch('/api/base-builder/web-enrichment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rows: compactRows,
+            match_mode: selectedMatchMode,
+            match_column: selectedMatchColumn,
+            company_column: companyColumnForPayload,
+            selected_fields: selectedFields,
+          }),
+        })
 
-      while (
-        enrichMissingContactsWithWeb &&
-        latestAnalysis.web_enrichment?.enabled &&
-        latestAnalysis.web_enrichment.limited &&
-        webPass < MAX_AUTO_WEB_PASSES
-      ) {
-        webPass += 1
-        const web = latestAnalysis.web_enrichment
-        const processed = web ? Math.min(web.candidates, web.from_cache + web.attempted) : 0
-        const total = web?.candidates ?? 0
-        setAnalyzeStatus(
-          total > 0
-            ? `Enriqueciendo web (${processed}/${total})...`
-            : `Enriqueciendo web (${webPass})...`
-        )
-        latestAnalysis = await runAnalysisPass()
-        updateAnalyzeProgress(latestAnalysis, webPass)
+        const contentType = res.headers.get('content-type') ?? ''
+        const payload = contentType.includes('application/json')
+          ? await res.json()
+          : await res.text()
+
+        if (!res.ok) {
+          const message = typeof payload === 'string'
+            ? payload
+            : payload?.error
+
+          throw new Error(message ?? 'No se pudo ejecutar el enriquecimiento web.')
+        }
+
+        if (typeof payload === 'string') {
+          throw new Error('El servidor devolvió una respuesta inválida al enriquecer en web.')
+        }
+
+        return (payload?.data ?? null) as BaseBuilderWebEnrichmentResult | null
+      }
+
+      let latestAnalysis = await runAnalysisPass()
+      let aggregateWeb: BaseBuilderWebEnrichmentResult | undefined
+
+      if (enrichMissingContactsWithWeb && contactFieldSelected) {
+        let webPass = 0
+
+        while (webPass < MAX_AUTO_WEB_PASSES) {
+          webPass += 1
+          setAnalyzeStatus(webPass === 1 ? 'Enriqueciendo web...' : `Enriqueciendo web (pasada ${webPass})...`)
+
+          const webPassResult = await runWebEnrichmentPass()
+          if (!webPassResult?.enabled) break
+
+          aggregateWeb = aggregateWeb
+            ? {
+                ...aggregateWeb,
+                candidates: Math.max(aggregateWeb.candidates, webPassResult.candidates),
+                attempted: aggregateWeb.attempted + webPassResult.attempted,
+                from_cache: Math.max(aggregateWeb.from_cache, webPassResult.from_cache),
+                limited: webPassResult.limited,
+                without_result: aggregateWeb.without_result + webPassResult.without_result,
+                email_found: aggregateWeb.email_found + webPassResult.email_found,
+                phone_found: aggregateWeb.phone_found + webPassResult.phone_found,
+                providers: {
+                  brave: (aggregateWeb.providers?.brave ?? 0) + (webPassResult.providers?.brave ?? 0),
+                  duckduckgo: (aggregateWeb.providers?.duckduckgo ?? 0) + (webPassResult.providers?.duckduckgo ?? 0),
+                  bing: (aggregateWeb.providers?.bing ?? 0) + (webPassResult.providers?.bing ?? 0),
+                  none: (aggregateWeb.providers?.none ?? 0) + (webPassResult.providers?.none ?? 0),
+                  error: (aggregateWeb.providers?.error ?? 0) + (webPassResult.providers?.error ?? 0),
+                },
+              }
+            : {
+                ...webPassResult,
+                providers: webPassResult.providers ?? emptyProviderMetrics(),
+              }
+
+          setAnalyzeProgress({
+            pass: webPass,
+            totalCandidates: aggregateWeb.candidates,
+            processed: Math.min(
+              aggregateWeb.candidates,
+              aggregateWeb.attempted + aggregateWeb.from_cache
+            ),
+            attempted: webPassResult.attempted,
+            fromCache: aggregateWeb.from_cache,
+            limited: webPassResult.limited,
+          })
+
+          latestAnalysis = await runAnalysisPass()
+
+          if (!webPassResult.limited || webPassResult.attempted === 0) {
+            break
+          }
+        }
       }
 
       const mergedRows = parsedUpload.rows.map((row, index) => ({
@@ -576,6 +636,7 @@ export function PoblarBasePage() {
 
       setAnalysis({
         ...latestAnalysis,
+        web_enrichment: aggregateWeb,
         rows: mergedRows,
         original_columns: parsedUpload.headers,
         match_mode: selectedMatchMode,

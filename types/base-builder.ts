@@ -84,6 +84,8 @@ export interface BaseBuilderAnalysisResult {
   rows: BaseBuilderExportRow[]
 }
 
+export type BaseBuilderWebEnrichmentResult = NonNullable<BaseBuilderAnalysisResult['web_enrichment']>
+
 export const BASE_BUILDER_FIELDS: BaseBuilderFieldDefinition[] = [
   {
     key: 'nombre_completo',

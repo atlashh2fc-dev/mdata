@@ -10,6 +10,7 @@ import type {
   BaseBuilderExportRow,
   BaseBuilderFieldKey,
   BaseBuilderMatchMode,
+  BaseBuilderWebEnrichmentResult,
 } from '@/types/base-builder'
 import type { PersonaView } from '@/types'
 import { BASE_BUILDER_FIELDS } from '@/types/base-builder'
@@ -654,4 +655,116 @@ export async function analyzeRowsForBaseBuilder(
     } : undefined,
     rows: exportRows,
   }
+}
+
+function buildWebEnrichmentSummary(
+  webEnrichment: Awaited<ReturnType<typeof enrichCompanyContacts>> | null
+): BaseBuilderWebEnrichmentResult {
+  const items = [...(webEnrichment?.items.values() ?? [])]
+
+  return {
+    enabled: true,
+    candidates: webEnrichment?.candidates ?? 0,
+    attempted: webEnrichment?.attempted ?? 0,
+    from_cache: webEnrichment?.fromCache ?? 0,
+    limited: webEnrichment?.limited ?? false,
+    without_result: webEnrichment?.withoutResult ?? 0,
+    email_found: items.filter(item => item.emails.length > 0).length,
+    phone_found: items.filter(item => item.phones.length > 0).length,
+    providers: webEnrichment?.providers,
+  }
+}
+
+export async function enrichRowsForBaseBuilderWeb(
+  sourceRows: Record<string, string>[],
+  matchColumn: string,
+  companyColumn: string | null,
+  requestedFields: string[],
+  matchMode: BaseBuilderMatchMode = 'rut'
+): Promise<BaseBuilderWebEnrichmentResult | undefined> {
+  const selectedFields = sanitizeSelectedFields(requestedFields)
+  const shouldEnrichContacts =
+    selectedFields.includes('email') || selectedFields.includes('fono_cel')
+
+  if (!shouldEnrichContacts || sourceRows.length === 0) {
+    return undefined
+  }
+
+  if (matchMode === 'razon_social') {
+    const preparedEntries = sourceRows.map(row => {
+      const raw = String(row[matchColumn] ?? '').trim()
+      const normalized = normalizeCompanyName(raw)
+
+      return {
+        raw,
+        normalized,
+        isValid: normalized.length > 0,
+      }
+    })
+
+    const validEntries = preparedEntries.filter(entry => entry.isValid)
+    const uniqueValidNames = [...new Set(validEntries.map(entry => entry.normalized))]
+    const companyMap = await fetchCompanyMatches(uniqueValidNames)
+    const uniqueMatchedRutIds = new Set<string>()
+
+    for (const name of uniqueValidNames) {
+      const rutIds = companyMap.get(name)
+      if (rutIds?.size === 1) {
+        uniqueMatchedRutIds.add([...rutIds][0])
+      }
+    }
+
+    const rowsByRut = await fetchMasterRowsByRutIds([...uniqueMatchedRutIds], selectedFields)
+    const companiesNeedingWeb = preparedEntries.flatMap(entry => {
+      const rutIds = companyMap.get(entry.normalized)
+      if (!entry.isValid || !rutIds || rutIds.size !== 1) return []
+
+      const matchedRutId = [...rutIds][0]
+      const matchedRow = rowsByRut.get(matchedRutId)
+      const needsEmail = selectedFields.includes('email') && !isPresent(getFieldValue(matchedRow, 'email'))
+      const needsPhone = selectedFields.includes('fono_cel') && !isPresent(getFieldValue(matchedRow, 'fono_cel'))
+
+      return needsEmail || needsPhone
+        ? [{ companyName: entry.raw, rutid: matchedRutId }]
+        : []
+    })
+
+    return buildWebEnrichmentSummary(await enrichCompanyContacts(companiesNeedingWeb))
+  }
+
+  const preparedEntries = sourceRows.map(row => {
+    const resolvedRut = resolveRutFromRow(row, matchColumn)
+    const sourceCompanyName = companyColumn
+      ? String(row[companyColumn] ?? '').trim()
+      : ''
+
+    return {
+      sourceCompanyName,
+      ...resolvedRut,
+    }
+  })
+
+  const validEntries = preparedEntries.filter(entry => entry.isValid && entry.paddedRut)
+  const uniqueValidRuts = [...new Set(validEntries.map(entry => entry.paddedRut as string))]
+  const rowsByRut = await fetchMasterRowsByRutIds(uniqueValidRuts, selectedFields)
+  const companiesNeedingWeb = preparedEntries.flatMap(entry => {
+    if (!entry.paddedRut || !entry.isValid) return []
+
+    const matchedRow = rowsByRut.get(entry.paddedRut)
+    const companyName = String(
+      matchedRow?.razon_social_empresa ??
+      entry.sourceCompanyName
+    ).trim()
+
+    if (!companyName) return []
+
+    const needsEmail = selectedFields.includes('email') && !isPresent(getFieldValue(matchedRow, 'email'))
+    const needsPhone = selectedFields.includes('fono_cel') && !isPresent(getFieldValue(matchedRow, 'fono_cel'))
+
+    return needsEmail || needsPhone
+      ? [{ companyName, rutid: matchedRow?.rutid ?? entry.paddedRut }]
+      : []
+  })
+
+  return buildWebEnrichmentSummary(await enrichCompanyContacts(companiesNeedingWeb))
 }
