@@ -126,10 +126,10 @@ async function fetchCompanyNameMap(): Promise<Map<string, Set<string>>> {
   for (let from = 0; ; from += COMPANY_BATCH_SIZE) {
     const to = from + COMPANY_BATCH_SIZE - 1
     const { data, error } = await db
-      .from('empresa_resumen')
-      .select('id,rutid,razon_social_empresa')
+      .from('master_personas_view')
+      .select('rutid,razon_social_empresa')
       .not('razon_social_empresa', 'is', null)
-      .order('id', { ascending: true })
+      .order('rutid', { ascending: true })
       .range(from, to)
 
     if (error) {
