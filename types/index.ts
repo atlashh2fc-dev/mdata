@@ -78,8 +78,262 @@ export interface PersonaView {
   tiene_bienes_raices: boolean
   score_patrimonial: number
   cobertura_pct: number
+  region_canonica?: string | null
+  comuna_canonica?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface CommercialDashboardSnapshot {
+  total_personas_scored: number
+  personas_with_feedback: number
+  personas_contacted_30d: number
+  personas_high_priority: number
+  personas_high_purchase_propensity: number
+  personas_high_contactability: number
+  personas_contact_now: number
+  personas_callback_pending: number
+  personas_in_cooldown: number
+  avg_contactability_score: number
+  avg_purchase_propensity_score: number
+  avg_priority_score: number
+  total_sales_events: number
+  total_sales_amount: number
+  last_feedback_sync_at: string | null
+  refreshed_at: string
+}
+
+export interface CommercialScoreSnapshot {
+  rutid: string
+  nombre_completo: string | null
+  region_canonica: string | null
+  comuna_canonica: string | null
+  best_phone: string | null
+  best_email: string | null
+  contactability_score: number
+  purchase_propensity_score: number
+  priority_score: number
+  recommended_channel: string
+  recommended_hour: number
+  next_best_action: string
+  total_interactions: number
+  interactions_30d: number
+  interactions_90d: number
+  effective_contacts_total: number
+  no_contact_total: number
+  callbacks_total: number
+  sales_total: number
+  sales_amount_total: number
+  last_contact_at: string | null
+  score_signals: {
+    strengths?: string[]
+    risks?: string[]
+  } | null
+  refreshed_at: string
+}
+
+export interface ContactCenterFeedbackItem {
+  id: string
+  gestion_at: string
+  channel: string | null
+  outcome: string | null
+  outcome_subtype: string | null
+  outcome_group: string | null
+  contact_effective: boolean
+  callback_requested: boolean
+  mail_opened: boolean
+  clicked: boolean
+  replied: boolean
+  sale: boolean
+  sale_amount: number | null
+  duration_seconds: number | null
+  agent_name: string | null
+  campaign_name: string | null
+  phone_raw: string | null
+  email_raw: string | null
+  is_best_management: boolean
+  is_high_intent: boolean
+}
+
+export interface PersonaContactPoint {
+  rutid: string
+  contact_type: 'phone' | 'email'
+  normalized_value: string
+  display_value: string
+  last_seen_at: string | null
+  usage_count: number
+  successful_interactions: number
+  from_master: boolean
+  rank_in_type: number
+}
+
+export interface ContactCenterFeedback {
+  id: string
+  source_system: string
+  source_event_id: string
+  source_table?: string | null
+  source_record_updated_at?: string | null
+  sync_run_id?: string | null
+  rutid?: string | null
+  phone?: string | null
+  normalized_phone?: string | null
+  email?: string | null
+  normalized_email?: string | null
+  channel: string
+  direction: string
+  event_at: string
+  outcome: string
+  outcome_subtype?: string | null
+  contact_status?: string | null
+  is_contact: boolean
+  is_effective_contact: boolean
+  is_interested: boolean
+  callback_requested: boolean
+  sale_closed: boolean
+  mail_opened: boolean
+  mail_clicked: boolean
+  response_received: boolean
+  is_best_management: boolean
+  duration_seconds?: number | null
+  agent_id?: string | null
+  agent_name?: string | null
+  campaign_id?: string | null
+  campaign_name?: string | null
+  offer_name?: string | null
+  rejection_reason?: string | null
+  monetary_value?: number | null
+  management_score?: number | null
+  notes?: string | null
+  raw_payload: Record<string, unknown>
+  derived_signals: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface PersonaFeedbackFeatures {
+  rutid: string
+  total_feedback_events: number
+  contact_attempts: number
+  effective_contacts: number
+  positive_outcomes: number
+  negative_outcomes: number
+  callback_requests: number
+  interested_events: number
+  sales_events: number
+  email_open_events: number
+  email_click_events: number
+  response_events: number
+  best_management_events: number
+  unique_channels: number
+  unique_agents: number
+  unique_campaigns: number
+  unique_phones_contacted: number
+  unique_emails_contacted: number
+  avg_duration_seconds?: number | null
+  total_monetary_value: number
+  contact_rate: number
+  effective_contact_rate: number
+  purchase_rate: number
+  email_open_rate: number
+  email_click_rate: number
+  response_rate: number
+  callback_rate: number
+  negative_rate: number
+  best_channel?: string | null
+  best_hour_local?: number | null
+  best_phone?: string | null
+  best_email?: string | null
+  last_event_at?: string | null
+  last_contact_at?: string | null
+  last_effective_contact_at?: string | null
+  last_positive_event_at?: string | null
+  last_sale_at?: string | null
+  last_negative_event_at?: string | null
+  channel_breakdown: Record<string, unknown>
+  outcome_breakdown: Record<string, unknown>
+  top_signals: string[]
+  updated_at: string
+}
+
+export interface PersonaScore {
+  rutid: string
+  contactability_score: number
+  purchase_propensity_score: number
+  commercial_priority_score: number
+  priority_tier: string
+  best_channel?: string | null
+  best_hour_local?: number | null
+  best_phone?: string | null
+  best_email?: string | null
+  recommended_action: string
+  recommended_strategy: Record<string, unknown>
+  score_inputs: Record<string, unknown>
+  score_signals: string[]
+  explanation: Record<string, unknown>
+  model_type: string
+  model_version: string
+  last_scored_at: string
+  updated_at: string
+}
+
+export interface PersonaIntelligence extends PersonaView {
+  contactability_score: number
+  purchase_propensity_score: number
+  commercial_priority_score: number
+  priority_tier: string
+  best_channel?: string | null
+  best_hour_local?: number | null
+  best_phone?: string | null
+  best_email?: string | null
+  recommended_action?: string | null
+  recommended_strategy?: Record<string, unknown> | null
+  score_inputs?: Record<string, unknown> | null
+  score_signals?: string[] | null
+  explanation?: Record<string, unknown> | null
+  model_type?: string | null
+  model_version?: string | null
+  last_scored_at?: string | null
+  total_feedback_events: number
+  contact_attempts: number
+  effective_contacts: number
+  sales_events: number
+  email_open_events: number
+  email_click_events: number
+  callback_requests: number
+  contact_rate?: number | null
+  effective_contact_rate?: number | null
+  purchase_rate?: number | null
+  email_open_rate?: number | null
+  email_click_rate?: number | null
+  response_rate?: number | null
+  callback_rate?: number | null
+  negative_rate?: number | null
+  learned_best_channel?: string | null
+  learned_best_hour_local?: number | null
+  learned_best_phone?: string | null
+  learned_best_email?: string | null
+  last_event_at?: string | null
+  last_contact_at?: string | null
+  last_effective_contact_at?: string | null
+  last_positive_event_at?: string | null
+  last_sale_at?: string | null
+  last_negative_event_at?: string | null
+  channel_breakdown?: Record<string, unknown> | null
+  outcome_breakdown?: Record<string, unknown> | null
+  top_signals?: string[] | null
+}
+
+export interface IntelligenceDashboardStats {
+  scored_personas: number
+  personas_with_feedback: number
+  avg_contactability_score: number
+  avg_purchase_propensity_score: number
+  avg_priority_score: number
+  p1_count: number
+  p2_count: number
+  p3_count: number
+  p4_count: number
+  generated_at: string
 }
 
 // ============================================================
@@ -462,4 +716,191 @@ export const TARGET_COLUMNS: Record<string, { column: string; label: string }[]>
     { column: 'n_bienes_raices', label: 'N° bienes raíces' },
     { column: 'totalavaluos', label: 'Total avalúos' },
   ],
+}
+
+// ============================================================
+// COMMERCIAL INTELLIGENCE TYPES
+// ============================================================
+
+export type FeedbackChannel =
+  | 'phone'
+  | 'email'
+  | 'whatsapp'
+  | 'sms'
+  | 'bot'
+  | 'web'
+  | 'in_person'
+  | 'other'
+
+export type FeedbackOutcome =
+  | 'contacted'
+  | 'no_contact'
+  | 'interested'
+  | 'callback'
+  | 'rejected'
+  | 'sale'
+  | 'opened'
+  | 'clicked'
+  | 'bounced'
+  | 'do_not_contact'
+  | 'unknown'
+
+export interface ContactCenterFeedbackInput {
+  id?: string
+  external_source?: string
+  external_event_id?: string
+  external_record_type?: string
+  rutid?: string | null
+  matched_rutid?: string | null
+  match_method?: string | null
+  contact_phone?: string | null
+  telefono?: string | null
+  contact_email?: string | null
+  email?: string | null
+  channel?: FeedbackChannel
+  managed_at?: string | Date | null
+  fecha_gestion?: string | Date | null
+  created_at?: string | Date | null
+  outcome?: FeedbackOutcome
+  outcome_subtype?: string | null
+  outcome_reason?: string | null
+  motivo_rechazo?: string | null
+  direction?: string | null
+  duration_seconds?: number | null
+  duracion?: number | null
+  talk_seconds?: number | null
+  wait_seconds?: number | null
+  agent_id?: string | null
+  agent_name?: string | null
+  agente?: string | null
+  campaign_id?: string | null
+  campaign_name?: string | null
+  campana?: string | null
+  opened_at?: string | Date | null
+  clicked_at?: string | Date | null
+  callback_at?: string | Date | null
+  responded_at?: string | Date | null
+  sold_at?: string | Date | null
+  value_amount?: number | null
+  monto?: number | null
+  mail_opened?: boolean | number | string | null
+  clicked?: boolean | number | string | null
+  callback_requested?: boolean | number | string | null
+  callback?: boolean | number | string | null
+  interested?: boolean | number | string | null
+  contacted?: boolean | number | string | null
+  effective_contact?: boolean | number | string | null
+  sale?: boolean | number | string | null
+  venta?: boolean | number | string | null
+  is_best_management?: boolean | number | string | null
+  raw_payload?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
+export interface PersonaFeedbackEvent {
+  id: string
+  external_source: string
+  external_event_id: string
+  rutid: string | null
+  matched_rutid: string | null
+  contact_phone: string | null
+  contact_email: string | null
+  channel: FeedbackChannel
+  managed_at: string
+  outcome: FeedbackOutcome
+  outcome_subtype: string | null
+  outcome_reason: string | null
+  duration_seconds: number | null
+  agent_name: string | null
+  campaign_name: string | null
+  mail_opened: boolean
+  clicked: boolean
+  callback_requested: boolean
+  interested: boolean
+  effective_contact: boolean
+  sale: boolean
+  is_best_management: boolean
+  value_amount: number | null
+  raw_payload: Record<string, unknown>
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface PersonaScoreCard {
+  rutid: string
+  contactability_score: number
+  purchase_propensity_score: number
+  priority_score: number
+  best_channel: FeedbackChannel
+  best_contact_hour: number | null
+  best_phone: string | null
+  best_email: string | null
+  next_best_action: string
+  action_priority: string
+  should_contact: boolean
+  total_interactions: number
+  effective_contacts: number
+  no_contact_events: number
+  interest_events: number
+  callback_events: number
+  sales_events: number
+  opened_events: number
+  clicked_events: number
+  best_management_events: number
+  known_phone_count: number
+  known_email_count: number
+  last_contact_at: string | null
+  last_sale_at: string | null
+  last_feedback_at: string | null
+  feedback_coverage: boolean
+  signal_summary: Record<string, unknown>
+  updated_at: string
+}
+
+export interface ContactPoint {
+  id: string
+  rutid: string
+  contact_type: 'phone' | 'email'
+  contact_value: string
+  normalized_value: string
+  source_name: string
+  source_priority: number
+  quality_score: number
+  is_primary: boolean
+  is_verified: boolean
+  is_deliverable: boolean | null
+  first_seen_at: string
+  last_seen_at: string
+  last_feedback_at: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface PersonaCommercialIntelligence {
+  persona: PersonaView
+  score: PersonaScoreCard | null
+  history: PersonaFeedbackEvent[]
+  contact_points: ContactPoint[]
+}
+
+export interface CommercialOverview {
+  total_scored_personas: number
+  with_feedback: number
+  high_priority_personas: number
+  recommended_phone: number
+  recommended_email: number
+  avg_contactability_score: number
+  avg_purchase_propensity_score: number
+  avg_priority_score: number
+  last_score_refresh: string | null
+  last_feedback_sync: string | null
+  top_opportunities: PersonaScoreCard[]
+  recent_syncs: Record<string, unknown>[]
+}
+
+export interface ContactCenterIngestionResult {
+  inserted: number
+  affected_ruts: number
+  refreshed_scores: number
+  sync_run_id: string | null
 }

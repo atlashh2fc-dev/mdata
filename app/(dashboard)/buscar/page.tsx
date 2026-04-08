@@ -6,6 +6,7 @@ import { Header } from '@/components/layout/Header'
 import { SearchBar } from '@/components/personas/SearchBar'
 import { PersonasTable } from '@/components/personas/PersonasTable'
 import { PersonaProfile } from '@/components/personas/PersonaProfile'
+import { CommercialIntelligencePanel } from '@/components/commercial/CommercialIntelligencePanel'
 import { LoadingState } from '@/components/ui/Spinner'
 import type { PersonaView, PaginatedResponse } from '@/types'
 import { validateRut } from '@/lib/utils/rut'
@@ -249,7 +250,10 @@ export default function BuscarPage() {
 
         {/* Perfil 360 */}
         {!loading && singleProfile && (
-          <PersonaProfile persona={singleProfile} />
+          <div className="space-y-4">
+            <PersonaProfile persona={singleProfile} />
+            <CommercialIntelligencePanel rut={singleProfile.rutid} />
+          </div>
         )}
 
         {/* Tabla de resultados */}

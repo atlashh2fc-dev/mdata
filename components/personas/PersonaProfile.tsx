@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { formatNumber, formatCurrency, formatRut } from '@/lib/utils/formatters'
 import { formatRut as fmtRut } from '@/lib/utils/rut'
+import { CommercialIntelligencePanel } from '@/components/commercial/CommercialIntelligencePanel'
 
 // Re-export since formatters.ts has formatRut too
 function safeDisplayRut(rut: string | null | undefined): string {
@@ -227,6 +228,8 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
           </div>
         </div>
       </div>
+
+      <CommercialIntelligencePanel rut={persona.rutid} />
 
       {/* Raw Data Toggle */}
       <div className="card overflow-hidden">
