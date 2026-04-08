@@ -139,6 +139,19 @@ function shouldAutoMarkRut(col: DetectedColumn): boolean {
   return false
 }
 
+function getMappedFieldLabels(mappings: ColumnMappingDraft[]): string[] {
+  const labels = mappings
+    .filter(mapping => mapping.target_table && mapping.target_column)
+    .map(mapping => {
+      const target = TARGET_COLUMNS[mapping.target_table!]?.find(
+        column => column.column === mapping.target_column
+      )
+      return target?.label ?? mapping.target_column!
+    })
+
+  return [...new Set(labels)]
+}
+
 // ============================================================
 // COLUMN MAPPING ROW
 // ============================================================
@@ -261,7 +274,14 @@ export default function IngestaPage() {
   const [currentJob, setCurrentJob] = useState<IngestionJob | null>(null)
   const [processing, setProcessing] = useState(false)
   const [processLogs, setProcessLogs] = useState<string[]>([])
-  const [mergeResult, setMergeResult] = useState<{merged: number; created: number} | null>(null)
+  const [mergeResult, setMergeResult] = useState<{
+    total: number
+    valid: number
+    invalid: number
+    merged: number
+    created: number
+    mappedFields: string[]
+  } | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -378,7 +398,14 @@ export default function IngestaPage() {
       body: JSON.stringify({ action: 'merge', job_id: job.id }),
     })
     const mergeJson = await mergeRes.json()
-    setMergeResult({ merged: mergeJson.merged, created: mergeJson.created })
+    setMergeResult({
+      total: parsedRows.length,
+      valid: stagingJson.valid ?? 0,
+      invalid: stagingJson.invalid ?? 0,
+      merged: mergeJson.merged ?? 0,
+      created: mergeJson.created ?? 0,
+      mappedFields: getMappedFieldLabels(mappings),
+    })
     addProcessLog(`Merge: ${mergeJson.created} nuevos, ${mergeJson.merged} actualizados`)
     addProcessLog('✓ Proceso completado exitosamente')
 
@@ -771,22 +798,66 @@ export default function IngestaPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-white">Ingesta completada</h3>
-                    <p className="text-sm text-slate-400 mt-1">Los datos han sido procesados y mergeados</p>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Aquí tienes el resumen real del cruce y de los campos enviados.
+                    </p>
                   </div>
 
                   {mergeResult && (
-                    <div className="grid grid-cols-2 gap-4 max-w-xs mx-auto">
-                      <div className="card p-4 text-center">
-                        <p className="text-2xl font-bold text-brand-400">
-                          {formatNumber(mergeResult.created)}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-1">RUTs nuevos</p>
+                    <div className="space-y-4 max-w-3xl mx-auto">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="card p-4 text-center">
+                          <p className="text-2xl font-bold text-white">
+                            {formatNumber(mergeResult.total)}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">Filas subidas</p>
+                        </div>
+                        <div className="card p-4 text-center">
+                          <p className="text-2xl font-bold text-brand-400">
+                            {formatNumber(mergeResult.valid)}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">RUTs válidos</p>
+                        </div>
+                        <div className="card p-4 text-center">
+                          <p className="text-2xl font-bold text-green-400">
+                            {formatNumber(mergeResult.merged)}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">Cruzaron existente</p>
+                        </div>
+                        <div className="card p-4 text-center">
+                          <p className="text-2xl font-bold text-cyan-400">
+                            {formatNumber(mergeResult.created)}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">RUTs nuevos</p>
+                        </div>
+                        <div className="card p-4 text-center">
+                          <p className="text-2xl font-bold text-amber-400">
+                            {formatNumber(mergeResult.invalid)}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">Inválidos</p>
+                        </div>
                       </div>
-                      <div className="card p-4 text-center">
-                        <p className="text-2xl font-bold text-green-400">
-                          {formatNumber(mergeResult.merged)}
+
+                      <div className="card p-5 text-left">
+                        <p className="text-sm font-semibold text-white mb-2">
+                          Campos mapeados para guardar
                         </p>
-                        <p className="text-xs text-slate-500 mt-1">Actualizados</p>
+                        {mergeResult.mappedFields.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {mergeResult.mappedFields.map(field => (
+                              <span
+                                key={field}
+                                className="badge badge-info text-[11px] px-2 py-1"
+                              >
+                                {field}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400">
+                            No se mapearon campos extra. En esta corrida solo se hizo cruce por RUT.
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
