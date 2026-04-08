@@ -14,7 +14,8 @@ import {
   RefreshCcw,
   Check,
   X,
-  Minus
+  Minus,
+  Info
 } from 'lucide-react'
 import { formatNumber } from '@/lib/utils/formatters'
 
@@ -32,14 +33,31 @@ interface UniverseRow {
 type FilterState = true | false | null
 
 const DIMENSIONS = [
-  { key: 'con_nombre', label: 'Nombre Completado', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-  { key: 'con_fono', label: 'Teléfono Celular', icon: Phone, color: 'text-green-400', bg: 'bg-green-400/10' },
-  { key: 'con_email', label: 'Correo Electrónico', icon: Mail, color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
-  { key: 'con_domicilio', label: 'Domicilio Conocido', icon: Home, color: 'text-orange-400', bg: 'bg-orange-400/10' },
-  { key: 'con_autos', label: 'Tiene Vehículos', icon: Car, color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
-  { key: 'con_bienes_raices', label: 'Bienes Raíces', icon: Building2, color: 'text-indigo-400', bg: 'bg-indigo-400/10' },
-  { key: 'con_empresa', label: 'Dueño de Empresa', icon: Dna, color: 'text-purple-400', bg: 'bg-purple-400/10' },
+  { key: 'con_nombre', label: 'Nombre Completo', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', borderActive: 'border-blue-400', glowActive: 'shadow-[0_0_18px_rgba(96,165,250,0.15)]' },
+  { key: 'con_fono', label: 'Teléfono Celular', icon: Phone, color: 'text-green-400', bg: 'bg-green-400/10', borderActive: 'border-green-400', glowActive: 'shadow-[0_0_18px_rgba(74,222,128,0.15)]' },
+  { key: 'con_email', label: 'Correo Electrónico', icon: Mail, color: 'text-yellow-400', bg: 'bg-yellow-400/10', borderActive: 'border-yellow-400', glowActive: 'shadow-[0_0_18px_rgba(250,204,21,0.15)]' },
+  { key: 'con_domicilio', label: 'Domicilio Conocido', icon: Home, color: 'text-orange-400', bg: 'bg-orange-400/10', borderActive: 'border-orange-400', glowActive: 'shadow-[0_0_18px_rgba(251,146,60,0.15)]' },
+  { key: 'con_autos', label: 'Tiene Vehículos', icon: Car, color: 'text-cyan-400', bg: 'bg-cyan-400/10', borderActive: 'border-cyan-400', glowActive: 'shadow-[0_0_18px_rgba(34,211,238,0.15)]' },
+  { key: 'con_bienes_raices', label: 'Bienes Raíces', icon: Building2, color: 'text-indigo-400', bg: 'bg-indigo-400/10', borderActive: 'border-indigo-400', glowActive: 'shadow-[0_0_18px_rgba(129,140,248,0.15)]' },
+  { key: 'con_empresa', label: 'Dueño de Empresa', icon: Dna, color: 'text-purple-400', bg: 'bg-purple-400/10', borderActive: 'border-purple-400', glowActive: 'shadow-[0_0_18px_rgba(192,132,252,0.15)]' },
 ]
+
+// Render a compact boolean badge for the breakdown table
+function BoolBadge({ val }: { val: boolean }) {
+  return val
+    ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400"><Check className="w-3 h-3" /></span>
+    : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-700/50 text-slate-600"><X className="w-3 h-3" /></span>
+}
+
+const DIM_SHORT: Record<string, string> = {
+  con_nombre: 'Nombre',
+  con_fono: 'Fono',
+  con_email: 'Email',
+  con_domicilio: 'Domic.',
+  con_autos: 'Autos',
+  con_bienes_raices: 'B.Raíz',
+  con_empresa: 'Empresa',
+}
 
 export default function UniversosPage() {
   const [data, setData] = useState<UniverseRow[]>([])
@@ -66,10 +84,22 @@ export default function UniversosPage() {
       .catch(() => setLoading(false))
   }, [])
 
+  // Grand total (all rows)
+  const totalBase = useMemo(() => data.reduce((acc, row) => acc + row.total, 0), [data])
+
+  // Individual total per dimension (con_X = true, independiente de otros filtros)
+  const dimTotals = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const dim of DIMENSIONS) {
+      out[dim.key] = data.filter(r => r[dim.key as keyof UniverseRow] === true).reduce((s, r) => s + r.total, 0)
+    }
+    return out
+  }, [data])
+
   // Calculamos el volumen instantáneamente cruzando la matriz precomputada
   const result = useMemo(() => {
     let count = 0
-    let universesCount = 0
+    const matchingRows: UniverseRow[] = []
 
     for (const row of data) {
       let isMatch = true
@@ -81,13 +111,14 @@ export default function UniversosPage() {
       }
       if (isMatch) {
         count += row.total
-        universesCount++
+        matchingRows.push(row)
       }
     }
-    return { count, universesCount }
+    // Sort by total desc
+    matchingRows.sort((a, b) => b.total - a.total)
+    return { count, matchingRows }
   }, [filters, data])
 
-  const totalBase = useMemo(() => data.reduce((acc, row) => acc + row.total, 0), [data])
   const pct = totalBase > 0 ? (result.count / totalBase) * 100 : 0
 
   const toggleFilter = (key: string) => {
@@ -116,20 +147,24 @@ export default function UniversosPage() {
 
   // Active filters count
   const activeCount = Object.values(filters).filter(v => v !== null).length
+  const activeFilters = Object.entries(filters).filter(([, v]) => v !== null)
 
   return (
     <>
       <Header
         title="Explorador de Universos"
-        subtitle="Matriz combinatoria para cruzar volúmenes a la velocidad de la luz"
+        subtitle="Matriz combinatoria — cruce de volúmenes en tiempo real"
       />
 
-      <div className="p-6 h-[calc(100vh-5rem)] flex flex-col xl:flex-row gap-6">
+      <div className="p-6 flex flex-col xl:flex-row gap-6" style={{ minHeight: 'calc(100vh - 5rem)' }}>
         
         {/* COLUMNA IZQUIERDA: CONTROLES */}
         <div className="flex-1 flex flex-col gap-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-300">Dimensiones (Capas de datos)</h3>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-300">Dimensiones de Datos</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">Haz clic para incluir ✓ o excluir ✗ cada dimensión</p>
+            </div>
             <button onClick={resetFilters} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
               <RefreshCcw className="w-3 h-3" />
               Restablecer
@@ -140,77 +175,186 @@ export default function UniversosPage() {
              {DIMENSIONS.map(dim => {
                const state = filters[dim.key]
                const Icon = dim.icon
+               const dimTotal = dimTotals[dim.key] || 0
+               const dimPct = totalBase > 0 ? (dimTotal / totalBase) * 100 : 0
                
                let stateClass = "border-slate-700/50 bg-[#1e293b]/50"
                let StateIcon = Minus
                let stateColor = "text-slate-500"
+               let stateLabel = 'Cualquiera'
                
                if (state === true) {
-                 stateClass = "border-cyan-500 bg-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.1)]"
+                 stateClass = `${dim.borderActive} border bg-[#1e293b]/80 ${dim.glowActive}`
                  StateIcon = Check
-                 stateColor = "text-cyan-400"
+                 stateColor = dim.color
+                 stateLabel = 'Requerido'
                } else if (state === false) {
-                 stateClass = "border-red-500/50 bg-red-500/10"
+                 stateClass = "border-red-500/40 bg-red-950/30"
                  StateIcon = X
                  stateColor = "text-red-400"
+                 stateLabel = 'Excluido'
                }
 
                return (
                  <button
                     key={dim.key}
                     onClick={() => toggleFilter(dim.key)}
-                    className={`p-4 rounded-xl border transition-all duration-200 text-left flex items-start justify-between min-h-[5rem] ${stateClass}`}
+                    className={`p-4 rounded-xl border transition-all duration-200 text-left flex flex-col gap-3 ${stateClass}`}
                  >
-                   <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${dim.bg}`}>
-                        <Icon className={`w-5 h-5 ${dim.color}`} />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-white">{dim.label}</h4>
-                        <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">
-                          {state === null ? 'Cualquiera (On / Off)' : state === true ? 'Requerido en segmento' : 'Excluido del segmento'}
-                        </p>
-                      </div>
+                   <div className="flex items-start justify-between w-full">
+                     <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${dim.bg}`}>
+                          <Icon className={`w-4.5 h-4.5 ${dim.color}`} />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-white leading-tight">{dim.label}</h4>
+                          <p className={`text-[10px] mt-0.5 uppercase tracking-wider font-medium ${stateColor}`}>
+                            {stateLabel}
+                          </p>
+                        </div>
+                     </div>
+                     <div className={`w-5 h-5 rounded-full flex items-center justify-center bg-black/20 border border-white/5 flex-shrink-0 ${stateColor}`}>
+                       <StateIcon className="w-3 h-3" />
+                     </div>
                    </div>
-                   <div className={`w-6 h-6 rounded-full flex items-center justify-center bg-black/20 border border-white/5 ${stateColor}`}>
-                     <StateIcon className="w-3.5 h-3.5" />
+
+                   {/* Individual total + mini progress bar */}
+                   <div className="w-full">
+                     <div className="flex items-center justify-between mb-1">
+                       <span className="text-[10px] text-slate-500">Universo propio</span>
+                       <span className={`text-[11px] font-mono font-semibold ${dim.color}`}>
+                         {loading ? '…' : formatNumber(dimTotal)} ({dimPct.toFixed(1)}%)
+                       </span>
+                     </div>
+                     <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                       <div
+                         className={`h-full rounded-full transition-all duration-500 ${dim.bg.replace('/10', '/60')}`}
+                         style={{ width: `${Math.min(dimPct, 100)}%` }}
+                       />
+                     </div>
                    </div>
                  </button>
                )
              })}
           </div>
+
+          {/* TABLA DE DESGLOSE — muestra exactamente qué filas se están sumando */}
+          {!loading && activeCount > 0 && (
+            <div className="mt-2">
+              <div className="flex items-center gap-2 mb-2">
+                <Info className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-[11px] text-slate-500">
+                  {result.matchingRows.length} combinación{result.matchingRows.length !== 1 ? 'es' : ''} que componen el resultado
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-700/50 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-800/80 border-b border-slate-700/50">
+                        {DIMENSIONS.map(d => (
+                          <th key={d.key} className="px-2 py-2 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                            {DIM_SHORT[d.key]}
+                          </th>
+                        ))}
+                        <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Registros</th>
+                        <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.matchingRows.map((row, i) => (
+                        <tr
+                          key={i}
+                          className={`border-b border-slate-800/50 ${i % 2 === 0 ? 'bg-[#1e293b]/30' : 'bg-transparent'} hover:bg-slate-800/30 transition-colors`}
+                        >
+                          {DIMENSIONS.map(d => (
+                            <td key={d.key} className="px-2 py-2 text-center">
+                              <BoolBadge val={row[d.key as keyof UniverseRow] as boolean} />
+                            </td>
+                          ))}
+                          <td className="px-3 py-2 text-right font-mono font-semibold text-white">
+                            {formatNumber(row.total)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-slate-400 text-[10px]">
+                            {totalBase > 0 ? (row.total / totalBase * 100).toFixed(2) : '0'}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-800/60 border-t border-slate-600/50">
+                        <td colSpan={DIMENSIONS.length} className="px-3 py-2 text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                          Total
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-cyan-400">
+                          {formatNumber(result.count)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-cyan-400 text-[10px]">
+                          {pct.toFixed(2)}%
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* COLUMNA DERECHA: RESULTADO EN VIVO */}
-        <div className="xl:w-[450px] flex flex-col gap-6">
-          <div className="glass-panel flex-1 flex flex-col justify-center items-center text-center p-8 relative overflow-hidden">
+        <div className="xl:w-[400px] flex flex-col gap-4">
+          <div className="glass-panel flex flex-col justify-center items-center text-center p-8 relative overflow-hidden" style={{ minHeight: 320 }}>
              
              {/* Background glow animated */}
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-cyan-500/10 rounded-full blur-[80px] animate-pulse-slow pointer-events-none" />
 
              {loading ? (
-               <LoadingState text="Cargando matriz combinatoria (128 universos)..." />
+               <LoadingState text="Cargando matriz…" />
              ) : (
                <>
-                 <h2 className="text-lg font-bold text-slate-300 mb-2">Universo Resultante</h2>
+                 <h2 className="text-base font-bold text-slate-300 mb-1">Universo Resultante</h2>
+                 <p className="text-[10px] text-slate-500 mb-6">
+                   {activeCount === 0 ? 'Sin filtros: universo total' : `${activeCount} filtro${activeCount > 1 ? 's' : ''} activo${activeCount > 1 ? 's' : ''}`}
+                 </p>
                  
-                 <div className="my-8">
-                   <div className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400 drop-shadow-lg tracking-tight">
+                 <div className="my-4">
+                   <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400 drop-shadow-lg tracking-tight">
                      {formatNumber(result.count)}
                    </div>
                    <p className="text-sm text-cyan-400 font-medium mt-3 bg-cyan-500/10 inline-flex px-4 py-1 rounded-full border border-cyan-500/20">
-                    {pct.toFixed(2)}% del volumen total
+                    {pct.toFixed(2)}% del total
                    </p>
                  </div>
 
-                 <div className="w-full bg-slate-800/50 rounded-xl p-4 mt-auto border border-white/5">
-                   <div className="flex justify-between items-center text-xs text-slate-400 mb-2">
-                     <span>Combinaciones agregadas:</span>
-                     <span className="font-mono text-cyan-400">{result.universesCount} de 128</span>
+                 {/* Filtros activos */}
+                 {activeCount > 0 && (
+                   <div className="w-full bg-slate-800/50 rounded-xl p-3 mt-4 border border-white/5 text-left">
+                     <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Filtros aplicados</p>
+                     <div className="flex flex-wrap gap-1.5">
+                       {activeFilters.map(([key, val]) => {
+                         const dim = DIMENSIONS.find(d => d.key === key)
+                         return (
+                           <span
+                             key={key}
+                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${val === true ? `${dim?.color} border-current bg-current/10` : 'text-red-400 border-red-500/40 bg-red-950/30'}`}
+                           >
+                             {val === true ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
+                             {DIM_SHORT[key]}
+                           </span>
+                         )
+                       })}
+                     </div>
+                   </div>
+                 )}
+
+                 <div className="w-full bg-slate-800/50 rounded-xl p-3 mt-3 border border-white/5">
+                   <div className="flex justify-between items-center text-xs text-slate-400 mb-1.5">
+                     <span>Combinaciones sumadas:</span>
+                     <span className="font-mono text-cyan-400">{result.matchingRows.length} de {data.length}</span>
                    </div>
                    <div className="flex justify-between items-center text-xs text-slate-400">
-                     <span>Filtros activos:</span>
-                     <span className="font-mono text-white">{activeCount} / 7</span>
+                     <span>Base total:</span>
+                     <span className="font-mono text-white">{formatNumber(totalBase)}</span>
                    </div>
                  </div>
                  
@@ -220,6 +364,16 @@ export default function UniversosPage() {
                </>
              )}
           </div>
+
+          {/* Info de contexto */}
+          {!loading && (
+            <div className="glass-panel p-4 text-xs text-slate-400 space-y-2">
+              <p className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">Cómo funciona</p>
+              <p>Cada dimensión muestra su <span className="text-white">universo propio</span>: personas que tienen ese dato, independiente de los demás.</p>
+              <p>Al combinar dos dimensiones, el resultado es la <span className="text-cyan-400">intersección</span> (personas que tienen ambas), por lo que el número puede bajar respecto a cada dimensión individual.</p>
+              <p className="text-slate-500">Gran total: <span className="font-mono text-white">{formatNumber(totalBase)}</span> registros en {data.length} combinaciones únicas.</p>
+            </div>
+          )}
         </div>
 
       </div>
