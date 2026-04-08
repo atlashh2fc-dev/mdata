@@ -31,18 +31,65 @@ export type CompanyContactEnrichment = {
   emails: string[]
   phones: string[]
   sourceUrls: string[]
-  source: 'cache' | 'web' | 'web_ai' | 'none'
+  source: 'cache' | 'web' | 'web_ai' | 'none' | 'error'
+}
+
+type SearchResultItem = {
+  title: string
+  url: string
+  description: string
 }
 
 function uniq(values: string[]): string[] {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }
 
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, '\'')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#x2F;/g, '/')
+}
+
+function stripHtml(value: string): string {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeObfuscatedText(value: string): string {
+  return value
+    .replace(/\s*\[\s*at\s*\]\s*/gi, '@')
+    .replace(/\s*\(\s*at\s*\)\s*/gi, '@')
+    .replace(/\s+arroba\s+/gi, '@')
+    .replace(/\s*\[\s*dot\s*\]\s*/gi, '.')
+    .replace(/\s*\(\s*dot\s*\)\s*/gi, '.')
+    .replace(/\s+punto\s+/gi, '.')
+}
+
 function extractEmails(text: string): string[] {
-  const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []
+  const normalized = normalizeObfuscatedText(text)
+  const matches = normalized.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []
   return uniq(matches)
     .filter(email => !/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(email))
     .slice(0, 10)
+}
+
+function extractEmailsFromHtml(html: string): string[] {
+  const mailtoMatches = [...html.matchAll(/mailto:([^"'?#>\s]+)/gi)]
+    .map(match => decodeHtmlEntities(match[1] ?? ''))
+
+  return uniq([
+    ...mailtoMatches,
+    ...extractEmails(html),
+    ...extractEmails(stripHtml(html)),
+  ]).slice(0, 10)
 }
 
 function normalizePhone(raw: string): string | null {
@@ -60,6 +107,67 @@ function normalizePhone(raw: string): string | null {
 function extractPhones(text: string): string[] {
   const matches = text.match(/(?:\+?56)?[\s().-]*\d(?:[\s().-]*\d){7,10}/g) ?? []
   return uniq(matches.map(match => normalizePhone(match)).filter(Boolean) as string[]).slice(0, 10)
+}
+
+function extractPhonesFromHtml(html: string): string[] {
+  return uniq([
+    ...extractPhones(html),
+    ...extractPhones(stripHtml(html)),
+  ]).slice(0, 10)
+}
+
+function isBlockedDomain(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase()
+    return [
+      'facebook.com',
+      'instagram.com',
+      'linkedin.com',
+      'x.com',
+      'twitter.com',
+      'youtube.com',
+      'tiktok.com',
+      'mercadolibre.cl',
+      'mercadolibre.com',
+      'duckduckgo.com',
+      'bing.com',
+    ].some(domain => host === domain || host.endsWith(`.${domain}`))
+  } catch {
+    return true
+  }
+}
+
+function normalizeSearchUrl(url: string): string | null {
+  const trimmed = decodeHtmlEntities(url).trim()
+  if (!trimmed) return null
+
+  try {
+    const parsed = new URL(trimmed)
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function scoreSearchResult(result: SearchResultItem, companyName: string): number {
+  let score = 0
+  const text = `${result.title} ${result.description}`.toLowerCase()
+  const normalizedCompany = companyName.toLowerCase()
+
+  if (text.includes(normalizedCompany)) score += 6
+  if (/contact|contacto|telefono|email|correo/.test(text)) score += 3
+  if (/oficial|sitio oficial/.test(text)) score += 2
+
+  try {
+    const url = new URL(result.url)
+    const path = url.pathname.toLowerCase()
+    if (path === '/' || path === '') score += 2
+    if (/contact|contacto|empresa|nosotros/.test(path)) score += 2
+  } catch {}
+
+  return score
 }
 
 function scoreEmail(email: string, website: string | null): number {
@@ -88,7 +196,85 @@ function pickBest(values: string[], scorer: (value: string) => number): string |
   return [...values].sort((a, b) => scorer(b) - scorer(a))[0] ?? null
 }
 
-async function fetchPageText(url: string): Promise<string> {
+async function searchWithBing(query: string): Promise<SearchResultItem[]> {
+  const response = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=10&setlang=es-CL`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; RUT-Intelligence/1.0; +https://rut-intelligence.local)',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Bing search failed with status ${response.status}`)
+  }
+
+  const html = await response.text()
+  const matches = [...html.matchAll(/<li class="b_algo"[\s\S]*?<a href="([^"]+)"[\s\S]*?>([\s\S]*?)<\/a>[\s\S]*?(?:<p>([\s\S]*?)<\/p>)?/gi)]
+
+  return matches
+    .map(match => ({
+      url: normalizeSearchUrl(match[1] ?? '') ?? '',
+      title: stripHtml(decodeHtmlEntities(match[2] ?? '')),
+      description: stripHtml(decodeHtmlEntities(match[3] ?? '')),
+    }))
+    .filter(item => item.url && !isBlockedDomain(item.url))
+}
+
+async function searchCompanyResults(companyName: string): Promise<SearchResultItem[]> {
+  const queries = [
+    `"${companyName}" sitio oficial contacto`,
+    `${companyName} contacto email telefono sitio oficial chile`,
+    `"${companyName}" contacto`,
+  ]
+
+  const collected: SearchResultItem[] = []
+  const seen = new Set<string>()
+
+  for (const query of queries) {
+    let results: SearchResultItem[] = []
+
+    try {
+      const ddg = await search(query, { safeSearch: SafeSearchType.OFF })
+      results = ddg.results.map(item => ({
+        title: item.title,
+        url: item.url,
+        description: item.description,
+      }))
+    } catch (error) {
+      console.error('[company-contact-enrichment:duckduckgo]', {
+        companyName,
+        query,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    if (results.length === 0) {
+      try {
+        results = await searchWithBing(query)
+      } catch (error) {
+        console.error('[company-contact-enrichment:bing]', {
+          companyName,
+          query,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    for (const result of results) {
+      const normalizedUrl = normalizeSearchUrl(result.url)
+      if (!normalizedUrl || seen.has(normalizedUrl) || isBlockedDomain(normalizedUrl)) continue
+      seen.add(normalizedUrl)
+      collected.push({ ...result, url: normalizedUrl })
+    }
+
+    if (collected.length >= SEARCH_RESULTS_PER_COMPANY) break
+  }
+
+  return collected
+    .sort((left, right) => scoreSearchResult(right, companyName) - scoreSearchResult(left, companyName))
+    .slice(0, SEARCH_RESULTS_PER_COMPANY)
+}
+
+async function fetchPageHtml(url: string): Promise<string> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8000)
 
@@ -103,18 +289,44 @@ async function fetchPageText(url: string): Promise<string> {
     const contentType = res.headers.get('content-type') ?? ''
     if (!res.ok || !contentType.includes('text/html')) return ''
 
-    const html = await res.text()
-    return html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .slice(0, MAX_FETCH_CHARS)
+    return (await res.text()).slice(0, MAX_FETCH_CHARS * 2)
   } catch {
     return ''
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function buildContactPageCandidates(url: string, html: string): string[] {
+  let base: URL
+
+  try {
+    base = new URL(url)
+  } catch {
+    return []
+  }
+
+  const hrefMatches = [...html.matchAll(/href=["']([^"'#]+)["']/gi)]
+    .map(match => match[1] ?? '')
+
+  const commonPaths = [
+    '/contacto',
+    '/contact',
+    '/contact-us',
+    '/empresa/contacto',
+    '/nosotros',
+  ]
+
+  return uniq([...hrefMatches, ...commonPaths].flatMap(candidate => {
+    try {
+      const resolved = new URL(candidate, base)
+      const path = resolved.pathname.toLowerCase()
+      if (!/contact|contacto|empresa|nosotros/.test(path)) return []
+      return [resolved.toString()]
+    } catch {
+      return []
+    }
+  })).slice(0, FETCH_RESULTS_PER_COMPANY)
 }
 
 async function chooseBestWithAI(
@@ -210,7 +422,9 @@ async function readCache(matchKeys: string[]): Promise<Map<string, CompanyContac
 async function writeCache(items: CompanyContactEnrichment[]) {
   if (!hasSupabaseAdminEnv || items.length === 0) return
 
-  const rows = items.map(item => ({
+  const rows = items
+    .filter(item => item.source !== 'error')
+    .map(item => ({
     match_key: item.matchKey,
     rutid: item.rutid ?? null,
     company_name: item.companyName,
@@ -221,6 +435,8 @@ async function writeCache(items: CompanyContactEnrichment[]) {
     enrichment_status: item.source === 'none' ? 'none' : item.source,
     searched_at: new Date().toISOString(),
   }))
+
+  if (rows.length === 0) return
 
   const { error } = await db
     .from('company_contact_enrichment_cache')
@@ -257,7 +473,6 @@ async function persistIntoMaster(items: CompanyContactEnrichment[]) {
     if (!existing?.fono_cel && bestPhone) payload.fono_cel = bestPhone
     if (!existing?.razon_social_empresa && item.companyName) {
       payload.razon_social_empresa = item.companyName
-      payload.tiene_empresa = true
     }
 
     if (Object.keys(payload).length === 0) continue
@@ -278,9 +493,7 @@ async function enrichOneCompany(
 ): Promise<CompanyContactEnrichment> {
   const matchKey = normalizeCompanyName(companyName)
   try {
-    const searchQuery = `${companyName} contacto telefono email sitio oficial chile`
-    const result = await search(searchQuery, { safeSearch: SafeSearchType.OFF })
-    const topResults = result.results.slice(0, SEARCH_RESULTS_PER_COMPANY)
+    const topResults = await searchCompanyResults(companyName)
 
     const snippets = topResults.map(item => `${item.title}\n${item.url}\n${item.description}`)
     const sourceUrls = uniq(topResults.map(item => item.url)).slice(0, FETCH_RESULTS_PER_COMPANY)
@@ -289,9 +502,20 @@ async function enrichOneCompany(
     let phones = uniq(topResults.flatMap(item => extractPhones(`${item.title} ${item.description}`)))
 
     for (const url of sourceUrls) {
-      const pageText = await fetchPageText(url)
-      emails = uniq([...emails, ...extractEmails(pageText)])
-      phones = uniq([...phones, ...extractPhones(pageText)])
+      const html = await fetchPageHtml(url)
+      if (!html) continue
+
+      emails = uniq([...emails, ...extractEmailsFromHtml(html)])
+      phones = uniq([...phones, ...extractPhonesFromHtml(html)])
+
+      const contactUrls = buildContactPageCandidates(url, html)
+      for (const contactUrl of contactUrls) {
+        const contactHtml = await fetchPageHtml(contactUrl)
+        if (!contactHtml) continue
+
+        emails = uniq([...emails, ...extractEmailsFromHtml(contactHtml)])
+        phones = uniq([...phones, ...extractPhonesFromHtml(contactHtml)])
+      }
     }
 
     const aiPick = await chooseBestWithAI(companyName, {
@@ -336,7 +560,7 @@ async function enrichOneCompany(
       emails: [],
       phones: [],
       sourceUrls: [],
-      source: 'none',
+      source: 'error',
     }
   }
 }
