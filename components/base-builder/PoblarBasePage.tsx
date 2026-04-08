@@ -256,6 +256,9 @@ function exportRowsToCsv(
 ): string {
   const fieldLabelMap = buildFieldLabelMap()
   const enrichedColumns = selectedFields.map(field => fieldLabelMap.get(field) ?? field)
+  const includeEmailSource = rows.some(row => isPresentForExport(row['Fuente Email']))
+  const includePhoneSource = rows.some(row => isPresentForExport(row['Fuente Teléfono']))
+  const includeWebsite = rows.some(row => isPresentForExport(row['Web - Sitio']))
 
   const exportRows = rows.map(row => {
     const record: Record<string, string | number | boolean | null> = {}
@@ -272,10 +275,20 @@ function exportRowsToCsv(
       record[column] = row[column]
     }
 
+    if (includeEmailSource) record['Fuente Email'] = row['Fuente Email']
+    if (includePhoneSource) record['Fuente Teléfono'] = row['Fuente Teléfono']
+    if (includeWebsite) record['Web - Sitio'] = row['Web - Sitio']
+
     return record
   })
 
   return Papa.unparse(exportRows)
+}
+
+function isPresentForExport(value: string | number | boolean | null | undefined): boolean {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim().length > 0
+  return true
 }
 
 function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
@@ -302,6 +315,7 @@ function getCoverageTone(pct: number): string {
 export function PoblarBasePage() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv')
   const [selectedMatchMode, setSelectedMatchMode] = useState<BaseBuilderMatchMode>('rut')
+  const [enrichMissingContactsWithWeb, setEnrichMissingContactsWithWeb] = useState(false)
   const [selectedFields, setSelectedFields] = useState<BaseBuilderFieldKey[]>(DEFAULT_FIELDS)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [parsedUpload, setParsedUpload] = useState<ParsedUpload>({
@@ -321,6 +335,7 @@ export function PoblarBasePage() {
   const fieldLabelMap = useMemo(() => buildFieldLabelMap(), [])
   const previewOriginalColumns = analysis?.original_columns.slice(0, 4) ?? parsedUpload.headers.slice(0, 4)
   const previewEnrichedColumns = selectedFields.map(field => fieldLabelMap.get(field) ?? field)
+  const contactFieldSelected = selectedFields.includes('email') || selectedFields.includes('fono_cel')
   const selectedColumnLooksLikeRut = selectedMatchColumn
     ? looksLikeSupportedRutColumn(selectedMatchColumn, parsedUpload.rows)
     : false
@@ -435,6 +450,7 @@ export function PoblarBasePage() {
           rows: compactRows,
           match_mode: selectedMatchMode,
           match_column: selectedMatchColumn,
+          enrich_missing_contacts_with_web: enrichMissingContactsWithWeb,
           selected_fields: selectedFields,
         }),
       })
@@ -662,6 +678,34 @@ export function PoblarBasePage() {
                 </span>
               </div>
 
+              <div className="mb-4 rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enrichMissingContactsWithWeb}
+                    onChange={event => {
+                      setEnrichMissingContactsWithWeb(event.target.checked)
+                      resetAnalysisState()
+                    }}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-white">
+                      Opcional: buscar mails y teléfonos faltantes en la web
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Usa búsqueda web + IA para intentar encontrar contactos cuando el maestro no los trae.
+                      Guarda cache para próximas corridas y procesa hasta 25 empresas nuevas por corrida.
+                    </p>
+                    {!contactFieldSelected && (
+                      <p className="text-xs text-amber-300 mt-2">
+                        Esta opción solo aplica si seleccionas Email o Teléfono celular.
+                      </p>
+                    )}
+                  </div>
+                </label>
+              </div>
+
               <div className="space-y-4">
                 {(['identidad', 'contacto', 'ubicacion', 'patrimonio', 'actividad'] as const).map(category => (
                   <div key={category}>
@@ -845,6 +889,32 @@ export function PoblarBasePage() {
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {analysis.web_enrichment?.enabled && (
+                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3 text-xs text-slate-400 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span>Web scraping intentado</span>
+                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.attempted)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Resultados desde cache</span>
+                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.from_cache)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Email encontrado en web</span>
+                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.email_found)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Teléfono encontrado en web</span>
+                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.phone_found)}</span>
+                      </div>
+                      {analysis.web_enrichment.limited && (
+                        <p className="text-amber-300 pt-1">
+                          Quedaron empresas nuevas pendientes de búsqueda web para próximas corridas.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

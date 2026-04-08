@@ -2,6 +2,8 @@
 
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import { cleanRut, displayRut, validateRut } from '@/lib/utils/rut'
+import { normalizeCompanyName } from '@/lib/utils/company-match'
+import { enrichCompanyContacts } from '@/lib/services/company-contact-enrichment'
 import type {
   BaseBuilderAnalysisResult,
   BaseBuilderCoverageItem,
@@ -57,35 +59,20 @@ function buildFieldLabelMap() {
   return new Map(BASE_BUILDER_FIELDS.map(field => [field.key, `Maestro - ${field.label}`]))
 }
 
-function normalizeCompanyName(value: string): string {
-  let normalized = String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
+function getFieldValue(row: PersonaSubset | undefined, field: BaseBuilderFieldKey) {
+  const value = row?.[field]
+  return value === undefined ? null : (value as string | number | boolean | null)
+}
 
-  normalized = normalized
-    .replace(/\bSOCIEDAD POR ACCIONES\b/g, ' ')
-    .replace(/\bSOCIEDAD ANONIMA\b/g, ' ')
-    .replace(/\bRESPONSABILIDAD LIMITADA\b/g, ' ')
-    .replace(/&/g, ' Y ')
-    .replace(/[^A-Z0-9]+/g, ' ')
-    .trim()
-
-  const removableSuffixes = new Set([
-    'SPA',
-    'LTDA',
-    'LIMITADA',
-    'SA',
-    'SAS',
-    'EIRL',
-  ])
-
-  const tokens = normalized.split(/\s+/).filter(Boolean)
-  while (tokens.length > 0 && removableSuffixes.has(tokens[tokens.length - 1])) {
-    tokens.pop()
-  }
-
-  return tokens.join(' ').trim()
+function buildWebEnrichmentColumns(
+  row: BaseBuilderExportRow,
+  emailSource: string | null,
+  phoneSource: string | null,
+  website: string | null
+) {
+  row['Fuente Email'] = emailSource
+  row['Fuente Teléfono'] = phoneSource
+  row['Web - Sitio'] = website
 }
 
 async function fetchMasterRowsByRutIds(
@@ -350,7 +337,8 @@ export async function analyzeRowsForBaseBuilder(
   sourceRows: Record<string, string>[],
   matchColumn: string,
   requestedFields: string[],
-  matchMode: BaseBuilderMatchMode = 'rut'
+  matchMode: BaseBuilderMatchMode = 'rut',
+  enrichMissingContactsWithWeb = false
 ): Promise<BaseBuilderAnalysisResult> {
   const selectedFields = sanitizeSelectedFields(requestedFields)
   const fieldLabelMap = buildFieldLabelMap()
@@ -387,6 +375,23 @@ export async function analyzeRowsForBaseBuilder(
     }
 
     const rowsByRut = await fetchMasterRowsByRutIds([...uniqueMatchedRutIds], selectedFields)
+    const shouldEnrichContacts = enrichMissingContactsWithWeb && (
+      selectedFields.includes('email') || selectedFields.includes('fono_cel')
+    )
+    const companiesNeedingWeb = shouldEnrichContacts
+      ? preparedEntries.flatMap(entry => {
+          const rutIds = companyMap.get(entry.normalized)
+          if (!entry.isValid || !rutIds || rutIds.size !== 1) return []
+          const matchedRutId = [...rutIds][0]
+          const matchedRow = rowsByRut.get(matchedRutId)
+          const needsEmail = selectedFields.includes('email') && !isPresent(getFieldValue(matchedRow, 'email'))
+          const needsPhone = selectedFields.includes('fono_cel') && !isPresent(getFieldValue(matchedRow, 'fono_cel'))
+          return needsEmail || needsPhone ? [{ companyName: entry.raw, rutid: matchedRutId }] : []
+        })
+      : []
+    const webEnrichment = shouldEnrichContacts
+      ? await enrichCompanyContacts(companiesNeedingWeb)
+      : null
 
     const exportRows: BaseBuilderExportRow[] = preparedEntries.map(entry => {
       const rutIds = entry.normalized ? companyMap.get(entry.normalized) : undefined
@@ -408,11 +413,30 @@ export async function analyzeRowsForBaseBuilder(
         match_status: matchStatus,
       }
 
+      const webMatch = entry.normalized ? webEnrichment?.items.get(entry.normalized) : null
+      const masterEmail = getFieldValue(matchedRow, 'email')
+      const masterPhone = getFieldValue(matchedRow, 'fono_cel')
+      const webEmail = webMatch?.emails[0] ?? null
+      const webPhone = webMatch?.phones[0] ?? null
+
       for (const field of selectedFields) {
         const label = fieldLabelMap.get(field) ?? field
-        const value = matchedRow?.[field]
+        let value = getFieldValue(matchedRow, field)
+
+        if (field === 'email' && !isPresent(value) && webEmail) value = webEmail
+        if (field === 'fono_cel' && !isPresent(value) && webPhone) value = webPhone
+
         baseRow[label] =
-          value === undefined ? null : (value as string | number | boolean | null)
+          value === undefined ? null : value
+      }
+
+      if (shouldEnrichContacts) {
+        buildWebEnrichmentColumns(
+          baseRow,
+          isPresent(masterEmail) ? 'maestro' : webEmail ? 'web' : null,
+          isPresent(masterPhone) ? 'maestro' : webPhone ? 'web' : null,
+          webMatch?.website ?? null
+        )
       }
 
       return baseRow
@@ -462,6 +486,14 @@ export async function analyzeRowsForBaseBuilder(
       original_columns: originalColumns,
       selected_fields: selectedFields,
       coverage,
+      web_enrichment: shouldEnrichContacts ? {
+        enabled: true,
+        attempted: webEnrichment?.attempted ?? 0,
+        from_cache: webEnrichment?.fromCache ?? 0,
+        limited: webEnrichment?.limited ?? false,
+        email_found: exportRows.filter(row => row['Fuente Email'] === 'web').length,
+        phone_found: exportRows.filter(row => row['Fuente Teléfono'] === 'web').length,
+      } : undefined,
       rows: exportRows,
     }
   }
