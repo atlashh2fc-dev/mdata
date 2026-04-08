@@ -53,6 +53,8 @@ export interface BaseBuilderAnalysisResult {
   matched_count: number
   unmatched_count: number
   match_rate: number
+  rut_column: string | null
+  original_columns: string[]
   selected_fields: BaseBuilderFieldKey[]
   coverage: BaseBuilderCoverageItem[]
   rows: BaseBuilderExportRow[]

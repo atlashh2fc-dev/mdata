@@ -14,6 +14,8 @@ import {
   Zap,
   LogOut,
   BrainCircuit,
+  Target,
+  WandSparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/formatters'
 import { supabaseBrowser } from '@/lib/db/client'
@@ -37,9 +39,11 @@ const NAV_ITEMS = [
   {
     group: 'AI & Análisis',
     items: [
+      { href: '/inteligencia', label: 'Inteligencia Comercial', icon: Target },
       { href: '/ai', label: 'Cerebro de Negocios', icon: BrainCircuit },
       { href: '/universos', label: 'Explorador Universos', icon: Database },
       { href: '/segmentos', label: 'Segmentador Visual', icon: Users },
+      { href: '/poblar', label: 'Poblar Base', icon: WandSparkles },
       { href: '/exportar', label: 'Exportar Base', icon: Download },
     ],
   },
@@ -83,7 +87,9 @@ export function Sidebar() {
             <div className="space-y-0.5">
               {group.items.map(item => {
                 const Icon = item.icon
-                const isActive = pathname.startsWith(item.href)
+                const isActive = item.href === '/poblar'
+                  ? pathname.startsWith('/poblar') || pathname.startsWith('/exportar')
+                  : pathname.startsWith(item.href)
                 return (
                   <Link
                     key={item.href}
