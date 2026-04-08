@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 import { Header } from '@/components/layout/Header'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { LoadingState, EmptyState, Spinner } from '@/components/ui/Spinner'
@@ -38,16 +40,68 @@ const STEPS: { key: WizardStep; label: string }[] = [
 // HELPERS
 // ============================================================
 
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.split('\n').filter(l => l.trim())
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''))
-  return lines.slice(1).map(line => {
-    const values = line.split(',').map(v => v.trim().replace(/^["']|["']$/g, ''))
-    const row: Record<string, string> = {}
-    headers.forEach((h, i) => { row[h] = values[i] ?? '' })
-    return row
+function toSafeHeader(value: string, index: number): string {
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : `columna_${index + 1}`
+}
+
+function ensureUniqueHeaders(headers: string[]): string[] {
+  const seen = new Map<string, number>()
+
+  return headers.map((header, index) => {
+    const base = toSafeHeader(header, index)
+    const currentCount = seen.get(base) ?? 0
+    seen.set(base, currentCount + 1)
+    return currentCount === 0 ? base : `${base}_${currentCount + 1}`
   })
+}
+
+function rowsFromMatrix(matrix: string[][]): Record<string, string>[] {
+  const nonEmptyRows = matrix.filter(row => row.some(cell => String(cell ?? '').trim().length > 0))
+  if (nonEmptyRows.length < 2) return []
+
+  const headers = ensureUniqueHeaders(nonEmptyRows[0].map((cell, index) => toSafeHeader(cell, index)))
+
+  return nonEmptyRows.slice(1).map(row => {
+    const record: Record<string, string> = {}
+    headers.forEach((header, index) => {
+      record[header] = String(row[index] ?? '').trim()
+    })
+    return record
+  })
+}
+
+async function parseTabularFile(file: File): Promise<Record<string, string>[]> {
+  const lowerName = file.name.toLowerCase()
+
+  if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+    const buffer = await file.arrayBuffer()
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const firstSheetName = workbook.SheetNames[0]
+    const firstSheet = workbook.Sheets[firstSheetName]
+
+    if (!firstSheet) return []
+
+    const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(firstSheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+    }).map(row => row.map(cell => String(cell ?? '').trim()))
+
+    return rowsFromMatrix(matrix)
+  }
+
+  const text = await file.text()
+  const parsed = Papa.parse<string[]>(text, {
+    skipEmptyLines: true,
+  })
+
+  if (parsed.errors.length > 0) {
+    throw new Error(parsed.errors[0]?.message ?? 'No se pudo leer el archivo')
+  }
+
+  const matrix = parsed.data.map(row => row.map(cell => String(cell ?? '').trim()))
+  return rowsFromMatrix(matrix)
 }
 
 // ============================================================
@@ -216,8 +270,7 @@ export default function IngestaPage() {
     if (!file) return
     setWizardStep('detect')
 
-    const text = await file.text()
-    const rows = parseCSV(text)
+    const rows = await parseTabularFile(file)
     setParsedRows(rows)
 
     const res = await fetch('/api/ingestion', {
