@@ -66,9 +66,11 @@ export interface BaseBuilderAnalysisResult {
   coverage: BaseBuilderCoverageItem[]
   web_enrichment?: {
     enabled: boolean
+    candidates: number
     attempted: number
     from_cache: number
     limited: boolean
+    without_result: number
     email_found: number
     phone_found: number
   }
