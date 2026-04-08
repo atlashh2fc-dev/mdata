@@ -41,6 +41,15 @@ const COMPANY_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
 
 const MAX_AUTO_WEB_PASSES = 20
 
+type AnalyzeProgress = {
+  pass: number
+  totalCandidates: number | null
+  processed: number
+  attempted: number
+  fromCache: number
+  limited: boolean
+}
+
 const CATEGORY_LABELS: Record<BaseBuilderFieldDefinition['category'], string> = {
   contacto: 'Contacto',
   identidad: 'Identidad',
@@ -339,6 +348,7 @@ export function PoblarBasePage() {
   const [loadingFile, setLoadingFile] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [analyzeStatus, setAnalyzeStatus] = useState<string>('Cruzando...')
+  const [analyzeProgress, setAnalyzeProgress] = useState<AnalyzeProgress | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportDone, setExportDone] = useState(false)
   const [analysis, setAnalysis] = useState<BaseBuilderAnalysisResult | null>(null)
@@ -368,6 +378,24 @@ export function PoblarBasePage() {
     setAnalysis(null)
     setExportDone(false)
     setError(null)
+    setAnalyzeProgress(null)
+  }
+
+  function updateAnalyzeProgress(nextAnalysis: BaseBuilderAnalysisResult, pass: number) {
+    const web = nextAnalysis.web_enrichment
+    if (!web?.enabled) {
+      setAnalyzeProgress(null)
+      return
+    }
+
+    setAnalyzeProgress({
+      pass,
+      totalCandidates: web.candidates,
+      processed: Math.min(web.candidates, web.from_cache + web.attempted),
+      attempted: web.attempted,
+      fromCache: web.from_cache,
+      limited: web.limited,
+    })
   }
 
   function toggleField(field: BaseBuilderFieldKey) {
@@ -444,6 +472,18 @@ export function PoblarBasePage() {
 
     setAnalyzing(true)
     setAnalyzeStatus('Cruzando...')
+    setAnalyzeProgress(
+      enrichMissingContactsWithWeb
+        ? {
+            pass: 0,
+            totalCandidates: null,
+            processed: 0,
+            attempted: 0,
+            fromCache: 0,
+            limited: false,
+          }
+        : null
+    )
     setError(null)
     setExportDone(false)
 
@@ -508,6 +548,7 @@ export function PoblarBasePage() {
 
       let latestAnalysis = await runAnalysisPass()
       let webPass = 1
+      updateAnalyzeProgress(latestAnalysis, webPass)
 
       while (
         enrichMissingContactsWithWeb &&
@@ -516,8 +557,16 @@ export function PoblarBasePage() {
         webPass < MAX_AUTO_WEB_PASSES
       ) {
         webPass += 1
-        setAnalyzeStatus(`Enriqueciendo web (${webPass})...`)
+        const web = latestAnalysis.web_enrichment
+        const processed = web ? Math.min(web.candidates, web.from_cache + web.attempted) : 0
+        const total = web?.candidates ?? 0
+        setAnalyzeStatus(
+          total > 0
+            ? `Enriqueciendo web (${processed}/${total})...`
+            : `Enriqueciendo web (${webPass})...`
+        )
         latestAnalysis = await runAnalysisPass()
+        updateAnalyzeProgress(latestAnalysis, webPass)
       }
 
       const mergedRows = parsedUpload.rows.map((row, index) => ({
@@ -539,6 +588,7 @@ export function PoblarBasePage() {
     } finally {
       setAnalyzing(false)
       setAnalyzeStatus('Cruzando...')
+      setAnalyzeProgress(null)
     }
   }
 
@@ -867,6 +917,50 @@ export function PoblarBasePage() {
                   </>
                 )}
               </button>
+
+              {analyzing && (
+                <div className="rounded-lg border border-[#253357] bg-[#111827] p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-slate-400">Progreso del poblamiento</span>
+                    <span className="text-brand-300 font-medium">{analyzeStatus}</span>
+                  </div>
+
+                  {analyzeProgress && analyzeProgress.totalCandidates !== null ? (
+                    <>
+                      <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                        <span>Empresas web procesadas</span>
+                        <span className="text-slate-200">
+                          {formatNumber(analyzeProgress.processed)} de {formatNumber(analyzeProgress.totalCandidates)}
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[#0b1328] overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-cyan-500 to-brand-500 transition-all"
+                          style={{
+                            width: `${analyzeProgress.totalCandidates > 0
+                              ? Math.max(6, Math.min(100, (analyzeProgress.processed / analyzeProgress.totalCandidates) * 100))
+                              : 100}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3 text-[11px] text-slate-500">
+                        <span>Lote actual: {formatNumber(analyzeProgress.attempted)}</span>
+                        <span>Desde cache: {formatNumber(analyzeProgress.fromCache)}</span>
+                        <span>Pasada: {formatNumber(analyzeProgress.pass)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="h-2 rounded-full bg-[#0b1328] overflow-hidden">
+                        <div className="h-full w-1/3 bg-gradient-to-r from-cyan-500 to-brand-500 animate-pulse" />
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Preparando cruce y estimando empresas candidatas para búsqueda web.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {analysis && (
                 <div className="space-y-3">
