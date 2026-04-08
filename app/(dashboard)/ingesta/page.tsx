@@ -104,6 +104,41 @@ async function parseTabularFile(file: File): Promise<Record<string, string>[]> {
   return rowsFromMatrix(matrix)
 }
 
+function normalizeColumnName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase()
+}
+
+function looksLikeRutDigits(values: string[]): boolean {
+  const sample = values
+    .map(value => String(value ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 20)
+
+  if (sample.length === 0) return false
+
+  const digitLikeCount = sample.filter(value => /^\d{7,8}$/.test(value)).length
+  return digitLikeCount / sample.length >= 0.7
+}
+
+function shouldAutoMarkRut(col: DetectedColumn): boolean {
+  const normalized = normalizeColumnName(col.name)
+
+  if (col.inferred_type === 'rut') return true
+  if (normalized === 'rut' || normalized === 'rutid' || normalized === 'run') {
+    return true
+  }
+
+  if (normalized.includes('rut') && looksLikeRutDigits(col.sample_values)) {
+    return true
+  }
+
+  return false
+}
+
 // ============================================================
 // COLUMN MAPPING ROW
 // ============================================================
@@ -288,7 +323,7 @@ export default function IngestaPage() {
       target_table: null,
       target_column: null,
       transform_fn: null,
-      is_rut_column: col.inferred_type === 'rut',
+      is_rut_column: shouldAutoMarkRut(col),
       sample_values: col.sample_values,
       inferred_type: col.inferred_type,
     })))
@@ -619,7 +654,16 @@ export default function IngestaPage() {
                     <p className="text-sm text-slate-300">
                       Se detectaron <strong className="text-white">{detectedColumns.length}</strong> columnas en{' '}
                       <strong className="text-white">{formatNumber(parsedRows.length)}</strong> filas.
-                      Mapea cada columna a su destino.
+                      Para hacer match solo necesitas confirmar la columna RUT.
+                    </p>
+                  </div>
+
+                  <div className="flex items-start gap-2 p-3 bg-brand-500/10 border border-brand-500/20 rounded-lg">
+                    <Info className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-slate-300">
+                      Marca la columna <strong className="text-white">RUT</strong> y procesa.
+                      <span className="text-slate-400"> Tabla destino, columna destino y transformación son opcionales y solo se usan si quieres guardar datos extra.</span>
+                      <span className="text-slate-400"> Si el archivo viene con columnas separadas <strong className="text-white">RUT</strong> y <strong className="text-white">DV</strong>, se combinarán automáticamente al procesar.</span>
                     </p>
                   </div>
 
@@ -630,9 +674,9 @@ export default function IngestaPage() {
                           <th>Columna origen</th>
                           <th>Muestra</th>
                           <th>RUT?</th>
-                          <th>Tabla destino</th>
-                          <th>Columna destino</th>
-                          <th>Transformación</th>
+                          <th>Tabla destino opcional</th>
+                          <th>Columna destino opcional</th>
+                          <th>Transformación opcional</th>
                         </tr>
                       </thead>
                       <tbody>

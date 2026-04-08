@@ -290,9 +290,10 @@ export async function insertStagingBatch(
     const batch = rows.slice(i, i + batchSize)
 
     const stagingRows = batch.map((row, idx) => {
-      const rawRut = rutMapping ? String(row[rutMapping.source_column] ?? '') : ''
-      const isValidRut = rawRut ? validateRut(rawRut) : false
-      const rutid = isValidRut ? normalizeRut(rawRut) : null
+      const resolvedRut = rutMapping ? resolveRutFromRow(row, rutMapping.source_column) : null
+      const rawRut = resolvedRut?.raw ?? ''
+      const isValidRut = resolvedRut?.isValid ?? false
+      const rutid = resolvedRut?.normalized ?? null
 
       // Aplicar mapeo
       const mappedData: Record<string, unknown> = {}
@@ -339,6 +340,70 @@ function applyTransform(value: string, fn: string): string {
     case 'trim':        return value.trim()
     case 'rut_format':  return normalizeRut(value)
     default:            return value
+  }
+}
+
+function normalizeColumnKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase()
+}
+
+function findDvValue(row: Record<string, string>, rutColumnName: string): string | null {
+  const entries = Object.entries(row)
+  const rutKey = normalizeColumnKey(rutColumnName)
+
+  for (const [key, value] of entries) {
+    const normalizedKey = normalizeColumnKey(key)
+    if (normalizedKey === rutKey) continue
+    if (
+      normalizedKey === 'dv' ||
+      normalizedKey === 'digitoverificador' ||
+      normalizedKey === 'digverificador' ||
+      normalizedKey === 'verificador'
+    ) {
+      const cleaned = String(value ?? '').trim().toUpperCase()
+      if (/^[0-9K]$/i.test(cleaned)) return cleaned
+    }
+  }
+
+  return null
+}
+
+function resolveRutFromRow(
+  row: Record<string, string>,
+  rutColumnName: string
+): { raw: string; normalized: string | null; isValid: boolean } | null {
+  const rawBase = String(row[rutColumnName] ?? '').trim()
+  if (!rawBase) return null
+
+  const directRut = rawBase
+  if (validateRut(directRut)) {
+    return {
+      raw: directRut,
+      normalized: normalizeRut(directRut),
+      isValid: true,
+    }
+  }
+
+  const dv = findDvValue(row, rutColumnName)
+  if (dv) {
+    const combined = `${rawBase}${dv}`
+    if (validateRut(combined)) {
+      return {
+        raw: combined,
+        normalized: normalizeRut(combined),
+        isValid: true,
+      }
+    }
+  }
+
+  return {
+    raw: directRut,
+    normalized: null,
+    isValid: false,
   }
 }
 
