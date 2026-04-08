@@ -13,7 +13,7 @@ import type { PersonaView } from '@/types'
 import { BASE_BUILDER_FIELDS } from '@/types/base-builder'
 
 const BATCH_SIZE = 500
-const COMPANY_BATCH_SIZE = 5000
+const COMPANY_MATCH_BATCH_SIZE = 500
 const VALID_FIELDS = new Set<BaseBuilderFieldKey>(
   BASE_BUILDER_FIELDS.map(field => field.key)
 )
@@ -118,38 +118,38 @@ async function fetchMasterRowsByRutIds(
   return rowsByRut
 }
 
-async function fetchCompanyNameMap(): Promise<Map<string, Set<string>>> {
+async function fetchCompanyMatches(matchKeys: string[]): Promise<Map<string, Set<string>>> {
   const companyMap = new Map<string, Set<string>>()
 
-  if (!hasSupabaseAdminEnv) return companyMap
+  if (!hasSupabaseAdminEnv || matchKeys.length === 0) return companyMap
 
-  for (let from = 0; ; from += COMPANY_BATCH_SIZE) {
-    const to = from + COMPANY_BATCH_SIZE - 1
-    const { data, error } = await db
-      .from('master_personas_view')
-      .select('rutid,razon_social_empresa')
-      .not('razon_social_empresa', 'is', null)
-      .order('rutid', { ascending: true })
-      .range(from, to)
+  for (let i = 0; i < matchKeys.length; i += COMPANY_MATCH_BATCH_SIZE) {
+    const batch = matchKeys.slice(i, i + COMPANY_MATCH_BATCH_SIZE)
+    const { data, error } = await db.rpc('match_company_names', {
+      input_names: batch,
+    })
 
     if (error) {
-      console.error('[fetchCompanyNameMap]', error)
+      console.error('[fetchCompanyMatches]', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      })
       throw new Error('No se pudo consultar la base empresarial.')
     }
 
-    const rows = (data ?? []) as { rutid: string; razon_social_empresa: string | null }[]
-    if (rows.length === 0) break
+    for (const row of (data ?? []) as {
+      match_key: string | null
+      rutid: string | null
+      razon_social_empresa: string | null
+    }[]) {
+      if (!row.match_key || !row.rutid) continue
 
-    for (const row of rows) {
-      const normalized = normalizeCompanyName(row.razon_social_empresa ?? '')
-      if (!normalized || !row.rutid) continue
-
-      const existing = companyMap.get(normalized) ?? new Set<string>()
+      const existing = companyMap.get(row.match_key) ?? new Set<string>()
       existing.add(row.rutid)
-      companyMap.set(normalized, existing)
+      companyMap.set(row.match_key, existing)
     }
-
-    if (rows.length < COMPANY_BATCH_SIZE) break
   }
 
   return companyMap
@@ -376,7 +376,7 @@ export async function analyzeRowsForBaseBuilder(
     const uniqueValidNames = [...new Set(validEntries.map(entry => entry.normalized))]
     const duplicateCount = validInputCount - uniqueValidNames.length
 
-    const companyMap = await fetchCompanyNameMap()
+    const companyMap = await fetchCompanyMatches(uniqueValidNames)
     const uniqueMatchedRutIds = new Set<string>()
 
     for (const name of uniqueValidNames) {
