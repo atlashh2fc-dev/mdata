@@ -6,6 +6,10 @@ import {
 } from '@/lib/services/base-builder'
 import type { BaseBuilderMatchMode } from '@/types/base-builder'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300
+
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient()
   const {
