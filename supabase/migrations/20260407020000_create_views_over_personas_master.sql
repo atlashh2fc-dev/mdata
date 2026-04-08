@@ -78,7 +78,7 @@ SELECT
   COUNT(*) FILTER (WHERE n_autos > 0)                              AS con_autos,
   COALESCE(SUM(n_autos), 0)                                        AS total_autos,
   COUNT(*) FILTER (WHERE razon_social_empresa IS NOT NULL)         AS con_empresa,
-  COUNT(*) FILTER (WHERE domicilio_region IS NOT NULL AND domicilio_region != '') AS con_domicilio,
+  COUNT(*) FILTER (WHERE COALESCE(NULLIF(TRIM(region_part), ''), NULLIF(TRIM(comuna_part), ''), NULLIF(TRIM(domicilio_region), '')) IS NOT NULL) AS con_domicilio,
   COUNT(*) FILTER (WHERE n_bienes_raices > 0)                      AS con_bienes_raices,
   COALESCE(SUM(totalavaluos), 0)                                   AS total_avaluos,
   0::BIGINT                                                         AS jobs_completados,
