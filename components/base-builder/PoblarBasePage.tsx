@@ -431,6 +431,10 @@ export function PoblarBasePage() {
     setExportDone(false)
 
     try {
+      const companyColumnForPayload = selectedMatchMode === 'rut'
+        ? parsedUpload.detectedCompanyColumn
+        : selectedMatchColumn
+
       const compactRows = parsedUpload.rows.map(row => {
         const compactRow: Record<string, string> = {
           [selectedMatchColumn]: String(row[selectedMatchColumn] ?? ''),
@@ -438,6 +442,14 @@ export function PoblarBasePage() {
 
         if (selectedMatchMode === 'rut' && selectedDvColumn) {
           compactRow[selectedDvColumn] = String(row[selectedDvColumn] ?? '')
+        }
+
+        if (
+          companyColumnForPayload &&
+          companyColumnForPayload !== selectedMatchColumn &&
+          companyColumnForPayload !== selectedDvColumn
+        ) {
+          compactRow[companyColumnForPayload] = String(row[companyColumnForPayload] ?? '')
         }
 
         return compactRow
@@ -450,6 +462,7 @@ export function PoblarBasePage() {
           rows: compactRows,
           match_mode: selectedMatchMode,
           match_column: selectedMatchColumn,
+          company_column: companyColumnForPayload,
           enrich_missing_contacts_with_web: enrichMissingContactsWithWeb,
           selected_fields: selectedFields,
         }),
@@ -895,6 +908,14 @@ export function PoblarBasePage() {
                   {analysis.web_enrichment?.enabled && (
                     <div className="rounded-lg border border-[#253357] bg-[#111827] p-3 text-xs text-slate-400 space-y-1">
                       <div className="flex items-center justify-between">
+                        <span>Ejecución web</span>
+                        <span className="text-emerald-300 font-medium">Sí, ejecutada</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Empresas candidatas</span>
+                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.candidates)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
                         <span>Web scraping intentado</span>
                         <span className="text-slate-200">{formatNumber(analysis.web_enrichment.attempted)}</span>
                       </div>
@@ -910,9 +931,25 @@ export function PoblarBasePage() {
                         <span>Teléfono encontrado en web</span>
                         <span className="text-slate-200">{formatNumber(analysis.web_enrichment.phone_found)}</span>
                       </div>
+                      <div className="flex items-center justify-between">
+                        <span>Sin hallazgo usable</span>
+                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.without_result)}</span>
+                      </div>
                       {analysis.web_enrichment.limited && (
                         <p className="text-amber-300 pt-1">
                           Quedaron empresas nuevas pendientes de búsqueda web para próximas corridas.
+                        </p>
+                      )}
+                      {analysis.web_enrichment.candidates === 0 && (
+                        <p className="text-slate-500 pt-1">
+                          Esta corrida no tenía empresas cruzadas con faltantes de contacto para buscar.
+                        </p>
+                      )}
+                      {analysis.web_enrichment.candidates > 0 &&
+                        analysis.web_enrichment.email_found === 0 &&
+                        analysis.web_enrichment.phone_found === 0 && (
+                        <p className="text-slate-500 pt-1">
+                          Sí se ejecutó, pero en esta corrida no encontró mails o teléfonos nuevos utilizables.
                         </p>
                       )}
                     </div>

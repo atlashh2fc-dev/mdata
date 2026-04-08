@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
     : typeof body?.rut_column === 'string'
       ? body.rut_column
       : null
+  const companyColumn = typeof body?.company_column === 'string'
+    ? body.company_column
+    : null
   const enrichMissingContactsWithWeb = body?.enrich_missing_contacts_with_web === true
   const selectedFields = Array.isArray(body?.selected_fields) ? body.selected_fields : []
 
@@ -42,6 +45,7 @@ export async function POST(req: NextRequest) {
       ? await analyzeRowsForBaseBuilder(
           rows,
           matchColumn,
+          companyColumn,
           selectedFields,
           matchMode,
           enrichMissingContactsWithWeb

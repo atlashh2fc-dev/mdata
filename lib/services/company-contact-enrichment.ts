@@ -14,6 +14,7 @@ const ENRICH_CONCURRENCY = 3
 
 type CacheRow = {
   match_key: string
+  rutid: string | null
   company_name: string
   website: string | null
   emails: string[] | null
@@ -182,7 +183,7 @@ async function readCache(matchKeys: string[]): Promise<Map<string, CompanyContac
 
   const { data, error } = await db
     .from('company_contact_enrichment_cache')
-    .select('match_key,company_name,website,emails,phones,source_urls,enrichment_status')
+    .select('match_key,rutid,company_name,website,emails,phones,source_urls,enrichment_status')
     .in('match_key', matchKeys)
 
   if (error) {
@@ -193,6 +194,7 @@ async function readCache(matchKeys: string[]): Promise<Map<string, CompanyContac
   for (const row of (data ?? []) as CacheRow[]) {
     byKey.set(row.match_key, {
       matchKey: row.match_key,
+      rutid: row.rutid,
       companyName: row.company_name,
       website: row.website,
       emails: row.emails ?? [],
@@ -241,7 +243,7 @@ async function persistIntoMaster(items: CompanyContactEnrichment[]) {
 
     const { data: existing, error: readError } = await db
       .from('personas_master')
-      .select('rutid,email,fono_cel')
+      .select('rutid,email,fono_cel,razon_social_empresa')
       .eq('rutid', item.rutid)
       .maybeSingle()
 
@@ -250,9 +252,13 @@ async function persistIntoMaster(items: CompanyContactEnrichment[]) {
       continue
     }
 
-    const payload: Record<string, string> = {}
+    const payload: Record<string, string | boolean> = {}
     if (!existing?.email && bestEmail) payload.email = bestEmail
     if (!existing?.fono_cel && bestPhone) payload.fono_cel = bestPhone
+    if (!existing?.razon_social_empresa && item.companyName) {
+      payload.razon_social_empresa = item.companyName
+      payload.tiene_empresa = true
+    }
 
     if (Object.keys(payload).length === 0) continue
 
@@ -368,11 +374,27 @@ export async function enrichCompanyContacts(
     async item => enrichOneCompany(item.companyName, item.rutid)
   )
 
-  await writeCache(fetched)
-  await persistIntoMaster(fetched)
+  const items = new Map<string, CompanyContactEnrichment>()
 
-  const items = new Map<string, CompanyContactEnrichment>(cached)
-  for (const item of fetched) items.set(item.matchKey, item)
+  for (const company of uniqueCompanies) {
+    const cachedItem = cached.get(company.matchKey)
+    if (!cachedItem) continue
+
+    items.set(company.matchKey, {
+      ...cachedItem,
+      rutid: company.rutid ?? cachedItem.rutid ?? null,
+      companyName: company.companyName || cachedItem.companyName,
+    })
+  }
+
+  for (const item of fetched) {
+    items.set(item.matchKey, item)
+  }
+
+  const resolvedItems = [...items.values()]
+
+  await writeCache(fetched)
+  await persistIntoMaster(resolvedItems)
 
   return {
     items,

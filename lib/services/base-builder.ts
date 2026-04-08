@@ -339,6 +339,7 @@ export async function analyzeRutsForBaseBuilder(
 export async function analyzeRowsForBaseBuilder(
   sourceRows: Record<string, string>[],
   matchColumn: string,
+  companyColumn: string | null,
   requestedFields: string[],
   matchMode: BaseBuilderMatchMode = 'rut',
   enrichMissingContactsWithWeb = false
@@ -505,9 +506,14 @@ export async function analyzeRowsForBaseBuilder(
 
   const preparedEntries = sourceRows.map((row, index) => {
     const resolvedRut = resolveRutFromRow(row, matchColumn)
+    const sourceCompanyName = companyColumn
+      ? String(row[companyColumn] ?? '').trim()
+      : ''
+
     return {
       row,
       rowNumber: index + 1,
+      sourceCompanyName,
       ...resolvedRut,
     }
   })
@@ -515,7 +521,7 @@ export async function analyzeRowsForBaseBuilder(
   const validEntries = preparedEntries.filter(entry => entry.isValid && entry.paddedRut)
   const uniqueValidRuts = [...new Set(validEntries.map(entry => entry.paddedRut as string))]
   const duplicateCount = validEntries.length - uniqueValidRuts.length
-  const rowsByRut = await fetchMasterRowsByRutIds(uniqueValidRuts, selectedFields)
+  let rowsByRut = await fetchMasterRowsByRutIds(uniqueValidRuts, selectedFields)
   const shouldEnrichContacts = enrichMissingContactsWithWeb && (
     selectedFields.includes('email') || selectedFields.includes('fono_cel')
   )
@@ -523,7 +529,10 @@ export async function analyzeRowsForBaseBuilder(
     ? preparedEntries.flatMap(entry => {
         if (!entry.paddedRut || !entry.isValid) return []
         const matchedRow = rowsByRut.get(entry.paddedRut)
-        const companyName = String(matchedRow?.razon_social_empresa ?? '').trim()
+        const companyName = String(
+          matchedRow?.razon_social_empresa ??
+          entry.sourceCompanyName
+        ).trim()
         if (!companyName) return []
 
         const needsEmail = selectedFields.includes('email') && !isPresent(getFieldValue(matchedRow, 'email'))
@@ -538,6 +547,14 @@ export async function analyzeRowsForBaseBuilder(
     ? await enrichCompanyContacts(companiesNeedingWeb)
     : null
 
+  if (
+    shouldEnrichContacts &&
+    companiesNeedingWeb.length > 0 &&
+    ((webEnrichment?.attempted ?? 0) > 0 || (webEnrichment?.fromCache ?? 0) > 0)
+  ) {
+    rowsByRut = await fetchMasterRowsByRutIds(uniqueValidRuts, selectedFields)
+  }
+
   const exportRows: BaseBuilderExportRow[] = preparedEntries.map(entry => {
     const matchedRow = entry.paddedRut ? rowsByRut.get(entry.paddedRut) : undefined
     const baseRow: BaseBuilderExportRow = {
@@ -548,7 +565,9 @@ export async function analyzeRowsForBaseBuilder(
       match_status: entry.isValid ? (matchedRow ? 'matched' : 'not_found') : 'invalid',
     }
 
-    const companyMatchKey = normalizeCompanyName(String(matchedRow?.razon_social_empresa ?? ''))
+    const companyMatchKey = normalizeCompanyName(
+      String(matchedRow?.razon_social_empresa ?? entry.sourceCompanyName ?? '')
+    )
     const webMatch = companyMatchKey ? webEnrichment?.items.get(companyMatchKey) : null
     const masterEmail = getFieldValue(matchedRow, 'email')
     const masterPhone = getFieldValue(matchedRow, 'fono_cel')
