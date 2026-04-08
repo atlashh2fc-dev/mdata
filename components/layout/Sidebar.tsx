@@ -39,7 +39,7 @@ const NAV_ITEMS = [
   {
     group: 'AI & Análisis',
     items: [
-      { href: '/inteligencia', label: 'Inteligencia Comercial', icon: Target },
+      { href: '/inteligencia-comercial', label: 'Inteligencia Comercial', icon: Target },
       { href: '/ai', label: 'Cerebro de Negocios', icon: BrainCircuit },
       { href: '/universos', label: 'Explorador Universos', icon: Database },
       { href: '/segmentos', label: 'Segmentador Visual', icon: Users },
@@ -89,7 +89,9 @@ export function Sidebar() {
                 const Icon = item.icon
                 const isActive = item.href === '/poblar'
                   ? pathname.startsWith('/poblar') || pathname.startsWith('/exportar')
-                  : pathname.startsWith(item.href)
+                  : item.href === '/inteligencia-comercial'
+                    ? pathname.startsWith('/inteligencia-comercial') || pathname.startsWith('/inteligencia')
+                    : pathname.startsWith(item.href)
                 return (
                   <Link
                     key={item.href}

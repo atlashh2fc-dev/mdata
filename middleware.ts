@@ -12,6 +12,9 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/buscar') ||
     pathname.startsWith('/datasets') ||
     pathname.startsWith('/ingesta') ||
+    pathname.startsWith('/inteligencia') ||
+    pathname.startsWith('/inteligencia-comercial') ||
+    pathname.startsWith('/poblar') ||
     pathname.startsWith('/segmentos') ||
     pathname.startsWith('/exportar') ||
     pathname.startsWith('/logs')
