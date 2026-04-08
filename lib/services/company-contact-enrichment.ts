@@ -340,9 +340,11 @@ export async function enrichCompanyContacts(
   companies: { companyName: string; rutid?: string | null }[]
 ): Promise<{
   items: Map<string, CompanyContactEnrichment>
+  candidates: number
   attempted: number
   fromCache: number
   limited: boolean
+  withoutResult: number
 }> {
   const normalizedCompanies = companies
     .map(item => ({
@@ -374,8 +376,12 @@ export async function enrichCompanyContacts(
 
   return {
     items,
+    candidates: uniqueCompanies.length,
     attempted: toProcess.length,
     fromCache: cached.size,
     limited: missing.length > toProcess.length,
+    withoutResult: fetched.filter(
+      item => item.emails.length === 0 && item.phones.length === 0
+    ).length,
   }
 }
