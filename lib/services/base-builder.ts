@@ -83,7 +83,10 @@ async function fetchMasterRowsByRutIds(
 
   if (!hasSupabaseAdminEnv || rutIds.length === 0) return rowsByRut
 
-  const selectColumns = ['rutid', ...selectedFields].join(',')
+  const internalFields = new Set<BaseBuilderFieldKey>(selectedFields)
+  internalFields.add('razon_social_empresa')
+
+  const selectColumns = ['rutid', ...internalFields].join(',')
 
   for (let i = 0; i < rutIds.length; i += BATCH_SIZE) {
     const batch = rutIds.slice(i, i + BATCH_SIZE)
@@ -488,9 +491,11 @@ export async function analyzeRowsForBaseBuilder(
       coverage,
       web_enrichment: shouldEnrichContacts ? {
         enabled: true,
+        candidates: companiesNeedingWeb.length,
         attempted: webEnrichment?.attempted ?? 0,
         from_cache: webEnrichment?.fromCache ?? 0,
         limited: webEnrichment?.limited ?? false,
+        without_result: webEnrichment?.withoutResult ?? 0,
         email_found: exportRows.filter(row => row['Fuente Email'] === 'web').length,
         phone_found: exportRows.filter(row => row['Fuente Teléfono'] === 'web').length,
       } : undefined,
@@ -511,6 +516,27 @@ export async function analyzeRowsForBaseBuilder(
   const uniqueValidRuts = [...new Set(validEntries.map(entry => entry.paddedRut as string))]
   const duplicateCount = validEntries.length - uniqueValidRuts.length
   const rowsByRut = await fetchMasterRowsByRutIds(uniqueValidRuts, selectedFields)
+  const shouldEnrichContacts = enrichMissingContactsWithWeb && (
+    selectedFields.includes('email') || selectedFields.includes('fono_cel')
+  )
+  const companiesNeedingWeb = shouldEnrichContacts
+    ? preparedEntries.flatMap(entry => {
+        if (!entry.paddedRut || !entry.isValid) return []
+        const matchedRow = rowsByRut.get(entry.paddedRut)
+        const companyName = String(matchedRow?.razon_social_empresa ?? '').trim()
+        if (!companyName) return []
+
+        const needsEmail = selectedFields.includes('email') && !isPresent(getFieldValue(matchedRow, 'email'))
+        const needsPhone = selectedFields.includes('fono_cel') && !isPresent(getFieldValue(matchedRow, 'fono_cel'))
+
+        return needsEmail || needsPhone
+          ? [{ companyName, rutid: matchedRow?.rutid ?? entry.paddedRut }]
+          : []
+      })
+    : []
+  const webEnrichment = shouldEnrichContacts
+    ? await enrichCompanyContacts(companiesNeedingWeb)
+    : null
 
   const exportRows: BaseBuilderExportRow[] = preparedEntries.map(entry => {
     const matchedRow = entry.paddedRut ? rowsByRut.get(entry.paddedRut) : undefined
@@ -522,11 +548,31 @@ export async function analyzeRowsForBaseBuilder(
       match_status: entry.isValid ? (matchedRow ? 'matched' : 'not_found') : 'invalid',
     }
 
+    const companyMatchKey = normalizeCompanyName(String(matchedRow?.razon_social_empresa ?? ''))
+    const webMatch = companyMatchKey ? webEnrichment?.items.get(companyMatchKey) : null
+    const masterEmail = getFieldValue(matchedRow, 'email')
+    const masterPhone = getFieldValue(matchedRow, 'fono_cel')
+    const webEmail = webMatch?.emails[0] ?? null
+    const webPhone = webMatch?.phones[0] ?? null
+
     for (const field of selectedFields) {
       const label = fieldLabelMap.get(field) ?? field
-      const value = matchedRow?.[field]
+      let value = getFieldValue(matchedRow, field)
+
+      if (field === 'email' && !isPresent(value) && webEmail) value = webEmail
+      if (field === 'fono_cel' && !isPresent(value) && webPhone) value = webPhone
+
       baseRow[label] =
-        value === undefined ? null : (value as string | number | boolean | null)
+        value === undefined ? null : value
+    }
+
+    if (shouldEnrichContacts) {
+      buildWebEnrichmentColumns(
+        baseRow,
+        isPresent(masterEmail) ? 'maestro' : webEmail ? 'web' : null,
+        isPresent(masterPhone) ? 'maestro' : webPhone ? 'web' : null,
+        webMatch?.website ?? null
+      )
     }
 
     return baseRow
@@ -575,6 +621,16 @@ export async function analyzeRowsForBaseBuilder(
     original_columns: originalColumns,
     selected_fields: selectedFields,
     coverage,
+    web_enrichment: shouldEnrichContacts ? {
+      enabled: true,
+      candidates: companiesNeedingWeb.length,
+      attempted: webEnrichment?.attempted ?? 0,
+      from_cache: webEnrichment?.fromCache ?? 0,
+      limited: webEnrichment?.limited ?? false,
+      without_result: webEnrichment?.withoutResult ?? 0,
+      email_found: exportRows.filter(row => row['Fuente Email'] === 'web').length,
+      phone_found: exportRows.filter(row => row['Fuente Teléfono'] === 'web').length,
+    } : undefined,
     rows: exportRows,
   }
 }
