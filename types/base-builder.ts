@@ -73,6 +73,13 @@ export interface BaseBuilderAnalysisResult {
     without_result: number
     email_found: number
     phone_found: number
+    providers?: {
+      brave: number
+      duckduckgo: number
+      bing: number
+      none: number
+      error: number
+    }
   }
   rows: BaseBuilderExportRow[]
 }

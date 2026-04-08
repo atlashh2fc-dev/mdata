@@ -32,6 +32,7 @@ export type CompanyContactEnrichment = {
   phones: string[]
   sourceUrls: string[]
   source: 'cache' | 'web' | 'web_ai' | 'none' | 'error'
+  searchProvider?: 'brave' | 'duckduckgo' | 'bing' | 'none' | 'error'
 }
 
 type SearchResultItem = {
@@ -264,7 +265,10 @@ async function searchWithBing(query: string): Promise<SearchResultItem[]> {
     .filter(item => item.url && !isBlockedDomain(item.url))
 }
 
-async function searchCompanyResults(companyName: string): Promise<SearchResultItem[]> {
+async function searchCompanyResults(companyName: string): Promise<{
+  results: SearchResultItem[]
+  provider: 'brave' | 'duckduckgo' | 'bing' | 'none'
+}> {
   const queries = [
     `"${companyName}" sitio oficial contacto`,
     `${companyName} contacto email telefono sitio oficial chile`,
@@ -274,11 +278,14 @@ async function searchCompanyResults(companyName: string): Promise<SearchResultIt
   const collected: SearchResultItem[] = []
   const seen = new Set<string>()
 
+  let winningProvider: 'brave' | 'duckduckgo' | 'bing' | 'none' = 'none'
+
   for (const query of queries) {
     let results: SearchResultItem[] = []
 
     try {
       results = await searchWithBrave(query)
+      if (results.length > 0) winningProvider = 'brave'
     } catch (error) {
       console.error('[company-contact-enrichment:brave]', {
         companyName,
@@ -295,6 +302,7 @@ async function searchCompanyResults(companyName: string): Promise<SearchResultIt
           url: item.url,
           description: item.description,
         }))
+        if (results.length > 0) winningProvider = 'duckduckgo'
       } catch (error) {
         console.error('[company-contact-enrichment:duckduckgo]', {
           companyName,
@@ -307,6 +315,7 @@ async function searchCompanyResults(companyName: string): Promise<SearchResultIt
     if (results.length === 0) {
       try {
         results = await searchWithBing(query)
+        if (results.length > 0) winningProvider = 'bing'
       } catch (error) {
         console.error('[company-contact-enrichment:bing]', {
           companyName,
@@ -326,9 +335,12 @@ async function searchCompanyResults(companyName: string): Promise<SearchResultIt
     if (collected.length >= SEARCH_RESULTS_PER_COMPANY) break
   }
 
-  return collected
-    .sort((left, right) => scoreSearchResult(right, companyName) - scoreSearchResult(left, companyName))
-    .slice(0, SEARCH_RESULTS_PER_COMPANY)
+  return {
+    results: collected
+      .sort((left, right) => scoreSearchResult(right, companyName) - scoreSearchResult(left, companyName))
+      .slice(0, SEARCH_RESULTS_PER_COMPANY),
+    provider: collected.length > 0 ? winningProvider : 'none',
+  }
 }
 
 async function fetchPageHtml(url: string): Promise<string> {
@@ -550,7 +562,8 @@ async function enrichOneCompany(
 ): Promise<CompanyContactEnrichment> {
   const matchKey = normalizeCompanyName(companyName)
   try {
-    const topResults = await searchCompanyResults(companyName)
+    const searchResults = await searchCompanyResults(companyName)
+    const topResults = searchResults.results
 
     const snippets = topResults.map(item => `${item.title}\n${item.url}\n${item.description}`)
     const sourceUrls = uniq(topResults.map(item => item.url)).slice(0, FETCH_RESULTS_PER_COMPANY)
@@ -601,6 +614,7 @@ async function enrichOneCompany(
       phones: bestPhone ? [bestPhone, ...phones.filter(item => item !== bestPhone)] : phones,
       sourceUrls,
       source: aiPick ? 'web_ai' : (emails.length > 0 || phones.length > 0 || bestWebsite ? 'web' : 'none'),
+      searchProvider: searchResults.provider,
     }
   } catch (error) {
     console.error('[company-contact-enrichment:search]', {
@@ -618,6 +632,7 @@ async function enrichOneCompany(
       phones: [],
       sourceUrls: [],
       source: 'error',
+      searchProvider: 'error',
     }
   }
 }
@@ -651,6 +666,13 @@ export async function enrichCompanyContacts(
   fromCache: number
   limited: boolean
   withoutResult: number
+  providers: {
+    brave: number
+    duckduckgo: number
+    bing: number
+    none: number
+    error: number
+  }
 }> {
   const normalizedCompanies = companies
     .map(item => ({
@@ -696,6 +718,14 @@ export async function enrichCompanyContacts(
   await writeCache(fetched)
   await persistIntoMaster(resolvedItems)
 
+  const providers = {
+    brave: fetched.filter(item => item.searchProvider === 'brave').length,
+    duckduckgo: fetched.filter(item => item.searchProvider === 'duckduckgo').length,
+    bing: fetched.filter(item => item.searchProvider === 'bing').length,
+    none: fetched.filter(item => item.searchProvider === 'none').length,
+    error: fetched.filter(item => item.searchProvider === 'error').length,
+  }
+
   return {
     items,
     candidates: uniqueCompanies.length,
@@ -705,5 +735,6 @@ export async function enrichCompanyContacts(
     withoutResult: fetched.filter(
       item => item.emails.length === 0 && item.phones.length === 0
     ).length,
+    providers,
   }
 }

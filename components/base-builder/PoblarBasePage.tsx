@@ -1053,6 +1053,26 @@ export function PoblarBasePage() {
                         <span>Resultados desde cache</span>
                         <span className="text-slate-200">{formatNumber(analysis.web_enrichment.from_cache)}</span>
                       </div>
+                      {analysis.web_enrichment.providers && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span>Busquedas con Brave</span>
+                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.brave)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Fallback DuckDuckGo</span>
+                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.duckduckgo)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Fallback Bing</span>
+                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.bing)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Errores de busqueda</span>
+                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.error)}</span>
+                          </div>
+                        </>
+                      )}
                       <div className="flex items-center justify-between">
                         <span>Email encontrado en web</span>
                         <span className="text-slate-200">{formatNumber(analysis.web_enrichment.email_found)}</span>

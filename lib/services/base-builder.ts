@@ -499,6 +499,7 @@ export async function analyzeRowsForBaseBuilder(
         without_result: webEnrichment?.withoutResult ?? 0,
         email_found: exportRows.filter(row => row['Fuente Email'] === 'web').length,
         phone_found: exportRows.filter(row => row['Fuente Teléfono'] === 'web').length,
+        providers: webEnrichment?.providers,
       } : undefined,
       rows: exportRows,
     }
@@ -649,6 +650,7 @@ export async function analyzeRowsForBaseBuilder(
       without_result: webEnrichment?.withoutResult ?? 0,
       email_found: exportRows.filter(row => row['Fuente Email'] === 'web').length,
       phone_found: exportRows.filter(row => row['Fuente Teléfono'] === 'web').length,
+      providers: webEnrichment?.providers,
     } : undefined,
     rows: exportRows,
   }
