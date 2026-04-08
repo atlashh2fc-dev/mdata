@@ -196,6 +196,51 @@ function pickBest(values: string[], scorer: (value: string) => number): string |
   return [...values].sort((a, b) => scorer(b) - scorer(a))[0] ?? null
 }
 
+async function searchWithBrave(query: string): Promise<SearchResultItem[]> {
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY
+  if (!apiKey) return []
+
+  const response = await fetch(
+    `https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({
+      q: query,
+      count: String(Math.max(SEARCH_RESULTS_PER_COMPANY, 10)),
+      country: 'CL',
+      search_lang: 'es',
+      spellcheck: '1',
+      extra_snippets: 'true',
+    })}`,
+    {
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey,
+      },
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(`Brave search failed with status ${response.status}`)
+  }
+
+  const data = await response.json()
+  const results = Array.isArray(data?.web?.results) ? data.web.results : []
+
+  return results
+    .map((item: {
+      title?: string
+      url?: string
+      description?: string
+      extra_snippets?: string[]
+    }) => ({
+      title: item.title ?? '',
+      url: item.url ?? '',
+      description: [item.description, ...(item.extra_snippets ?? [])]
+        .filter(Boolean)
+        .join(' '),
+    }))
+    .filter(item => item.url && !isBlockedDomain(item.url))
+}
+
 async function searchWithBing(query: string): Promise<SearchResultItem[]> {
   const response = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=10&setlang=es-CL`, {
     headers: {
@@ -233,18 +278,30 @@ async function searchCompanyResults(companyName: string): Promise<SearchResultIt
     let results: SearchResultItem[] = []
 
     try {
-      const ddg = await search(query, { safeSearch: SafeSearchType.OFF })
-      results = ddg.results.map(item => ({
-        title: item.title,
-        url: item.url,
-        description: item.description,
-      }))
+      results = await searchWithBrave(query)
     } catch (error) {
-      console.error('[company-contact-enrichment:duckduckgo]', {
+      console.error('[company-contact-enrichment:brave]', {
         companyName,
         query,
         error: error instanceof Error ? error.message : String(error),
       })
+    }
+
+    if (results.length === 0) {
+      try {
+        const ddg = await search(query, { safeSearch: SafeSearchType.OFF })
+        results = ddg.results.map(item => ({
+          title: item.title,
+          url: item.url,
+          description: item.description,
+        }))
+      } catch (error) {
+        console.error('[company-contact-enrichment:duckduckgo]', {
+          companyName,
+          query,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
 
     if (results.length === 0) {
