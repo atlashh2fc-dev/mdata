@@ -1,3 +1,5 @@
+export type BaseBuilderMatchMode = 'rut' | 'razon_social'
+
 export type BaseBuilderFieldKey =
   | 'nombre_completo'
   | 'nombres'
@@ -40,11 +42,15 @@ export interface BaseBuilderExportRow {
   rut_input: string
   rut_formateado: string
   rutid: string | null
-  match_status: 'matched' | 'not_found' | 'invalid'
+  match_status: 'matched' | 'not_found' | 'invalid' | 'ambiguous'
   [key: string]: string | number | boolean | null
 }
 
 export interface BaseBuilderAnalysisResult {
+  match_mode: BaseBuilderMatchMode
+  match_column: string | null
+  valid_input_count: number
+  invalid_input_count: number
   requested_count: number
   unique_count: number
   valid_rut_count: number
@@ -52,6 +58,7 @@ export interface BaseBuilderAnalysisResult {
   duplicate_count: number
   matched_count: number
   unmatched_count: number
+  ambiguous_count: number
   match_rate: number
   rut_column: string | null
   original_columns: string[]

@@ -4,6 +4,7 @@ import {
   analyzeRowsForBaseBuilder,
   analyzeRutsForBaseBuilder,
 } from '@/lib/services/base-builder'
+import type { BaseBuilderMatchMode } from '@/types/base-builder'
 
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient()
@@ -18,7 +19,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const ruts = Array.isArray(body?.ruts) ? body.ruts : []
   const rows = Array.isArray(body?.rows) ? body.rows : []
-  const rutColumn = typeof body?.rut_column === 'string' ? body.rut_column : null
+  const matchMode: BaseBuilderMatchMode = body?.match_mode === 'razon_social'
+    ? 'razon_social'
+    : 'rut'
+  const matchColumn = typeof body?.match_column === 'string'
+    ? body.match_column
+    : typeof body?.rut_column === 'string'
+      ? body.rut_column
+      : null
   const selectedFields = Array.isArray(body?.selected_fields) ? body.selected_fields : []
 
   if (rows.length === 0 && ruts.length === 0) {
@@ -29,8 +37,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const analysis = rows.length > 0 && rutColumn
-      ? await analyzeRowsForBaseBuilder(rows, rutColumn, selectedFields)
+    const analysis = rows.length > 0 && matchColumn
+      ? await analyzeRowsForBaseBuilder(rows, matchColumn, selectedFields, matchMode)
       : await analyzeRutsForBaseBuilder(ruts, selectedFields)
     return NextResponse.json({ success: true, data: analysis })
   } catch (error) {

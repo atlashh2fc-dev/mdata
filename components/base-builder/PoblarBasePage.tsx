@@ -13,6 +13,7 @@ import {
   type BaseBuilderAnalysisResult,
   type BaseBuilderFieldDefinition,
   type BaseBuilderFieldKey,
+  type BaseBuilderMatchMode,
 } from '@/types/base-builder'
 import {
   cn,
@@ -42,6 +43,7 @@ type ParsedUpload = {
   headers: string[]
   rows: Record<string, string>[]
   detectedRutColumn: string | null
+  detectedCompanyColumn: string | null
 }
 
 function toSafeHeader(value: string, index: number): string {
@@ -82,22 +84,27 @@ function looksLikeFullRut(values: string[]): boolean {
   return count / sample.length >= 0.6
 }
 
+function scoreRutColumn(header: string, rows: Record<string, string>[]): number {
+  const normalized = normalizeColumnName(header)
+  const values = rows.map(row => String(row[header] ?? '').trim()).filter(Boolean)
+  if (values.length === 0) return 0
+
+  let score = 0
+  if (normalized === 'rut' || normalized === 'rutid' || normalized === 'run') score += 5
+  else if (normalized.includes('rut')) score += 3
+
+  if (looksLikeFullRut(values)) score += 4
+  if (looksLikeRutDigits(values)) score += 2
+
+  return score
+}
+
 function detectBestRutColumn(headers: string[], rows: Record<string, string>[]): string | null {
   let bestHeader: string | null = null
   let bestScore = 0
 
   for (const header of headers) {
-    const normalized = normalizeColumnName(header)
-    const values = rows.map(row => String(row[header] ?? '').trim()).filter(Boolean)
-    if (values.length === 0) continue
-
-    let score = 0
-    if (normalized === 'rut' || normalized === 'rutid' || normalized === 'run') score += 5
-    else if (normalized.includes('rut')) score += 3
-
-    if (looksLikeFullRut(values)) score += 4
-    if (looksLikeRutDigits(values)) score += 2
-
+    const score = scoreRutColumn(header, rows)
     if (score > bestScore) {
       bestScore = score
       bestHeader = header
@@ -107,10 +114,85 @@ function detectBestRutColumn(headers: string[], rows: Record<string, string>[]):
   return bestScore >= 3 ? bestHeader : null
 }
 
+function looksLikeSupportedRutColumn(header: string, rows: Record<string, string>[]): boolean {
+  return scoreRutColumn(header, rows) >= 2
+}
+
+function looksLikeCompanyValue(value: string): boolean {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return false
+  if (validateRut(normalized)) return false
+  return /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(normalized) && normalized.length >= 5
+}
+
+function scoreCompanyColumn(header: string, rows: Record<string, string>[]): number {
+  const normalized = normalizeColumnName(header)
+  const values = rows.map(row => String(row[header] ?? '').trim()).filter(Boolean)
+  if (values.length === 0) return 0
+
+  let score = 0
+  if (
+    normalized === 'razonsocial' ||
+    normalized === 'razonsocialempresa' ||
+    normalized === 'empresa' ||
+    normalized === 'nombreempresa'
+  ) score += 5
+  else if (
+    normalized.includes('razonsocial') ||
+    normalized.includes('empresa') ||
+    normalized.includes('social')
+  ) score += 3
+
+  const sample = values.slice(0, 50)
+  const companyLikeCount = sample.filter(looksLikeCompanyValue).length
+  if (sample.length > 0 && companyLikeCount / sample.length >= 0.7) score += 3
+
+  return score
+}
+
+function detectBestCompanyColumn(headers: string[], rows: Record<string, string>[]): string | null {
+  let bestHeader: string | null = null
+  let bestScore = 0
+
+  for (const header of headers) {
+    const score = scoreCompanyColumn(header, rows)
+    if (score > bestScore) {
+      bestScore = score
+      bestHeader = header
+    }
+  }
+
+  return bestScore >= 3 ? bestHeader : null
+}
+
+function looksLikeSupportedCompanyColumn(header: string, rows: Record<string, string>[]): boolean {
+  return scoreCompanyColumn(header, rows) >= 2
+}
+
+function findLikelyDvColumn(headers: string[], rutColumnName: string): string | null {
+  const rutKey = normalizeColumnName(rutColumnName)
+
+  for (const header of headers) {
+    const normalized = normalizeColumnName(header)
+    if (normalized === rutKey) continue
+
+    if (
+      normalized === 'dv' ||
+      normalized === 'digitoverificador' ||
+      normalized === 'digverificador' ||
+      normalized === 'verificador'
+    ) {
+      return header
+    }
+  }
+
+  return null
+}
+
 function rowsFromMatrix(matrix: string[][]): ParsedUpload {
   const nonEmptyRows = matrix.filter(row => row.some(cell => String(cell ?? '').trim().length > 0))
   if (nonEmptyRows.length < 2) {
-    return { headers: [], rows: [], detectedRutColumn: null }
+    return { headers: [], rows: [], detectedRutColumn: null, detectedCompanyColumn: null }
   }
 
   const headers = ensureUniqueHeaders(nonEmptyRows[0].map((cell, index) => toSafeHeader(cell, index)))
@@ -126,6 +208,7 @@ function rowsFromMatrix(matrix: string[][]): ParsedUpload {
     headers,
     rows,
     detectedRutColumn: detectBestRutColumn(headers, rows),
+    detectedCompanyColumn: detectBestCompanyColumn(headers, rows),
   }
 }
 
@@ -138,7 +221,9 @@ async function parseUploadedFile(file: File): Promise<ParsedUpload> {
     const firstSheetName = workbook.SheetNames[0]
     const firstSheet = workbook.Sheets[firstSheetName]
 
-    if (!firstSheet) return { headers: [], rows: [], detectedRutColumn: null }
+    if (!firstSheet) {
+      return { headers: [], rows: [], detectedRutColumn: null, detectedCompanyColumn: null }
+    }
 
     const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(firstSheet, {
       header: 1,
@@ -208,16 +293,24 @@ function getExportBaseName(fileName?: string | null): string {
   return fileName.replace(/\.[^.]+$/, '')
 }
 
+function getCoverageTone(pct: number): string {
+  if (pct >= 70) return 'text-green-300'
+  if (pct >= 40) return 'text-amber-300'
+  return 'text-slate-300'
+}
+
 export function PoblarBasePage() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv')
+  const [selectedMatchMode, setSelectedMatchMode] = useState<BaseBuilderMatchMode>('rut')
   const [selectedFields, setSelectedFields] = useState<BaseBuilderFieldKey[]>(DEFAULT_FIELDS)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [parsedUpload, setParsedUpload] = useState<ParsedUpload>({
     headers: [],
     rows: [],
     detectedRutColumn: null,
+    detectedCompanyColumn: null,
   })
-  const [selectedRutColumn, setSelectedRutColumn] = useState<string>('')
+  const [selectedMatchColumn, setSelectedMatchColumn] = useState<string>('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -228,6 +321,27 @@ export function PoblarBasePage() {
   const fieldLabelMap = useMemo(() => buildFieldLabelMap(), [])
   const previewOriginalColumns = analysis?.original_columns.slice(0, 4) ?? parsedUpload.headers.slice(0, 4)
   const previewEnrichedColumns = selectedFields.map(field => fieldLabelMap.get(field) ?? field)
+  const selectedColumnLooksLikeRut = selectedMatchColumn
+    ? looksLikeSupportedRutColumn(selectedMatchColumn, parsedUpload.rows)
+    : false
+  const selectedColumnLooksLikeCompany = selectedMatchColumn
+    ? looksLikeSupportedCompanyColumn(selectedMatchColumn, parsedUpload.rows)
+    : false
+  const selectedDvColumn = selectedMatchColumn
+    ? findLikelyDvColumn(parsedUpload.headers, selectedMatchColumn)
+    : null
+  const selectedColumnIsValid = selectedMatchMode === 'rut'
+    ? selectedColumnLooksLikeRut
+    : selectedColumnLooksLikeCompany
+  const detectedColumnForMode = selectedMatchMode === 'rut'
+    ? parsedUpload.detectedRutColumn
+    : parsedUpload.detectedCompanyColumn
+
+  function resetAnalysisState() {
+    setAnalysis(null)
+    setExportDone(false)
+    setError(null)
+  }
 
   function toggleField(field: BaseBuilderFieldKey) {
     setExportDone(false)
@@ -237,6 +351,16 @@ export function PoblarBasePage() {
         ? prev.filter(item => item !== field)
         : [...prev, field]
     ))
+  }
+
+  function applyMatchMode(mode: BaseBuilderMatchMode, upload: ParsedUpload = parsedUpload) {
+    setSelectedMatchMode(mode)
+    setSelectedMatchColumn(
+      mode === 'rut'
+        ? upload.detectedRutColumn ?? ''
+        : upload.detectedCompanyColumn ?? ''
+    )
+    resetAnalysisState()
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -250,13 +374,24 @@ export function PoblarBasePage() {
 
     try {
       const parsed = await parseUploadedFile(file)
+      const nextMode: BaseBuilderMatchMode = parsed.detectedRutColumn ? 'rut' : 'razon_social'
       setUploadedFile(file)
       setParsedUpload(parsed)
-      setSelectedRutColumn(parsed.detectedRutColumn ?? parsed.headers[0] ?? '')
+      setSelectedMatchMode(nextMode)
+      setSelectedMatchColumn(
+        nextMode === 'rut'
+          ? parsed.detectedRutColumn ?? ''
+          : parsed.detectedCompanyColumn ?? ''
+      )
     } catch (err) {
       setUploadedFile(null)
-      setParsedUpload({ headers: [], rows: [], detectedRutColumn: null })
-      setSelectedRutColumn('')
+      setParsedUpload({
+        headers: [],
+        rows: [],
+        detectedRutColumn: null,
+        detectedCompanyColumn: null,
+      })
+      setSelectedMatchColumn('')
       setError(err instanceof Error ? err.message : 'No se pudo leer el archivo.')
     } finally {
       setLoadingFile(false)
@@ -264,29 +399,76 @@ export function PoblarBasePage() {
   }
 
   async function handleAnalyze() {
-    if (parsedUpload.rows.length === 0 || !selectedRutColumn) return
+    if (parsedUpload.rows.length === 0 || !selectedMatchColumn) return
+
+    if (!selectedColumnIsValid) {
+      setAnalysis(null)
+      setError(
+        selectedMatchMode === 'rut'
+          ? 'La columna seleccionada no parece contener RUTs válidos.'
+          : 'La columna seleccionada no parece contener razones sociales utilizables para cruzar.'
+      )
+      return
+    }
 
     setAnalyzing(true)
     setError(null)
     setExportDone(false)
 
     try {
+      const compactRows = parsedUpload.rows.map(row => {
+        const compactRow: Record<string, string> = {
+          [selectedMatchColumn]: String(row[selectedMatchColumn] ?? ''),
+        }
+
+        if (selectedMatchMode === 'rut' && selectedDvColumn) {
+          compactRow[selectedDvColumn] = String(row[selectedDvColumn] ?? '')
+        }
+
+        return compactRow
+      })
+
       const res = await fetch('/api/base-builder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rows: parsedUpload.rows,
-          rut_column: selectedRutColumn,
+          rows: compactRows,
+          match_mode: selectedMatchMode,
+          match_column: selectedMatchColumn,
           selected_fields: selectedFields,
         }),
       })
 
-      const json = await res.json()
+      const contentType = res.headers.get('content-type') ?? ''
+      const payload = contentType.includes('application/json')
+        ? await res.json()
+        : await res.text()
+
       if (!res.ok) {
-        throw new Error(json.error ?? 'No se pudo poblar la base.')
+        const message = typeof payload === 'string'
+          ? payload
+          : payload?.error
+
+        throw new Error(message ?? 'No se pudo poblar la base.')
       }
 
-      setAnalysis(json.data ?? null)
+      if (typeof payload === 'string' || !payload?.data) {
+        throw new Error('El servidor devolvió una respuesta inválida.')
+      }
+
+      const mergedRows = parsedUpload.rows.map((row, index) => ({
+        ...row,
+        ...(payload.data.rows[index] ?? {}),
+      }))
+
+      setAnalysis({
+        ...payload.data,
+        rows: mergedRows,
+        original_columns: parsedUpload.headers,
+        match_mode: selectedMatchMode,
+        match_column: selectedMatchColumn,
+        rut_column: selectedMatchMode === 'rut' ? selectedMatchColumn : null,
+      })
     } catch (err) {
       setAnalysis(null)
       setError(err instanceof Error ? err.message : 'No se pudo poblar la base.')
@@ -325,7 +507,7 @@ export function PoblarBasePage() {
     <>
       <Header
         title="Poblar base"
-        subtitle="Sube tu archivo, cruza por RUT contra el maestro y exporta la misma base enriquecida"
+        subtitle="Sube tu archivo, cruza por RUT o razón social contra el maestro y exporta la misma base enriquecida"
       />
 
       <div className="p-6 space-y-5">
@@ -367,20 +549,44 @@ export function PoblarBasePage() {
                   {loadingFile ? 'Leyendo archivo...' : 'Subir base para poblar'}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  CSV o Excel. Detectamos la columna RUT y luego te dejamos elegir qué traer del maestro.
+                  CSV o Excel. Puedes cruzar por RUT o por razón social y luego elegir qué traer del maestro.
                 </p>
               </div>
             </label>
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
-                <p className="text-xs font-medium text-slate-400 mb-2">Columna RUT detectada</p>
+                <p className="text-xs font-medium text-slate-400 mb-3">Cómo quieres cruzar</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: 'rut', label: 'Por RUT' },
+                    { value: 'razon_social', label: 'Por razón social' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      onClick={() => applyMatchMode(option.value as BaseBuilderMatchMode)}
+                      disabled={parsedUpload.headers.length === 0}
+                      className={cn(
+                        'rounded-lg border px-3 py-2 text-sm transition-all',
+                        selectedMatchMode === option.value
+                          ? 'border-brand-500/50 bg-brand-500/10 text-white'
+                          : 'border-[#253357] text-slate-400 hover:border-brand-500/30'
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs font-medium text-slate-400 mt-4 mb-2">
+                  {selectedMatchMode === 'rut'
+                    ? 'Columna RUT detectada'
+                    : 'Columna razón social detectada'}
+                </p>
                 <select
-                  value={selectedRutColumn}
+                  value={selectedMatchColumn}
                   onChange={event => {
-                    setSelectedRutColumn(event.target.value)
-                    setAnalysis(null)
-                    setExportDone(false)
+                    setSelectedMatchColumn(event.target.value)
+                    resetAnalysisState()
                   }}
                   disabled={parsedUpload.headers.length === 0}
                   className="input-base"
@@ -394,10 +600,29 @@ export function PoblarBasePage() {
                   )}
                 </select>
                 <p className="text-xs text-slate-500 mt-2">
-                  {parsedUpload.detectedRutColumn
-                    ? `Sugerencia automática: ${parsedUpload.detectedRutColumn}`
-                    : 'Si la detección no fue correcta, puedes cambiarla aquí.'}
+                  {detectedColumnForMode
+                    ? `Sugerencia automática: ${detectedColumnForMode}`
+                    : selectedMatchMode === 'rut'
+                      ? 'Si tu archivo no trae RUT, este modo no va a poder cruzar contra el maestro.'
+                      : 'Si tu archivo no trae una razón social clara, cambia la columna o usa cruce por RUT.'}
                 </p>
+                {selectedMatchMode === 'razon_social' && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    El cruce por razón social normaliza tildes, mayúsculas y sufijos como SpA o Ltda.
+                  </p>
+                )}
+                {selectedMatchColumn && !selectedColumnIsValid && (
+                  <p className="text-xs text-amber-300 mt-2">
+                    {selectedMatchMode === 'rut'
+                      ? 'La columna elegida no parece ser RUT.'
+                      : 'La columna elegida no parece ser una razón social utilizable.'}
+                  </p>
+                )}
+                {selectedMatchMode === 'rut' && selectedDvColumn && selectedColumnLooksLikeRut && (
+                  <p className="text-xs text-emerald-300 mt-2">
+                    Detectamos también la columna DV: {selectedDvColumn}
+                  </p>
+                )}
               </div>
 
               <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
@@ -529,7 +754,12 @@ export function PoblarBasePage() {
 
               <button
                 onClick={handleAnalyze}
-                disabled={parsedUpload.rows.length === 0 || !selectedRutColumn || analyzing}
+                disabled={
+                  parsedUpload.rows.length === 0 ||
+                  !selectedMatchColumn ||
+                  !selectedColumnIsValid ||
+                  analyzing
+                }
                 className="btn-primary w-full justify-center"
               >
                 {analyzing ? (
@@ -555,9 +785,11 @@ export function PoblarBasePage() {
                       </p>
                     </div>
                     <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
-                      <p className="text-[11px] text-slate-500">Con RUT válido</p>
+                      <p className="text-[11px] text-slate-500">
+                        {analysis.match_mode === 'rut' ? 'Con RUT válido' : 'Con valor útil'}
+                      </p>
                       <p className="text-lg font-semibold text-white mt-1">
-                        {formatNumber(analysis.valid_rut_count)}
+                        {formatNumber(analysis.valid_input_count)}
                       </p>
                     </div>
                   </div>
@@ -575,14 +807,46 @@ export function PoblarBasePage() {
                       <span className="text-slate-200">{formatNumber(analysis.unmatched_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span>RUT inválido</span>
-                      <span className="text-slate-200">{formatNumber(analysis.invalid_rut_count)}</span>
+                      <span>
+                        {analysis.match_mode === 'rut' ? 'RUT inválido' : 'Sin razón social útil'}
+                      </span>
+                      <span className="text-slate-200">{formatNumber(analysis.invalid_input_count)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Ambiguos</span>
+                      <span className="text-slate-200">{formatNumber(analysis.ambiguous_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Duplicados</span>
                       <span className="text-slate-200">{formatNumber(analysis.duplicate_count)}</span>
                     </div>
                   </div>
+
+                  {analysis.coverage.length > 0 && (
+                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
+                      <p className="text-xs font-medium text-slate-300 mb-2">
+                        Qué pudimos poblar de lo pedido
+                      </p>
+                      <div className="space-y-1.5">
+                        {analysis.coverage.map(item => (
+                          <div
+                            key={item.field}
+                            className="flex items-center justify-between gap-3 text-xs"
+                          >
+                            <span className="text-slate-400">{item.label}</span>
+                            <div className="text-right">
+                              <span className={cn('font-medium', getCoverageTone(item.pct))}>
+                                {formatNumber(item.count)}
+                              </span>
+                              <span className="text-slate-500">
+                                {' '}de {formatNumber(analysis.requested_count)} ({formatPercentage(item.pct)})
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -634,7 +898,7 @@ export function PoblarBasePage() {
                   </p>
                 </div>
                 <p className="text-xs text-slate-400">
-                  RUT usado para cruce: {analysis.rut_column ?? '—'}
+                  Cruce por {analysis.match_mode === 'rut' ? 'RUT' : 'razón social'} en: {analysis.match_column ?? '—'}
                 </p>
               </div>
 
@@ -720,6 +984,8 @@ export function PoblarBasePage() {
                               'inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium',
                               row.match_status === 'matched'
                                 ? 'bg-green-500/10 text-green-300'
+                                : row.match_status === 'ambiguous'
+                                  ? 'bg-orange-500/10 text-orange-300'
                                 : row.match_status === 'not_found'
                                   ? 'bg-amber-500/10 text-amber-300'
                                   : 'bg-rose-500/10 text-rose-300'
@@ -727,6 +993,8 @@ export function PoblarBasePage() {
                           >
                             {row.match_status === 'matched'
                               ? 'Cruzó'
+                              : row.match_status === 'ambiguous'
+                                ? 'Ambiguo'
                               : row.match_status === 'not_found'
                                 ? 'Sin match'
                                 : 'Inválido'}
@@ -757,7 +1025,7 @@ export function PoblarBasePage() {
           <div className="card p-5">
             <EmptyState
               title="Todavía no hay poblamiento"
-              description="Sube tu base, confirma la columna RUT, elige qué campos del maestro quieres agregar y luego exporta la base enriquecida."
+              description="Sube tu base, elige si quieres cruzar por RUT o razón social, selecciona qué campos del maestro agregar y luego exporta la base enriquecida."
             />
           </div>
         )}
