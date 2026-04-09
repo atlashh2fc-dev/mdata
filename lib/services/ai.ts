@@ -91,6 +91,9 @@ export async function analyzeWithAI(
     case 'dataset':
       messages = buildDatasetAnalysisPrompt(request)
       break
+    case 'campaign_strategy':
+      messages = buildCampaignStrategyPrompt(request)
+      break
     default:
       throw new Error(`Tipo de análisis no soportado: ${request.type}`)
   }
@@ -251,6 +254,40 @@ Devuelve un JSON con:
   "recomendaciones_limpieza": ["rec1", "rec2"],
   "valor_negocio": "alto|medio|bajo",
   "casos_uso_sugeridos": ["caso1", "caso2"]
+}`,
+    },
+  ]
+}
+
+function buildCampaignStrategyPrompt(req: AIAnalysisRequest): InceptionMessage[] {
+  return [
+    {
+      role: 'system',
+      content: `Eres un gerente experto en contact center, BI comercial y revenue intelligence.
+Tu trabajo es diagnosticar campañas activas comparando contra baseline esperado y devolver acciones concretas.
+No hagas reporting pasivo: prioriza causas probables, impactos operativos y recomendaciones accionables.
+Devuelve SIEMPRE JSON estructurado y evita texto fuera del JSON.
+Contexto adicional: ${req.context ?? 'ninguno'}`,
+    },
+    {
+      role: 'user',
+      content: `Analiza este estado táctico del motor comercial:
+
+${JSON.stringify(req.data, null, 2)}
+
+Devuelve un JSON con:
+{
+  "executive_summary": "resumen ejecutivo de 3-5 frases",
+  "probable_root_causes": ["causa 1", "causa 2", "causa 3"],
+  "recommended_actions": [
+    {
+      "title": "accion corta",
+      "why": "por que conviene",
+      "expected_impact": "impacto esperado"
+    }
+  ],
+  "monitoring_focus": ["senal 1", "senal 2"],
+  "confidence": 0.0
 }`,
     },
   ]

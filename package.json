@@ -13,13 +13,19 @@
     "ops:sync:master": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs",
     "ops:sync:master:replace": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs --mode=replace",
     "ops:import:csv": "node --env-file=.env.local scripts/master-sync/import-csv-to-supabase.mjs",
+    "ops:padron2024:prepare": "node --env-file=.env.local scripts/master-sync/prepare-padron2024-txt.mjs",
+    "ops:padron2024:load": "node --env-file=.env.local scripts/master-sync/load-padron2024-to-postgres.mjs",
+    "ops:padron2024:import": "node --env-file=.env.local scripts/master-sync/prepare-padron2024-txt.mjs && node --env-file=.env.local scripts/master-sync/load-padron2024-to-postgres.mjs",
     "ops:consolidado": "node --env-file=.env.local scripts/master-sync/export-consolidado.mjs",
     "ops:consolidado:replace": "node --env-file=.env.local scripts/master-sync/export-consolidado.mjs --mode=replace",
     "ops:consolidado:rest": "node --env-file=.env.local scripts/master-sync/export-consolidado-rest.mjs",
     "ops:consolidado:rest:replace": "node --env-file=.env.local scripts/master-sync/export-consolidado-rest.mjs --mode=replace",
     "ops:verify": "node --env-file=.env.local scripts/master-sync/verify-migration.mjs",
     "ops:backfill:company-contacts": "node --env-file=.env.local scripts/master-sync/backfill-company-contacts.mjs",
-    "ops:sync:crm-feedback": "node --env-file=.env.local scripts/crm-feedback-sync/sync-registro-intel.mjs"
+    "ops:sync:crm-feedback": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-feedback-sync/sync-registro-intel.mjs",
+    "ops:apply:crm-contract": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-contract/apply-registro-intel-contract.mjs",
+    "ops:push:crm-actions": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/push-registro-intel.mjs",
+    "ops:sync:crm-loop": "npm run ops:sync:crm-feedback && npm run ops:push:crm-actions"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",

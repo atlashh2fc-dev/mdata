@@ -113,6 +113,31 @@ function normalizeFeedbackRecord(record: ContactCenterFeedbackInput) {
 }
 
 async function upsertContactPoints(records: ReturnType<typeof normalizeFeedbackRecord>[]) {
+  const candidateRutids = [...new Set(
+    records
+      .map(record => record.matched_rutid ?? record.rutid)
+      .filter((value): value is string => Boolean(value))
+  )]
+
+  const existingRuts = new Set<string>()
+
+  for (let i = 0; i < candidateRutids.length; i += UPSERT_CHUNK_SIZE) {
+    const chunk = candidateRutids.slice(i, i + UPSERT_CHUNK_SIZE)
+    const { data, error } = await db
+      .from('master_personas')
+      .select('rutid')
+      .in('rutid', chunk)
+
+    if (error) {
+      console.error('[upsertContactPoints:master_personas]', error)
+      throw new Error('No se pudo validar los RUTs de la base maestra.')
+    }
+
+    for (const row of data ?? []) {
+      if (row.rutid) existingRuts.add(row.rutid)
+    }
+  }
+
   const points = new Map<string, {
     rutid: string
     contact_type: 'phone' | 'email'
@@ -130,7 +155,7 @@ async function upsertContactPoints(records: ReturnType<typeof normalizeFeedbackR
 
   for (const record of records) {
     const rutid = record.matched_rutid ?? record.rutid
-    if (!rutid) continue
+    if (!rutid || !existingRuts.has(rutid)) continue
 
     if (record.contact_phone) {
       const key = `${rutid}:phone:${record.contact_phone}`

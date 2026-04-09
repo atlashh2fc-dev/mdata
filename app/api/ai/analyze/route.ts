@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { type, data, context } = body as AIAnalysisRequest & { type: AIAnalysisType }
 
-  const validTypes = ['enrichment', 'classification', 'scoring', 'dataset']
+  const validTypes = ['enrichment', 'classification', 'scoring', 'dataset', 'campaign_strategy']
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       { error: `Tipo inválido. Usar: ${validTypes.join(', ')}` },

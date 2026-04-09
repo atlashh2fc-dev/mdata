@@ -592,7 +592,12 @@ export interface SegmentExport {
 // AI TYPES
 // ============================================================
 
-export type AIAnalysisType = 'enrichment' | 'classification' | 'scoring' | 'dataset'
+export type AIAnalysisType =
+  | 'enrichment'
+  | 'classification'
+  | 'scoring'
+  | 'dataset'
+  | 'campaign_strategy'
 
 export interface AIAnalysisRequest {
   type: AIAnalysisType
@@ -903,4 +908,150 @@ export interface ContactCenterIngestionResult {
   affected_ruts: number
   refreshed_scores: number
   sync_run_id: string | null
+}
+
+export type CampaignSeverity = 'healthy' | 'watch' | 'risk' | 'critical'
+
+export interface CommercialHealthSnapshot {
+  overall_health_score: number
+  active_campaigns: number
+  campaigns_at_risk: number
+  critical_campaigns: number
+  anomaly_count: number
+  current_contact_rate: number
+  expected_contact_rate: number
+  current_conversion_rate: number
+  expected_conversion_rate: number
+  current_interest_rate: number
+  expected_interest_rate: number
+  monitored_window_hours: number
+  last_feedback_at: string | null
+}
+
+export interface CampaignHealthCard {
+  campaign_name: string
+  attempts_3h: number
+  unique_leads_3h: number
+  effective_contacts_3h: number
+  sales_3h: number
+  interest_3h: number
+  current_contact_rate: number
+  baseline_contact_rate: number
+  current_conversion_rate: number
+  baseline_conversion_rate: number
+  current_interest_rate: number
+  baseline_interest_rate: number
+  fatigue_score: number
+  health_score: number
+  severity: CampaignSeverity
+  underperformance_hours: number
+  probable_causes: string[]
+  recommended_action: string
+  recommended_adjustments: string[]
+  top_channel: string | null
+  best_next_window: string
+  ai_summary: string | null
+  supporting_signals: Record<string, unknown>
+}
+
+export interface TacticalRecommendation {
+  title: string
+  scope: 'campaign' | 'segment' | 'window' | 'portfolio'
+  rationale: string
+  action: string
+  impact: string
+  priority: 'high' | 'medium' | 'low'
+}
+
+export interface SegmentHealthInsight {
+  segment_label: string
+  segment_type: 'region' | 'comuna' | 'channel' | 'cohort'
+  volume: number
+  current_contact_rate: number
+  baseline_contact_rate: number
+  current_conversion_rate: number
+  baseline_conversion_rate: number
+  health_delta: number
+  recommendation: string
+}
+
+export interface WindowPerformance {
+  hour: number
+  label: string
+  attempts: number
+  contact_rate: number
+  conversion_rate: number
+  interest_rate: number
+  score: number
+  recommendation: string
+}
+
+export interface LeadActionItem {
+  rutid: string
+  nombre_completo: string | null
+  campaign_name: string | null
+  region: string | null
+  comuna: string | null
+  priority_score: number
+  dynamic_priority_score: number
+  contact_probability: number
+  conversion_probability: number
+  fatigue_score: number
+  operational_affinity: number
+  optimal_window: string
+  recommended_channel: string
+  next_best_action: string
+  reason_tags: string[]
+}
+
+export interface CommercialBrainOverview {
+  snapshot: CommercialHealthSnapshot
+  campaigns: CampaignHealthCard[]
+  recommendations: TacticalRecommendation[]
+  strong_segments: SegmentHealthInsight[]
+  weak_segments: SegmentHealthInsight[]
+  optimal_windows: WindowPerformance[]
+  lead_actions: LeadActionItem[]
+  ai_executive_summary: string | null
+  generated_at: string
+}
+
+export interface CampaignActionInstruction {
+  campaign_name: string
+  severity: CampaignSeverity
+  health_score: number
+  underperformance_hours: number
+  recommended_action: string
+  recommended_adjustments: string[]
+  best_next_window: string
+  top_channel: string | null
+  probable_causes: string[]
+}
+
+export interface LeadActionInstruction {
+  rutid: string
+  campaign_name: string | null
+  dynamic_priority_score: number
+  contact_probability: number
+  conversion_probability: number
+  fatigue_score: number
+  optimal_window: string
+  recommended_channel: string
+  next_best_action: string
+  reason_tags: string[]
+}
+
+export interface CommercialActionFeed {
+  source_system: string
+  generated_at: string
+  portfolio_status: {
+    overall_health_score: number
+    campaigns_at_risk: number
+    critical_campaigns: number
+    anomaly_count: number
+  }
+  executive_summary: string | null
+  campaign_instructions: CampaignActionInstruction[]
+  lead_instructions: LeadActionInstruction[]
+  recommendations: TacticalRecommendation[]
 }

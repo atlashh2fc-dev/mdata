@@ -8,6 +8,7 @@ import {
   markBestManagement,
   refreshPersonaScores,
 } from '@/lib/services/commercial-intelligence'
+import { getCommercialActionFeed, getCommercialBrainOverview } from '@/lib/services/commercial-brain'
 import type { ContactCenterFeedbackInput } from '@/types'
 
 function hasSyncSecret(req: NextRequest): boolean {
@@ -31,15 +32,27 @@ async function requireAuthenticatedUser() {
 }
 
 export async function GET(req: NextRequest) {
-  const user = await requireAuthenticatedUser()
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+  const secretAuthorized = hasSyncSecret(req)
+  const user = secretAuthorized ? null : await requireAuthenticatedUser()
+  if (!secretAuthorized && !user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
   const { searchParams } = req.nextUrl
   const rut = searchParams.get('rut')
   const section = searchParams.get('section') ?? 'overview'
 
+  if (!rut && section === 'brain') {
+    const brain = await getCommercialBrainOverview()
+    return NextResponse.json({ success: true, data: brain })
+  }
+
+  if (!rut && section === 'actions') {
+    const actions = await getCommercialActionFeed()
+    return NextResponse.json({ success: true, data: actions })
+  }
+
   if (rut) {
     if (section === 'explanation') {
+      if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
       const explanation = await explainPersonaCommercialScore(rut, user.id)
       return NextResponse.json({ success: true, data: explanation })
     }

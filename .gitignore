@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+node_modules.bad.*/
 .pnp
 .pnp.js
 
@@ -10,6 +11,7 @@ build/
 
 # Environment variables (NUNCA subir al repo)
 .env
+.env.production
 .env.local
 .env.development.local
 .env.test.local
@@ -41,3 +43,4 @@ Thumbs.db
 # Uploads temporales
 uploads/
 tmp/
+.env*.local
