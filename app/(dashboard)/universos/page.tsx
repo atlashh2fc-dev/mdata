@@ -20,7 +20,7 @@ import {
 import { formatNumber } from '@/lib/utils/formatters'
 
 interface UniverseRow {
-  entidad_tipo: 'persona_natural' | 'persona_juridica' | 'indeterminado' | 'invalido'
+  entidad_tipo: 'persona_natural' | 'persona_juridica' | 'indeterminado' | 'rut_recuperable' | 'basura'
   con_nombre: boolean
   con_email: boolean
   con_fono: boolean
@@ -45,8 +45,9 @@ const ENTITY_GROUPS: Array<{
   { key: 'todos', label: 'Todos', description: 'Base consolidada completa', tone: 'text-slate-300', border: 'border-slate-600/60', bg: 'bg-slate-800/70' },
   { key: 'persona_natural', label: 'Naturales', description: 'RUTs con nombre de persona', tone: 'text-cyan-300', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
   { key: 'persona_juridica', label: 'Jurídicas', description: 'Empresas e instituciones', tone: 'text-violet-300', border: 'border-violet-500/50', bg: 'bg-violet-500/10' },
-  { key: 'indeterminado', label: 'Indeterminados', description: 'Sin nombre ni razón social', tone: 'text-amber-300', border: 'border-amber-500/50', bg: 'bg-amber-500/10' },
-  { key: 'invalido', label: 'Inválidos', description: 'RUTs anómalos o basura', tone: 'text-rose-300', border: 'border-rose-500/50', bg: 'bg-rose-500/10' },
+  { key: 'indeterminado', label: 'Indeterminados', description: 'Canónicos sin nombre ni razón social', tone: 'text-amber-300', border: 'border-amber-500/50', bg: 'bg-amber-500/10' },
+  { key: 'rut_recuperable', label: 'Recuperables', description: 'RUTs útiles pero mal normalizados', tone: 'text-emerald-300', border: 'border-emerald-500/50', bg: 'bg-emerald-500/10' },
+  { key: 'basura', label: 'Basura', description: 'RUTs vacíos, cero o no recuperables', tone: 'text-rose-300', border: 'border-rose-500/50', bg: 'bg-rose-500/10' },
 ]
 
 const DIMENSIONS = [
@@ -108,7 +109,8 @@ export default function UniversosPage() {
       persona_natural: 0,
       persona_juridica: 0,
       indeterminado: 0,
-      invalido: 0,
+      rut_recuperable: 0,
+      basura: 0,
     }
 
     for (const row of data) {
@@ -211,7 +213,7 @@ export default function UniversosPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
             {ENTITY_GROUPS.map(group => {
               const isActive = entityFilter === group.key
               const total = entityTotals[group.key]
@@ -433,7 +435,7 @@ export default function UniversosPage() {
           {!loading && (
             <div className="glass-panel p-4 text-xs text-slate-400 space-y-2">
               <p className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">Cómo funciona</p>
-              <p>Primero eliges el <span className="text-white">tipo de entidad</span>: naturales, jurídicas, indeterminados o inválidos. Luego cada dimensión muestra su universo propio dentro de ese grupo.</p>
+              <p>Primero eliges el <span className="text-white">tipo de entidad</span>: naturales, jurídicas, indeterminados, recuperables o basura. Luego cada dimensión muestra su universo propio dentro de ese grupo.</p>
               <p>Al combinar dos dimensiones, el resultado es la <span className="text-cyan-400">intersección</span> (personas que tienen ambas), por lo que el número puede bajar respecto a cada dimensión individual.</p>
               <p className="text-slate-500">Base activa: <span className="font-mono text-white">{formatNumber(totalBase)}</span> registros en {scopedData.length} combinaciones únicas.</p>
             </div>
