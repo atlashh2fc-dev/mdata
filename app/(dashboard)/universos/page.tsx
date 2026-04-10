@@ -20,6 +20,7 @@ import {
 import { formatNumber } from '@/lib/utils/formatters'
 
 interface UniverseRow {
+  entidad_tipo: 'persona_natural' | 'persona_juridica' | 'indeterminado' | 'invalido'
   con_nombre: boolean
   con_email: boolean
   con_fono: boolean
@@ -31,6 +32,22 @@ interface UniverseRow {
 }
 
 type FilterState = true | false | null
+type EntityFilter = 'todos' | UniverseRow['entidad_tipo']
+
+const ENTITY_GROUPS: Array<{
+  key: EntityFilter
+  label: string
+  description: string
+  tone: string
+  border: string
+  bg: string
+}> = [
+  { key: 'todos', label: 'Todos', description: 'Base consolidada completa', tone: 'text-slate-300', border: 'border-slate-600/60', bg: 'bg-slate-800/70' },
+  { key: 'persona_natural', label: 'Naturales', description: 'RUTs con nombre de persona', tone: 'text-cyan-300', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
+  { key: 'persona_juridica', label: 'Jurídicas', description: 'Empresas e instituciones', tone: 'text-violet-300', border: 'border-violet-500/50', bg: 'bg-violet-500/10' },
+  { key: 'indeterminado', label: 'Indeterminados', description: 'Sin nombre ni razón social', tone: 'text-amber-300', border: 'border-amber-500/50', bg: 'bg-amber-500/10' },
+  { key: 'invalido', label: 'Inválidos', description: 'RUTs anómalos o basura', tone: 'text-rose-300', border: 'border-rose-500/50', bg: 'bg-rose-500/10' },
+]
 
 const DIMENSIONS = [
   { key: 'con_nombre', label: 'Nombre Completo', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', borderActive: 'border-blue-400', glowActive: 'shadow-[0_0_18px_rgba(96,165,250,0.15)]' },
@@ -62,6 +79,7 @@ const DIM_SHORT: Record<string, string> = {
 export default function UniversosPage() {
   const [data, setData] = useState<UniverseRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>('persona_natural')
 
   // Filters state (null = ANY, true = REQUIRED, false = EXCLUDED)
   const [filters, setFilters] = useState<Record<string, FilterState>>({
@@ -84,24 +102,46 @@ export default function UniversosPage() {
       .catch(() => setLoading(false))
   }, [])
 
+  const entityTotals = useMemo(() => {
+    const totals: Record<EntityFilter, number> = {
+      todos: 0,
+      persona_natural: 0,
+      persona_juridica: 0,
+      indeterminado: 0,
+      invalido: 0,
+    }
+
+    for (const row of data) {
+      totals.todos += row.total
+      totals[row.entidad_tipo] += row.total
+    }
+
+    return totals
+  }, [data])
+
+  const scopedData = useMemo(() => {
+    if (entityFilter === 'todos') return data
+    return data.filter(row => row.entidad_tipo === entityFilter)
+  }, [data, entityFilter])
+
   // Grand total (all rows)
-  const totalBase = useMemo(() => data.reduce((acc, row) => acc + row.total, 0), [data])
+  const totalBase = useMemo(() => scopedData.reduce((acc, row) => acc + row.total, 0), [scopedData])
 
   // Individual total per dimension (con_X = true, independiente de otros filtros)
   const dimTotals = useMemo(() => {
     const out: Record<string, number> = {}
     for (const dim of DIMENSIONS) {
-      out[dim.key] = data.filter(r => r[dim.key as keyof UniverseRow] === true).reduce((s, r) => s + r.total, 0)
+      out[dim.key] = scopedData.filter(r => r[dim.key as keyof UniverseRow] === true).reduce((s, r) => s + r.total, 0)
     }
     return out
-  }, [data])
+  }, [scopedData])
 
   // Calculamos el volumen instantáneamente cruzando la matriz precomputada
   const result = useMemo(() => {
     let count = 0
     const matchingRows: UniverseRow[] = []
 
-    for (const row of data) {
+    for (const row of scopedData) {
       let isMatch = true
       for (const [key, val] of Object.entries(filters)) {
         if (val !== null && row[key as keyof UniverseRow] !== val) {
@@ -117,7 +157,7 @@ export default function UniversosPage() {
     // Sort by total desc
     matchingRows.sort((a, b) => b.total - a.total)
     return { count, matchingRows }
-  }, [filters, data])
+  }, [filters, scopedData])
 
   const pct = totalBase > 0 ? (result.count / totalBase) * 100 : 0
 
@@ -163,12 +203,36 @@ export default function UniversosPage() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold text-slate-300">Dimensiones de Datos</h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">Haz clic para incluir ✓ o excluir ✗ cada dimensión</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Primero elige el universo base; luego incluye ✓ o excluye ✗ cada dimensión</p>
             </div>
             <button onClick={resetFilters} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
               <RefreshCcw className="w-3 h-3" />
               Restablecer
             </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+            {ENTITY_GROUPS.map(group => {
+              const isActive = entityFilter === group.key
+              const total = entityTotals[group.key]
+              return (
+                <button
+                  key={group.key}
+                  onClick={() => setEntityFilter(group.key)}
+                  className={`rounded-xl border p-4 text-left transition-all ${isActive ? `${group.border} ${group.bg} shadow-[0_0_18px_rgba(15,23,42,0.35)]` : 'border-slate-700/50 bg-[#1e293b]/40 hover:bg-[#1e293b]/70'}`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className={`text-sm font-semibold ${isActive ? group.tone : 'text-white'}`}>{group.label}</h4>
+                      <p className="mt-1 text-[10px] text-slate-500 leading-relaxed">{group.description}</p>
+                    </div>
+                    {isActive && <Check className={`w-4 h-4 ${group.tone}`} />}
+                  </div>
+                  <div className="mt-4 text-xl font-black text-white">{formatNumber(total)}</div>
+                  <div className="text-[10px] text-slate-500 mt-1">registros en este universo</div>
+                </button>
+              )
+            })}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -314,7 +378,7 @@ export default function UniversosPage() {
                <>
                  <h2 className="text-base font-bold text-slate-300 mb-1">Universo Resultante</h2>
                  <p className="text-[10px] text-slate-500 mb-6">
-                   {activeCount === 0 ? 'Sin filtros: universo total' : `${activeCount} filtro${activeCount > 1 ? 's' : ''} activo${activeCount > 1 ? 's' : ''}`}
+                   {ENTITY_GROUPS.find(group => group.key === entityFilter)?.label ?? 'Todos'} · {activeCount === 0 ? 'sin filtros adicionales' : `${activeCount} filtro${activeCount > 1 ? 's' : ''} activo${activeCount > 1 ? 's' : ''}`}
                  </p>
                  
                  <div className="my-4">
@@ -350,7 +414,7 @@ export default function UniversosPage() {
                  <div className="w-full bg-slate-800/50 rounded-xl p-3 mt-3 border border-white/5">
                    <div className="flex justify-between items-center text-xs text-slate-400 mb-1.5">
                      <span>Combinaciones sumadas:</span>
-                     <span className="font-mono text-cyan-400">{result.matchingRows.length} de {data.length}</span>
+                     <span className="font-mono text-cyan-400">{result.matchingRows.length} de {scopedData.length}</span>
                    </div>
                    <div className="flex justify-between items-center text-xs text-slate-400">
                      <span>Base total:</span>
@@ -369,9 +433,9 @@ export default function UniversosPage() {
           {!loading && (
             <div className="glass-panel p-4 text-xs text-slate-400 space-y-2">
               <p className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">Cómo funciona</p>
-              <p>Cada dimensión muestra su <span className="text-white">universo propio</span>: personas que tienen ese dato, independiente de los demás.</p>
+              <p>Primero eliges el <span className="text-white">tipo de entidad</span>: naturales, jurídicas, indeterminados o inválidos. Luego cada dimensión muestra su universo propio dentro de ese grupo.</p>
               <p>Al combinar dos dimensiones, el resultado es la <span className="text-cyan-400">intersección</span> (personas que tienen ambas), por lo que el número puede bajar respecto a cada dimensión individual.</p>
-              <p className="text-slate-500">Gran total: <span className="font-mono text-white">{formatNumber(totalBase)}</span> registros en {data.length} combinaciones únicas.</p>
+              <p className="text-slate-500">Base activa: <span className="font-mono text-white">{formatNumber(totalBase)}</span> registros en {scopedData.length} combinaciones únicas.</p>
             </div>
           )}
         </div>
