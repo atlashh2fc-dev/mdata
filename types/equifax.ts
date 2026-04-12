@@ -124,6 +124,16 @@ export interface EquifaxLeadPreviewResult {
   scenarios: EquifaxLeadScenario[]
 }
 
+export interface EquifaxCrmPushResult {
+  run_id: string
+  crm_run_id: string
+  source_system: string
+  campaign_instructions: number
+  lead_instructions: number
+  pushed_at: string
+  apply_result: Record<string, unknown> | null
+}
+
 export interface EquifaxLeadFeatureSnapshot {
   rutid: string
   company_name: string | null

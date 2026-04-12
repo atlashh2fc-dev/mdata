@@ -1,24 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import { generateEquifaxLeads, previewEquifaxLeadScenarios } from '@/lib/services/equifax-bdd'
+import { getEquifaxRunActionFeed, pushEquifaxRunToCrm } from '@/lib/services/equifax-crm'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-export async function POST(req: NextRequest) {
+async function requireAuthenticatedUser() {
   const supabase = await createSupabaseServerClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
+  return user
+}
+
+export async function GET(req: NextRequest) {
+  const user = await requireAuthenticatedUser()
+  if (!user) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+  }
+
+  try {
+    const section = req.nextUrl.searchParams.get('section') ?? 'feed'
+    const runId = req.nextUrl.searchParams.get('run_id')
+
+    if (section === 'feed') {
+      if (!runId) {
+        return NextResponse.json({ error: 'run_id es requerido' }, { status: 400 })
+      }
+
+      const data = await getEquifaxRunActionFeed(runId)
+      return NextResponse.json({ success: true, data })
+    }
+
+    return NextResponse.json({ error: 'Sección no soportada' }, { status: 400 })
+  } catch (error) {
+    console.error('[equifax/leads:get]', error)
+    const message = error instanceof Error ? error.message : 'No se pudo preparar el feed Equifax.'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const user = await requireAuthenticatedUser()
   if (!user) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   }
 
   try {
     const body = await req.json()
-    const action = body?.action === 'generate' ? 'generate' : 'preview'
+    const action =
+      body?.action === 'generate' || body?.action === 'push_to_crm'
+        ? body.action
+        : 'preview'
+
+    if (action === 'push_to_crm') {
+      if (!body?.run_id || typeof body.run_id !== 'string') {
+        return NextResponse.json({ error: 'run_id es requerido' }, { status: 400 })
+      }
+
+      const data = await pushEquifaxRunToCrm(body.run_id)
+      return NextResponse.json({ success: true, data })
+    }
+
     const params = {
       volume: Number(body?.volume ?? 1000),
       product_ids: Array.isArray(body?.product_ids) ? body.product_ids : [],

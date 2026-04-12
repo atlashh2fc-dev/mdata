@@ -21,6 +21,7 @@ import {
 } from '@/lib/utils/formatters'
 import type {
   EquifaxCatalogSummary,
+  EquifaxCrmPushResult,
   EquifaxLeadGenerationResult,
   EquifaxLeadPreviewResult,
   EquifaxLeadScenario,
@@ -174,9 +175,11 @@ export function EquifaxLeadBuilderPage() {
   const [importingSales, setImportingSales] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [generatingScenarioKey, setGeneratingScenarioKey] = useState<string | null>(null)
+  const [pushingToCrm, setPushingToCrm] = useState(false)
   const [preview, setPreview] = useState<EquifaxLeadPreviewResult | null>(null)
   const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
   const [result, setResult] = useState<EquifaxLeadGenerationResult | null>(null)
+  const [crmPushResult, setCrmPushResult] = useState<EquifaxCrmPushResult | null>(null)
   const [salesImportResult, setSalesImportResult] = useState<EquifaxSalesImportResult | null>(null)
   const [productImportMessage, setProductImportMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -353,6 +356,7 @@ export function EquifaxLeadBuilderPage() {
   async function handleGenerateScenario(scenario: EquifaxLeadScenario) {
     setGeneratingScenarioKey(scenario.key)
     setError(null)
+    setCrmPushResult(null)
 
     try {
       const res = await fetch('/api/equifax/leads', {
@@ -376,6 +380,33 @@ export function EquifaxLeadBuilderPage() {
     }
   }
 
+  async function handlePushToCrm() {
+    if (!result?.run_id) return
+
+    setPushingToCrm(true)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/equifax/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'push_to_crm',
+          run_id: result.run_id,
+        }),
+      })
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxCrmPushResult; error?: string }>(res)
+      if (!res.ok) throw new Error(json.error ?? 'No se pudo exportar el run al CRM.')
+      setCrmPushResult(json.data ?? null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo exportar el run al CRM.')
+    } finally {
+      setPushingToCrm(false)
+    }
+  }
+
   if (loading) {
     return <LoadingState text="Cargando módulo Equifax..." />
   }
@@ -386,13 +417,23 @@ export function EquifaxLeadBuilderPage() {
         title="Armado de BDD Equifax"
         subtitle="Histórico de ventas, catálogo de productos y priorización IA para bases listas para CRM"
         actions={result?.rows?.length ? (
-          <button
-            onClick={() => downloadCsv(result.rows)}
-            className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/15"
-          >
-            <Download className="h-4 w-4" />
-            Exportar CSV CRM
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handlePushToCrm}
+              disabled={pushingToCrm}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pushingToCrm ? <Spinner size="sm" /> : <Upload className="h-4 w-4" />}
+              {crmPushResult?.run_id === result.run_id ? 'Reenviar al CRM' : 'Enviar al CRM'}
+            </button>
+            <button
+              onClick={() => downloadCsv(result.rows)}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/15"
+            >
+              <Download className="h-4 w-4" />
+              Exportar CSV CRM
+            </button>
+          </div>
         ) : null}
       />
 
@@ -812,6 +853,12 @@ export function EquifaxLeadBuilderPage() {
 
         {result && (
           <section className="card p-5">
+            {crmPushResult?.run_id === result.run_id && (
+              <div className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                Run enviado al CRM. Se creó el run {crmPushResult.crm_run_id} con {formatNumber(crmPushResult.lead_instructions)} leads y {formatNumber(crmPushResult.campaign_instructions)} instrucción(es) de campaña.
+              </div>
+            )}
+
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-white">Resultado de priorización</h2>

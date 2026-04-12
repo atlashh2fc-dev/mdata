@@ -287,6 +287,62 @@ function buildReasonTags(feature: EquifaxLeadFeatureSnapshot, score: HeuristicSc
   return uniqueStrings(tags).slice(0, 8)
 }
 
+function deriveContactLabel(params: {
+  totalInteractions: number
+  effectiveContacts: number
+  noContactEvents: number
+  interestEvents: number
+  callbackEvents: number
+  salesEvents: number
+  openedEvents: number
+  clickedEvents: number
+}) {
+  const contactRate = safeRate(params.effectiveContacts, Math.max(params.totalInteractions, 1))
+  const noContactRate = safeRate(params.noContactEvents, Math.max(params.totalInteractions, 1))
+
+  if (params.salesEvents > 0) return true
+  if (params.interestEvents > 0 || params.callbackEvents > 0) return true
+  if (params.effectiveContacts >= 2) return true
+  if (params.effectiveContacts >= 1 && params.totalInteractions <= 2) return true
+  if (params.effectiveContacts >= 1 && noContactRate < 0.7) return true
+  if (params.clickedEvents > 0 && params.openedEvents > 0) return true
+  if (contactRate >= 0.4 && params.totalInteractions >= 2) return true
+
+  return false
+}
+
+function deriveInterestLabel(params: {
+  interestEvents: number
+  callbackEvents: number
+  clickedEvents: number
+  bestManagementEvents: number
+  effectiveContacts: number
+}) {
+  if (params.interestEvents > 0 || params.callbackEvents > 0) return true
+  if (params.clickedEvents > 0 && params.effectiveContacts > 0) return true
+  if (params.bestManagementEvents > 0 && params.effectiveContacts > 0) return true
+  return false
+}
+
+function derivePurchaseLabel(params: {
+  salesEvents: number
+  interestEvents: number
+  callbackEvents: number
+  clickedEvents: number
+  bestManagementEvents: number
+  effectiveContacts: number
+  equifaxSalesCount: number
+  isExistingCustomer: boolean
+}) {
+  if (params.salesEvents > 0) return true
+  if (params.interestEvents > 0 && params.callbackEvents > 0) return true
+  if (params.interestEvents > 0 && params.bestManagementEvents > 0) return true
+  if (params.callbackEvents > 0 && params.effectiveContacts >= 2) return true
+  if (params.clickedEvents > 0 && params.interestEvents > 0) return true
+  if (params.isExistingCustomer && params.equifaxSalesCount >= 2 && params.interestEvents > 0) return true
+  return false
+}
+
 async function fetchRowsInChunks<T>(
   table: string,
   columns: string,
@@ -497,6 +553,36 @@ function buildFeatureRow(params: {
     best_email: persona?.best_email ?? null,
   }
 
+  const labelContact = deriveContactLabel({
+    totalInteractions: contactBase,
+    effectiveContacts,
+    noContactEvents,
+    interestEvents,
+    callbackEvents,
+    salesEvents,
+    openedEvents: feedback?.openedEvents ?? 0,
+    clickedEvents: feedback?.clickedEvents ?? 0,
+  })
+
+  const labelInterest = deriveInterestLabel({
+    interestEvents,
+    callbackEvents,
+    clickedEvents: feedback?.clickedEvents ?? 0,
+    bestManagementEvents: feedback?.bestManagementEvents ?? 0,
+    effectiveContacts,
+  })
+
+  const labelPurchase = derivePurchaseLabel({
+    salesEvents,
+    interestEvents,
+    callbackEvents,
+    clickedEvents: feedback?.clickedEvents ?? 0,
+    bestManagementEvents: feedback?.bestManagementEvents ?? 0,
+    effectiveContacts,
+    equifaxSalesCount: toNumber(customer?.sales_count),
+    isExistingCustomer: Boolean(customer),
+  })
+
   const row: EquifaxLeadFeatureSnapshot = {
     rutid,
     company_name: master?.razon_social_empresa ?? null,
@@ -534,9 +620,9 @@ function buildFeatureRow(params: {
       last_interest_at: feedback?.lastInterestAt ?? null,
       last_sale_feedback_at: feedback?.lastSaleFeedbackAt ?? null,
     },
-    label_contact: safeRate(effectiveContacts, Math.max(contactBase, 1)) >= 0.3 || effectiveContacts >= 2,
-    label_interest: interestEvents > 0 || callbackEvents > 0,
-    label_purchase: salesEvents > 0 || (interestEvents > 0 && callbackEvents > 0),
+    label_contact: labelContact,
+    label_interest: labelInterest,
+    label_purchase: labelPurchase,
     refreshed_at: new Date().toISOString(),
   }
 
@@ -1132,8 +1218,10 @@ export async function trainEquifaxLogisticModels(options?: {
       if (target === 'interest') return row.label_interest ? 1 : 0
       return row.label_purchase ? 1 : 0
     })
+    const positiveCount = labels.reduce((sum, value) => sum + value, 0)
+    const negativeCount = labels.length - positiveCount
     const positiveRate = safeRate(labels.reduce((sum, value) => sum + value, 0), labels.length)
-    if (positiveRate <= 0.02 || positiveRate >= 0.98) {
+    if (positiveRate <= 0.02 || positiveRate >= 0.98 || positiveCount < 40 || negativeCount < 40) {
       continue
     }
 
