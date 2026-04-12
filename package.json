@@ -24,6 +24,7 @@
     "ops:consolidado:replace": "node --env-file=.env.local scripts/master-sync/export-consolidado.mjs --mode=replace",
     "ops:consolidado:rest": "node --env-file=.env.local scripts/master-sync/export-consolidado-rest.mjs",
     "ops:consolidado:rest:replace": "node --env-file=.env.local scripts/master-sync/export-consolidado-rest.mjs --mode=replace",
+    "ops:equifax:import:sales": "node --env-file=.env.local scripts/equifax/import-sales-xlsx.mjs",
     "ops:verify": "node --env-file=.env.local scripts/master-sync/verify-migration.mjs",
     "ops:backfill:company-contacts": "node --env-file=.env.local scripts/master-sync/backfill-company-contacts.mjs",
     "ops:sync:crm-feedback": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-feedback-sync/sync-registro-intel.mjs",

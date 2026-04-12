@@ -16,6 +16,7 @@ import {
   BrainCircuit,
   Target,
   WandSparkles,
+  Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/formatters'
 import { supabaseBrowser } from '@/lib/db/client'
@@ -44,6 +45,7 @@ const NAV_ITEMS = [
       { href: '/universos', label: 'Explorador Universos', icon: Database },
       { href: '/segmentos', label: 'Segmentador Visual', icon: Users },
       { href: '/poblar', label: 'Poblar Base', icon: WandSparkles },
+      { href: '/equifax-bdd', label: 'Armado BDD Equifax', icon: Building2 },
       { href: '/exportar', label: 'Exportar Base', icon: Download },
     ],
   },
@@ -89,6 +91,8 @@ export function Sidebar() {
                 const Icon = item.icon
                 const isActive = item.href === '/poblar'
                   ? pathname.startsWith('/poblar') || pathname.startsWith('/exportar')
+                  : item.href === '/equifax-bdd'
+                    ? pathname.startsWith('/equifax-bdd')
                   : item.href === '/inteligencia-comercial'
                     ? pathname.startsWith('/inteligencia-comercial') || pathname.startsWith('/inteligencia')
                     : pathname.startsWith(item.href)
