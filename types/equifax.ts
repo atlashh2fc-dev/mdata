@@ -43,6 +43,7 @@ export interface EquifaxLeadGenerationParams {
   include_existing_customers?: boolean
   min_phone_count?: number
   min_email_count?: number
+  scenario_key?: string | null
 }
 
 export interface EquifaxLeadResultItem {
@@ -66,6 +67,8 @@ export interface EquifaxLeadResultItem {
 
 export interface EquifaxLeadGenerationResult {
   run_id: string
+  scenario_key: string
+  scenario_title: string
   generated_count: number
   requested_volume: number
   ai_profile: Record<string, unknown>
@@ -75,6 +78,35 @@ export interface EquifaxLeadGenerationResult {
     avg_priority_score: number
     avg_contactability_score: number
     avg_purchase_propensity_score: number
+    avg_equifax_fit_score: number
   }
   rows: EquifaxLeadResultItem[]
+}
+
+export interface EquifaxLeadScenario {
+  key: string
+  title: string
+  description: string
+  recommendation: string
+  generated_count: number
+  requested_volume: number
+  summary: {
+    existing_customers: number
+    prospects: number
+    avg_priority_score: number
+    avg_contactability_score: number
+    avg_purchase_propensity_score: number
+    avg_equifax_fit_score: number
+  }
+  highlights: string[]
+  sample_rows: EquifaxLeadResultItem[]
+}
+
+export interface EquifaxLeadPreviewResult {
+  requested_volume: number
+  universe_analyzed: number
+  eligible_matches: number
+  recommended_scenario_key: string
+  ai_profile: Record<string, unknown>
+  scenarios: EquifaxLeadScenario[]
 }

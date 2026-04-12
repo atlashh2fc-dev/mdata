@@ -3,8 +3,10 @@ import { cleanRut } from '@/lib/utils/rut'
 import type {
   EquifaxCatalogSummary,
   EquifaxLeadGenerationParams,
+  EquifaxLeadPreviewResult,
   EquifaxLeadGenerationResult,
   EquifaxLeadResultItem,
+  EquifaxLeadScenario,
   EquifaxProductCatalogItem,
   EquifaxSalesImportResult,
 } from '@/types/equifax'
@@ -12,7 +14,8 @@ import type {
 const INCEPTION_API_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
 const INCEPTION_MODEL = 'mercury-2'
 const FETCH_CHUNK_SIZE = 1000
-const MAX_CANDIDATES = 15000
+const MAX_CANDIDATES = 60000
+const INSERT_CHUNK_SIZE = 500
 
 type ImportedSaleRow = {
   source_file: string
@@ -85,6 +88,80 @@ type CustomerSummaryRow = {
   last_sale_at: string | null
   services_bought: string[] | null
 }
+
+type ScoredLeadCandidate = EquifaxLeadResultItem & {
+  base_priority_score: number
+  coverage_score: number
+  keyword_hits: number
+}
+
+type ScenarioConfig = {
+  key: string
+  title: string
+  description: string
+  recommendation: string
+  weights: {
+    base: number
+    contactability: number
+    purchase: number
+    fit: number
+    existing: number
+    prospect: number
+  }
+}
+
+type PreparedEquifaxCandidates = {
+  volume: number
+  aiProfile: ProductProfile
+  candidates: ScoredLeadCandidate[]
+  universeAnalyzed: number
+  eligibleMatches: number
+}
+
+const EQUFAX_SCENARIOS: ScenarioConfig[] = [
+  {
+    key: 'balanceado_rapido',
+    title: 'Base 1 · Balanceado para cierre rápido',
+    description: 'Mezcla clientes actuales y prospectos nuevos, priorizando contacto disponible y fit comercial inmediato.',
+    recommendation: 'Úsala cuando quieras velocidad comercial con una mezcla sana de upsell y apertura de cuentas nuevas.',
+    weights: {
+      base: 0.44,
+      contactability: 0.18,
+      purchase: 0.15,
+      fit: 0.13,
+      existing: 0.1,
+      prospect: 0,
+    },
+  },
+  {
+    key: 'upsell_cross_sell',
+    title: 'Base 2 · Upsell y cross-sell',
+    description: 'Empuja primero clientes Equifax actuales con mayor contactabilidad y mejor encaje para ampliar ticket.',
+    recommendation: 'Úsala cuando el foco sea vender rápido sobre cartera conocida y con argumentos comerciales más directos.',
+    weights: {
+      base: 0.34,
+      contactability: 0.2,
+      purchase: 0.14,
+      fit: 0.14,
+      existing: 0.18,
+      prospect: 0,
+    },
+  },
+  {
+    key: 'captacion_nuevos',
+    title: 'Base 3 · Captación de prospectos nuevos',
+    description: 'Busca empresas nuevas con alto match a los productos, buena señal comercial y posibilidad real de contacto.',
+    recommendation: 'Úsala cuando quieras expandir base nueva sin perder calidad de contacto ni potencial de compra.',
+    weights: {
+      base: 0.32,
+      contactability: 0.16,
+      purchase: 0.2,
+      fit: 0.18,
+      existing: 0,
+      prospect: 0.14,
+    },
+  },
+]
 
 function normalizeRutForDb(value: string | null | undefined): string | null {
   if (!value) return null
@@ -550,7 +627,40 @@ Devuelve:
   }
 }
 
-async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
+function dedupeCandidateCompanies(rows: CandidateCompany[]) {
+  const map = new Map<string, CandidateCompany>()
+
+  for (const row of rows) {
+    const current = map.get(row.rutid)
+    if (!current) {
+      map.set(row.rutid, row)
+      continue
+    }
+
+    const currentCoverage = Number(current.cobertura_pct ?? 0)
+    const nextCoverage = Number(row.cobertura_pct ?? 0)
+    const currentContacts = Number(Boolean(current.email)) + Number(Boolean(current.fono_cel))
+    const nextContacts = Number(Boolean(row.email)) + Number(Boolean(row.fono_cel))
+    const currentPatrimonial = Number(current.score_patrimonial ?? 0)
+    const nextPatrimonial = Number(row.score_patrimonial ?? 0)
+
+    if (
+      nextContacts > currentContacts ||
+      nextCoverage > currentCoverage ||
+      nextPatrimonial > currentPatrimonial
+    ) {
+      map.set(row.rutid, row)
+    }
+  }
+
+  return [...map.values()]
+}
+
+async function fetchCandidateCompaniesOrdered(
+  sampleSize: number,
+  regions: string[],
+  orderBy: 'score_patrimonial' | 'cobertura_pct'
+) {
   const rows: CandidateCompany[] = []
 
   for (let start = 0; start < sampleSize; start += FETCH_CHUNK_SIZE) {
@@ -572,7 +682,7 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
         n_bienes_raices
       `)
       .not('razon_social_empresa', 'is', null)
-      .order('score_patrimonial', { ascending: false })
+      .order(orderBy, { ascending: false, nullsFirst: false })
       .range(start, start + FETCH_CHUNK_SIZE - 1)
 
     if (regions.length > 0) {
@@ -581,7 +691,7 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
 
     const { data, error } = await query
     if (error) {
-      console.error('[fetchCandidateCompanies]', error)
+      console.error('[fetchCandidateCompaniesOrdered]', error)
       throw new Error('No se pudo consultar el universo empresarial.')
     }
 
@@ -591,6 +701,90 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
   }
 
   return rows
+}
+
+async function fetchExistingCustomerCandidates(limit: number, regions: string[]) {
+  const { data: customerRows, error: customerError } = await db
+    .from('equifax_sales_company_summary')
+    .select('rutid')
+    .order('total_amount', { ascending: false })
+    .order('last_sale_at', { ascending: false })
+    .limit(limit)
+
+  if (customerError) {
+    console.error('[fetchExistingCustomerCandidates:summary]', customerError)
+    throw new Error('No se pudo consultar clientes Equifax históricos.')
+  }
+
+  const rutids = uniqueStrings((customerRows ?? []).map(row => String(row.rutid ?? '')).filter(Boolean))
+  const rows: CandidateCompany[] = []
+
+  for (let start = 0; start < rutids.length; start += FETCH_CHUNK_SIZE) {
+    let query = db
+      .from('master_personas_view')
+      .select(`
+        rutid,
+        razon_social_empresa,
+        region_canonica,
+        comuna_canonica,
+        email,
+        fono_cel,
+        score_patrimonial,
+        cobertura_pct,
+        tiene_empresa,
+        tiene_autos,
+        tiene_bienes_raices,
+        n_autos,
+        n_bienes_raices
+      `)
+      .in('rutid', rutids.slice(start, start + FETCH_CHUNK_SIZE))
+
+    if (regions.length > 0) {
+      query = query.in('region_canonica', regions)
+    }
+
+    const { data, error } = await query
+    if (error) {
+      console.error('[fetchExistingCustomerCandidates:master]', error)
+      throw new Error('No se pudo cruzar clientes Equifax con el universo empresarial.')
+    }
+
+    rows.push(...((data ?? []) as CandidateCompany[]))
+  }
+
+  return rows
+}
+
+async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
+  const [patrimonialRows, coverageRows, existingRows] = await Promise.all([
+    fetchCandidateCompaniesOrdered(sampleSize, regions, 'score_patrimonial'),
+    fetchCandidateCompaniesOrdered(Math.ceil(sampleSize * 0.6), regions, 'cobertura_pct'),
+    fetchExistingCustomerCandidates(Math.min(Math.ceil(sampleSize * 0.2), 8000), regions),
+  ])
+
+  return dedupeCandidateCompanies([
+    ...existingRows,
+    ...patrimonialRows,
+    ...coverageRows,
+  ])
+    .sort((left, right) => {
+      const leftScore =
+        Number(Boolean(left.email)) * 18 +
+        Number(Boolean(left.fono_cel)) * 24 +
+        Number(left.cobertura_pct ?? 0) * 0.4 +
+        Number(left.score_patrimonial ?? 0) * 0.35 +
+        Number(Boolean(left.tiene_empresa)) * 12
+
+      const rightScore =
+        Number(Boolean(right.email)) * 18 +
+        Number(Boolean(right.fono_cel)) * 24 +
+        Number(right.cobertura_pct ?? 0) * 0.4 +
+        Number(right.score_patrimonial ?? 0) * 0.35 +
+        Number(Boolean(right.tiene_empresa)) * 12
+
+      return rightScore - leftScore
+    })
+    .slice(0, sampleSize)
 }
 
 async function fetchPersonaScoresMap(rutids: string[]) {
@@ -697,6 +891,136 @@ function buildLeadReasons(params: {
   }
 
   return reasons.slice(0, 6)
+}
+
+function dedupeLeadRowsByRutid(rows: EquifaxLeadResultItem[]) {
+  const map = new Map<string, EquifaxLeadResultItem>()
+
+  for (const row of rows) {
+    const current = map.get(row.rutid)
+    if (!current || row.priority_score > current.priority_score) {
+      map.set(row.rutid, row)
+    }
+  }
+
+  return [...map.values()]
+}
+
+function buildRunSummary(rows: EquifaxLeadResultItem[]) {
+  const avg = (values: number[]) => values.length
+    ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 2)
+    : 0
+
+  return {
+    existing_customers: rows.filter(row => row.is_existing_customer).length,
+    prospects: rows.filter(row => !row.is_existing_customer).length,
+    avg_priority_score: avg(rows.map(row => row.priority_score)),
+    avg_contactability_score: avg(rows.map(row => row.contactability_score)),
+    avg_purchase_propensity_score: avg(rows.map(row => row.purchase_propensity_score)),
+    avg_equifax_fit_score: avg(rows.map(row => row.equifax_fit_score)),
+  }
+}
+
+function applyScenarioToCandidates(
+  candidates: ScoredLeadCandidate[],
+  scenario: ScenarioConfig,
+  volume: number
+) {
+  const reranked = candidates
+    .map(candidate => ({
+      ...candidate,
+      priority_score: round(
+        clamp(
+          candidate.base_priority_score * scenario.weights.base +
+          candidate.contactability_score * scenario.weights.contactability +
+          candidate.purchase_propensity_score * scenario.weights.purchase +
+          candidate.equifax_fit_score * scenario.weights.fit +
+          (candidate.is_existing_customer ? 100 : 0) * scenario.weights.existing +
+          (!candidate.is_existing_customer ? 100 : 0) * scenario.weights.prospect
+        ),
+        2
+      ),
+    }))
+    .sort((left, right) => right.priority_score - left.priority_score)
+
+  const selectedRows = dedupeLeadRowsByRutid(reranked).slice(0, volume)
+  return {
+    selectedRows,
+    summary: buildRunSummary(selectedRows),
+  }
+}
+
+function buildScenarioHighlights(rows: EquifaxLeadResultItem[], requestedVolume: number) {
+  const bothContact = rows.filter(row => row.phone_count > 0 && row.email_count > 0).length
+  const withPhone = rows.filter(row => row.phone_count > 0).length
+  const withEmail = rows.filter(row => row.email_count > 0).length
+  const regionCounts = new Map<string, number>()
+  for (const row of rows) {
+    if (!row.region) continue
+    regionCounts.set(row.region, (regionCounts.get(row.region) ?? 0) + 1)
+  }
+
+  const topRegions = [...regionCounts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([region, count]) => `${region}: ${count}`)
+
+  return [
+    `${rows.length} leads elegibles sobre ${requestedVolume} solicitados`,
+    `${bothContact} con teléfono y email · ${withPhone} con teléfono · ${withEmail} con email`,
+    topRegions.length ? `Mayor concentración: ${topRegions.join(' · ')}` : 'Sin preferencia regional dominante',
+  ]
+}
+
+function scoreScenarioRecommendation(scenario: EquifaxLeadScenario) {
+  const fulfillment = scenario.requested_volume > 0
+    ? scenario.generated_count / scenario.requested_volume
+    : 0
+
+  return (
+    scenario.summary.avg_priority_score * 0.4 +
+    scenario.summary.avg_contactability_score * 0.25 +
+    scenario.summary.avg_purchase_propensity_score * 0.2 +
+    scenario.summary.avg_equifax_fit_score * 0.15 +
+    fulfillment * 20
+  )
+}
+
+function resolveScenarioConfig(scenarioKey?: string | null) {
+  return EQUFAX_SCENARIOS.find(scenario => scenario.key === scenarioKey) ?? EQUFAX_SCENARIOS[0]
+}
+
+async function insertRunItemsInChunks(runId: string, rows: EquifaxLeadResultItem[]) {
+  for (let start = 0; start < rows.length; start += INSERT_CHUNK_SIZE) {
+    const chunk = rows.slice(start, start + INSERT_CHUNK_SIZE)
+    const { error } = await db
+      .from('equifax_generation_run_items')
+      .insert(chunk.map(row => ({
+        run_id: runId,
+        rutid: row.rutid,
+        company_name: row.company_name,
+        region: row.region,
+        comuna: row.comuna,
+        best_phone: row.best_phone,
+        best_email: row.best_email,
+        phone_count: row.phone_count,
+        email_count: row.email_count,
+        contactability_score: row.contactability_score,
+        purchase_propensity_score: row.purchase_propensity_score,
+        equifax_fit_score: row.equifax_fit_score,
+        priority_score: row.priority_score,
+        is_existing_customer: row.is_existing_customer,
+        last_equifax_sale_at: row.last_equifax_sale_at,
+        services_bought: row.services_bought,
+        reason_tags: row.reason_tags,
+        export_payload: row,
+      })))
+
+    if (error) {
+      console.error('[insertRunItemsInChunks]', error)
+      throw new Error('No se pudieron guardar los leads generados.')
+    }
+  }
 }
 
 export async function importEquifaxSalesRows(rows: ImportedSaleRow[]): Promise<EquifaxSalesImportResult> {
@@ -845,10 +1169,9 @@ export async function saveEquifaxProducts(
   }
 }
 
-export async function generateEquifaxLeads(
-  params: EquifaxLeadGenerationParams,
-  userId?: string
-): Promise<EquifaxLeadGenerationResult> {
+async function prepareEquifaxCandidates(
+  params: EquifaxLeadGenerationParams
+): Promise<PreparedEquifaxCandidates> {
   const volume = clamp(Math.round(params.volume || 1000), 1, 10000)
   const includeExistingCustomers = params.include_existing_customers !== false
   const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
@@ -888,7 +1211,7 @@ export async function generateEquifaxLeads(
 
   const summary = await getEquifaxCatalogSummary()
   const aiProfile = await buildCampaignProfileWithAI(products, summary.top_services, params.prompt)
-  const sampleSize = Math.min(MAX_CANDIDATES, Math.max(volume * 4, 2500))
+  const sampleSize = Math.min(MAX_CANDIDATES, Math.max(volume * 8, 12000))
 
   const candidates = await fetchCandidateCompanies(sampleSize, regions)
   const candidateRutids = candidates.map(row => row.rutid)
@@ -897,7 +1220,7 @@ export async function generateEquifaxLeads(
     fetchCustomerSummaryMap(candidateRutids),
   ])
 
-  const ranked: EquifaxLeadResultItem[] = []
+  const ranked: ScoredLeadCandidate[] = []
 
   for (const candidate of candidates) {
     const companyName = candidate.razon_social_empresa?.trim()
@@ -978,6 +1301,9 @@ export async function generateEquifaxLeads(
       purchase_propensity_score: round(purchase, 2),
       equifax_fit_score: round(equifaxFit, 2),
       priority_score: round(priorityScore, 2),
+      base_priority_score: round(priorityScore, 2),
+      coverage_score: round(Number(candidate.cobertura_pct ?? 0), 2),
+      keyword_hits: keywordMetrics.includeHits,
       is_existing_customer: isExistingCustomer,
       last_equifax_sale_at: customerSummary?.last_sale_at ?? null,
       services_bought: customerSummary?.services_bought ?? [],
@@ -994,33 +1320,84 @@ export async function generateEquifaxLeads(
     })
   }
 
-  ranked.sort((left, right) => right.priority_score - left.priority_score)
-  const selectedRows = ranked.slice(0, volume)
+  ranked.sort((left, right) => right.base_priority_score - left.base_priority_score)
 
-  const avg = (values: number[]) => values.length
-    ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 2)
-    : 0
-
-  const runSummary = {
-    existing_customers: selectedRows.filter(row => row.is_existing_customer).length,
-    prospects: selectedRows.filter(row => !row.is_existing_customer).length,
-    avg_priority_score: avg(selectedRows.map(row => row.priority_score)),
-    avg_contactability_score: avg(selectedRows.map(row => row.contactability_score)),
-    avg_purchase_propensity_score: avg(selectedRows.map(row => row.purchase_propensity_score)),
+  return {
+    volume,
+    aiProfile,
+    candidates: ranked,
+    universeAnalyzed: candidates.length,
+    eligibleMatches: ranked.length,
   }
+}
+
+export async function previewEquifaxLeadScenarios(
+  params: EquifaxLeadGenerationParams
+): Promise<EquifaxLeadPreviewResult> {
+  const prepared = await prepareEquifaxCandidates(params)
+
+  const scenarios = EQUFAX_SCENARIOS.map<EquifaxLeadScenario>(scenario => {
+    const applied = applyScenarioToCandidates(prepared.candidates, scenario, prepared.volume)
+    return {
+      key: scenario.key,
+      title: scenario.title,
+      description: scenario.description,
+      recommendation: scenario.recommendation,
+      generated_count: applied.selectedRows.length,
+      requested_volume: prepared.volume,
+      summary: applied.summary,
+      highlights: buildScenarioHighlights(applied.selectedRows, prepared.volume),
+      sample_rows: applied.selectedRows.slice(0, 12),
+    }
+  })
+
+  const recommendedScenario = [...scenarios]
+    .sort((left, right) => scoreScenarioRecommendation(right) - scoreScenarioRecommendation(left))[0]
+
+  return {
+    requested_volume: prepared.volume,
+    universe_analyzed: prepared.universeAnalyzed,
+    eligible_matches: prepared.eligibleMatches,
+    recommended_scenario_key: recommendedScenario?.key ?? EQUFAX_SCENARIOS[0].key,
+    ai_profile: prepared.aiProfile as Record<string, unknown>,
+    scenarios,
+  }
+}
+
+export async function generateEquifaxLeads(
+  params: EquifaxLeadGenerationParams,
+  userId?: string
+): Promise<EquifaxLeadGenerationResult> {
+  const prepared = await prepareEquifaxCandidates(params)
+  const includeExistingCustomers = params.include_existing_customers !== false
+  const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
+  const minEmailCount = Math.max(0, Math.round(params.min_email_count ?? 0))
+  const regions = uniqueStrings((params.regions ?? []).map(item => item.trim()).filter(Boolean))
+  const scenario = resolveScenarioConfig(params.scenario_key)
+  const applied = applyScenarioToCandidates(prepared.candidates, scenario, prepared.volume)
+  const selectedRows = applied.selectedRows
 
   const { data: runData, error: runError } = await db
     .from('equifax_generation_runs')
     .insert({
-      requested_volume: volume,
+      requested_volume: prepared.volume,
       include_existing_customers: includeExistingCustomers,
       minimum_phone_count: minPhoneCount,
       minimum_email_count: minEmailCount,
       product_catalog_ids: params.product_ids ?? [],
-      product_payload: products,
+      product_payload: {
+        source: 'equifax-bdd',
+        scenario_key: scenario.key,
+        scenario_title: scenario.title,
+        transient_products: params.transient_products ?? [],
+      },
       filter_payload: { regions },
-      ai_profile: aiProfile,
-      summary: runSummary,
+      ai_profile: {
+        ...prepared.aiProfile,
+        selected_scenario_key: scenario.key,
+        selected_scenario_title: scenario.title,
+      },
+      summary: applied.summary,
       created_by: userId ?? null,
     })
     .select('id')
@@ -1034,41 +1411,30 @@ export async function generateEquifaxLeads(
   const runId = String(runData.id)
 
   if (selectedRows.length > 0) {
-    const { error: itemsError } = await db
-      .from('equifax_generation_run_items')
-      .insert(selectedRows.map(row => ({
-        run_id: runId,
-        rutid: row.rutid,
-        company_name: row.company_name,
-        region: row.region,
-        comuna: row.comuna,
-        best_phone: row.best_phone,
-        best_email: row.best_email,
-        phone_count: row.phone_count,
-        email_count: row.email_count,
-        contactability_score: row.contactability_score,
-        purchase_propensity_score: row.purchase_propensity_score,
-        equifax_fit_score: row.equifax_fit_score,
-        priority_score: row.priority_score,
-        is_existing_customer: row.is_existing_customer,
-        last_equifax_sale_at: row.last_equifax_sale_at,
-        services_bought: row.services_bought,
-        reason_tags: row.reason_tags,
-        export_payload: row,
-      })))
+    try {
+      await insertRunItemsInChunks(runId, selectedRows)
+    } catch (error) {
+      await db
+        .from('equifax_generation_runs')
+        .delete()
+        .eq('id', runId)
 
-    if (itemsError) {
-      console.error('[generateEquifaxLeads:items]', itemsError)
-      throw new Error('No se pudieron guardar los leads generados.')
+      throw error
     }
   }
 
   return {
     run_id: runId,
+    scenario_key: scenario.key,
+    scenario_title: scenario.title,
     generated_count: selectedRows.length,
-    requested_volume: volume,
-    ai_profile: aiProfile as Record<string, unknown>,
-    summary: runSummary,
+    requested_volume: prepared.volume,
+    ai_profile: {
+      ...prepared.aiProfile,
+      selected_scenario_key: scenario.key,
+      selected_scenario_title: scenario.title,
+    } as Record<string, unknown>,
+    summary: applied.summary,
     rows: selectedRows,
   }
 }

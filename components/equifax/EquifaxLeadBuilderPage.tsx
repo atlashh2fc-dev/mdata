@@ -22,6 +22,8 @@ import {
 import type {
   EquifaxCatalogSummary,
   EquifaxLeadGenerationResult,
+  EquifaxLeadPreviewResult,
+  EquifaxLeadScenario,
   EquifaxProductCatalogItem,
   EquifaxSalesImportResult,
 } from '@/types/equifax'
@@ -147,7 +149,10 @@ export function EquifaxLeadBuilderPage() {
   const [includeExistingCustomers, setIncludeExistingCustomers] = useState(true)
   const [savingProducts, setSavingProducts] = useState(false)
   const [importingSales, setImportingSales] = useState(false)
-  const [generating, setGenerating] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [generatingScenarioKey, setGeneratingScenarioKey] = useState<string | null>(null)
+  const [preview, setPreview] = useState<EquifaxLeadPreviewResult | null>(null)
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
   const [result, setResult] = useState<EquifaxLeadGenerationResult | null>(null)
   const [salesImportResult, setSalesImportResult] = useState<EquifaxSalesImportResult | null>(null)
   const [productImportMessage, setProductImportMessage] = useState<string | null>(null)
@@ -177,6 +182,31 @@ export function EquifaxLeadBuilderPage() {
     const ids = new Set(selectedProductIds)
     return (catalog?.products ?? []).filter(item => ids.has(item.id))
   }, [catalog?.products, selectedProductIds])
+
+  const generationPayload = useMemo(() => ({
+    product_ids: selectedProductIds,
+    prompt,
+    volume,
+    regions: regions.split(',').map(item => item.trim()).filter(Boolean),
+    include_existing_customers: includeExistingCustomers,
+    min_phone_count: minPhoneCount,
+    min_email_count: minEmailCount,
+  }), [
+    includeExistingCustomers,
+    minEmailCount,
+    minPhoneCount,
+    prompt,
+    regions,
+    selectedProductIds,
+    volume,
+  ])
+
+  const currentRequestKey = useMemo(
+    () => JSON.stringify(generationPayload),
+    [generationPayload]
+  )
+
+  const isPreviewStale = Boolean(preview && previewRequestKey && previewRequestKey !== currentRequestKey)
 
   async function handleSalesImport(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -270,8 +300,35 @@ export function EquifaxLeadBuilderPage() {
     }
   }
 
-  async function handleGenerate() {
-    setGenerating(true)
+  async function handleAnalyze() {
+    setAnalyzing(true)
+    setError(null)
+    setResult(null)
+
+    try {
+      const res = await fetch('/api/equifax/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'preview',
+          ...generationPayload,
+        }),
+      })
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxLeadPreviewResult; error?: string }>(res)
+      if (!res.ok) throw new Error(json.error ?? 'No se pudieron analizar escenarios.')
+      setPreview(json.data ?? null)
+      setPreviewRequestKey(currentRequestKey)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron analizar escenarios.')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  async function handleGenerateScenario(scenario: EquifaxLeadScenario) {
+    setGeneratingScenarioKey(scenario.key)
     setError(null)
 
     try {
@@ -281,22 +338,18 @@ export function EquifaxLeadBuilderPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          product_ids: selectedProductIds,
-          prompt,
-          volume,
-          regions: regions.split(',').map(item => item.trim()).filter(Boolean),
-          include_existing_customers: includeExistingCustomers,
-          min_phone_count: minPhoneCount,
-          min_email_count: minEmailCount,
+          action: 'generate',
+          scenario_key: scenario.key,
+          ...generationPayload,
         }),
       })
       const json = await parseApiResponse<{ success?: boolean; data?: EquifaxLeadGenerationResult; error?: string }>(res)
-      if (!res.ok) throw new Error(json.error ?? 'No se pudo generar la base.')
+      if (!res.ok) throw new Error(json.error ?? 'No se pudo generar la base elegida.')
       setResult(json.data ?? null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo generar leads.')
+      setError(err instanceof Error ? err.message : 'No se pudo generar la base elegida.')
     } finally {
-      setGenerating(false)
+      setGeneratingScenarioKey(null)
     }
   }
 
@@ -502,12 +555,12 @@ export function EquifaxLeadBuilderPage() {
         <section className="card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-semibold text-white">3. Generar base priorizada</h2>
+              <h2 className="text-sm font-semibold text-white">3. Explorar escenarios de base</h2>
               <p className="mt-1 text-xs text-slate-400">
-                El motor cruza catálogo, histórico Equifax, scores comerciales y disponibilidad de teléfonos/emails.
+                Primero analizamos escenarios posibles sobre el universo empresarial disponible. Solo después eliges uno y generamos la base final.
               </p>
             </div>
-            {generating && <Spinner size="sm" />}
+            {analyzing && <Spinner size="sm" />}
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -582,19 +635,136 @@ export function EquifaxLeadBuilderPage() {
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
-              onClick={handleGenerate}
-              disabled={generating || selectedProductIds.length === 0}
+              onClick={handleAnalyze}
+              disabled={analyzing || selectedProductIds.length === 0}
               className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <BrainCircuit className="h-4 w-4" />
-              Generar base con IA
+              {preview ? 'Analizar nuevamente' : 'Analizar escenarios con IA'}
             </button>
+            {preview && (
+              <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-300">
+                Universo analizado: {formatNumber(preview.universe_analyzed)} · Matches elegibles: {formatNumber(preview.eligible_matches)}
+              </div>
+            )}
             <div className="text-xs text-slate-500">
               {selectedProducts.length > 0
                 ? `${formatNumber(selectedProducts.length)} producto(s) seleccionado(s)`
                 : 'Selecciona al menos un producto'}
             </div>
           </div>
+
+          {preview && (
+            <div className="mt-5 space-y-4">
+              {isPreviewStale && (
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  Cambiaste filtros después del último análisis. Vuelve a analizar para recalcular escenarios antes de generar una base final.
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Lectura de la IA</div>
+                <p className="mt-2 text-sm text-slate-200">
+                  {String(preview.ai_profile.notes ?? 'Sin explicación adicional.')}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {Array.isArray(preview.ai_profile.buyer_signals) && preview.ai_profile.buyer_signals.map(signal => (
+                    <span key={String(signal)} className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-200">
+                      {String(signal)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-3">
+                {preview.scenarios.map(scenario => {
+                  const isRecommended = preview.recommended_scenario_key === scenario.key
+                  const isGenerating = generatingScenarioKey === scenario.key
+
+                  return (
+                    <div
+                      key={scenario.key}
+                      className={cn(
+                        'rounded-2xl border p-4',
+                        isRecommended
+                          ? 'border-cyan-500/35 bg-cyan-500/8'
+                          : 'border-slate-800 bg-slate-950/35'
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-sm font-semibold text-white">{scenario.title}</h3>
+                            {isRecommended && (
+                              <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-200">
+                                Recomendado
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-2 text-xs text-slate-400">{scenario.description}</p>
+                        </div>
+                        {isGenerating && <Spinner size="sm" />}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                          <div className="text-lg font-semibold text-white">{formatNumber(scenario.generated_count)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Volumen</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                          <div className="text-lg font-semibold text-white">{formatNumber(scenario.summary.avg_priority_score)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Priority</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                          <div className="text-lg font-semibold text-white">{formatNumber(scenario.summary.existing_customers)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Clientes</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                          <div className="text-lg font-semibold text-white">{formatNumber(scenario.summary.prospects)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Prospects</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        {scenario.highlights.map(highlight => (
+                          <div key={`${scenario.key}-${highlight}`} className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-300">
+                            {highlight}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-3 text-xs text-emerald-100">
+                        {scenario.recommendation}
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Muestra top</div>
+                        <div className="mt-2 space-y-2">
+                          {scenario.sample_rows.slice(0, 4).map(row => (
+                            <div key={`${scenario.key}-${row.rutid}`} className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-2">
+                              <div className="font-medium text-white">{row.company_name}</div>
+                              <div className="mt-1 text-xs text-slate-400">
+                                {row.region ?? 'Sin región'} · Score {formatNumber(row.priority_score)} · {row.best_phone ?? 'Sin teléfono'}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleGenerateScenario(scenario)}
+                        disabled={isGenerating || isPreviewStale}
+                        className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Download className="h-4 w-4" />
+                        Generar esta base
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </section>
 
         {result && (
@@ -603,10 +773,10 @@ export function EquifaxLeadBuilderPage() {
               <div>
                 <h2 className="text-sm font-semibold text-white">Resultado de priorización</h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  Run {result.run_id} · {formatNumber(result.generated_count)} leads generados sobre {formatNumber(result.requested_volume)} solicitados
+                  {result.scenario_title} · Run {result.run_id} · {formatNumber(result.generated_count)} leads generados sobre {formatNumber(result.requested_volume)} solicitados
                 </p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-4">
                 <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-center">
                   <div className="text-lg font-semibold text-white">{formatNumber(result.summary.prospects)}</div>
                   <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Prospects</div>
@@ -618,6 +788,10 @@ export function EquifaxLeadBuilderPage() {
                 <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-center">
                   <div className="text-lg font-semibold text-white">{formatNumber(result.summary.avg_priority_score)}</div>
                   <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Priority score</div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-center">
+                  <div className="text-lg font-semibold text-white">{formatNumber(result.summary.avg_equifax_fit_score)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Fit Equifax</div>
                 </div>
               </div>
             </div>
