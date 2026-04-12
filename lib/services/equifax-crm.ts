@@ -6,6 +6,7 @@ import type {
   CommercialActionFeed,
   LeadActionInstruction,
 } from '@/types'
+import type { EquifaxCrmPushFilters } from '@/types/equifax'
 
 const FETCH_CHUNK_SIZE = 1000
 const INSERT_CHUNK_SIZE = 1000
@@ -47,6 +48,18 @@ type PortfolioSummary = {
   averageLeadScore: number
   averageContactProbability: number
   averagePurchaseProbability: number
+}
+
+type CrmActiveTargetRow = {
+  rutid: string
+  campaign_name: string | null
+  current_priority_score: number | null
+  updated_at: string | null
+}
+
+type CrmRecentPushRow = {
+  rutid: string
+  created_at: string | null
 }
 
 function clamp(value: number, min = 0, max = 100) {
@@ -96,6 +109,50 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value)))]
 }
 
+function normalizeRutid(value?: string | null) {
+  if (!value) return null
+
+  const compact = value.toUpperCase().replace(/[^0-9K]/g, '')
+  if (!compact) return null
+
+  const trimmed = compact.replace(/^0+/, '')
+  return trimmed || null
+}
+
+function subtractDays(days: number) {
+  return new Date(Date.now() - Math.max(0, days) * 24 * 60 * 60 * 1000).toISOString()
+}
+
+const DEFAULT_PUSH_FILTERS: EquifaxCrmPushFilters = {
+  allowed_temperatures: ['green', 'yellow'],
+  min_lead_score: 35,
+  min_contact_probability: 35,
+  min_purchase_probability: 10,
+  exclude_existing_customers: false,
+  exclude_active_crm_targets: true,
+  exclude_recent_crm_days: 7,
+  max_leads: null,
+}
+
+function normalizePushFilters(filters?: Partial<EquifaxCrmPushFilters>): EquifaxCrmPushFilters {
+  const temperatures = Array.isArray(filters?.allowed_temperatures) && filters?.allowed_temperatures.length
+    ? filters.allowed_temperatures.filter(item => item === 'green' || item === 'yellow' || item === 'red')
+    : DEFAULT_PUSH_FILTERS.allowed_temperatures
+
+  return {
+    allowed_temperatures: temperatures.length ? temperatures : DEFAULT_PUSH_FILTERS.allowed_temperatures,
+    min_lead_score: Math.max(0, Number(filters?.min_lead_score ?? DEFAULT_PUSH_FILTERS.min_lead_score)),
+    min_contact_probability: Math.max(0, Number(filters?.min_contact_probability ?? DEFAULT_PUSH_FILTERS.min_contact_probability)),
+    min_purchase_probability: Math.max(0, Number(filters?.min_purchase_probability ?? DEFAULT_PUSH_FILTERS.min_purchase_probability)),
+    exclude_existing_customers: filters?.exclude_existing_customers === true,
+    exclude_active_crm_targets: filters?.exclude_active_crm_targets !== false,
+    exclude_recent_crm_days: Math.max(0, Math.round(Number(filters?.exclude_recent_crm_days ?? DEFAULT_PUSH_FILTERS.exclude_recent_crm_days))),
+    max_leads: filters?.max_leads === null || filters?.max_leads === undefined
+      ? DEFAULT_PUSH_FILTERS.max_leads
+      : Math.max(1, Math.round(Number(filters.max_leads))),
+  }
+}
+
 function getCrmOperationalClient() {
   const url = process.env.REGISTRO_INTEL_SUPABASE_URL
   const key =
@@ -112,6 +169,73 @@ function getCrmOperationalClient() {
       persistSession: false,
     },
   })
+}
+
+async function fetchCrmActiveTargets(
+  crm: ReturnType<typeof getCrmOperationalClient>,
+  rutids: string[]
+) {
+  const normalizedRutids = [...new Set(
+    rutids
+      .map(rutid => normalizeRutid(rutid))
+      .filter((rutid): rutid is string => Boolean(rutid))
+  )]
+
+  if (!normalizedRutids.length) return new Map<string, CrmActiveTargetRow>()
+
+  const { data, error } = await crm
+    .from('commercial_brain_active_targets_v1')
+    .select('rutid,campaign_name,current_priority_score,updated_at')
+    .in('rutid', normalizedRutids)
+    .order('current_priority_score', { ascending: false })
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`No pude leer los leads activos del CRM: ${error.message}`)
+  }
+
+  const map = new Map<string, CrmActiveTargetRow>()
+  for (const row of (data ?? []) as CrmActiveTargetRow[]) {
+    const normalized = normalizeRutid(row.rutid)
+    if (normalized && !map.has(normalized)) {
+      map.set(normalized, row)
+    }
+  }
+  return map
+}
+
+async function fetchRecentCrmPushes(
+  crm: ReturnType<typeof getCrmOperationalClient>,
+  rutids: string[],
+  lookbackDays: number
+) {
+  const normalizedRutids = [...new Set(
+    rutids
+      .map(rutid => normalizeRutid(rutid))
+      .filter((rutid): rutid is string => Boolean(rutid))
+  )]
+
+  if (!normalizedRutids.length || lookbackDays <= 0) return new Map<string, CrmRecentPushRow>()
+
+  const { data, error } = await crm
+    .from('commercial_brain_lead_actions')
+    .select('rutid,created_at')
+    .in('rutid', normalizedRutids)
+    .gte('created_at', subtractDays(lookbackDays))
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`No pude leer pushes recientes del CRM: ${error.message}`)
+  }
+
+  const map = new Map<string, CrmRecentPushRow>()
+  for (const row of (data ?? []) as CrmRecentPushRow[]) {
+    const normalized = normalizeRutid(row.rutid)
+    if (normalized && !map.has(normalized)) {
+      map.set(normalized, row)
+    }
+  }
+  return map
 }
 
 async function fetchRun(runId: string): Promise<EquifaxRunRow> {
@@ -400,6 +524,60 @@ export async function getEquifaxRunActionFeed(runId: string): Promise<Commercial
   }
 }
 
+async function filterRowsForCrmPush(
+  crm: ReturnType<typeof getCrmOperationalClient>,
+  rows: EquifaxRunItemRow[],
+  filters?: Partial<EquifaxCrmPushFilters>
+) {
+  const normalizedFilters = normalizePushFilters(filters)
+  let skippedActiveTargets = 0
+  let skippedRecentPushes = 0
+
+  const rutids = rows.map(row => row.rutid)
+  const [activeTargets, recentPushes] = await Promise.all([
+    normalizedFilters.exclude_active_crm_targets
+      ? fetchCrmActiveTargets(crm, rutids)
+      : Promise.resolve(new Map<string, CrmActiveTargetRow>()),
+    normalizedFilters.exclude_recent_crm_days > 0
+      ? fetchRecentCrmPushes(crm, rutids, normalizedFilters.exclude_recent_crm_days)
+      : Promise.resolve(new Map<string, CrmRecentPushRow>()),
+  ])
+
+  const filtered = rows.filter(row => {
+    if (!normalizedFilters.allowed_temperatures.includes(row.lead_temperature ?? 'red')) return false
+    if (Number(row.lead_score ?? 0) < normalizedFilters.min_lead_score) return false
+    if (Number(row.contact_probability ?? 0) < normalizedFilters.min_contact_probability) return false
+    if (Number(row.purchase_probability ?? 0) < normalizedFilters.min_purchase_probability) return false
+    if (normalizedFilters.exclude_existing_customers && row.is_existing_customer) return false
+
+    const normalizedRutid = normalizeRutid(row.rutid)
+    if (normalizedRutid && activeTargets.has(normalizedRutid)) {
+      skippedActiveTargets += 1
+      return false
+    }
+
+    if (normalizedRutid && recentPushes.has(normalizedRutid)) {
+      skippedRecentPushes += 1
+      return false
+    }
+
+    return true
+  })
+
+  const limited = normalizedFilters.max_leads
+    ? filtered.slice(0, normalizedFilters.max_leads)
+    : filtered
+
+  return {
+    filters: normalizedFilters,
+    rows: limited,
+    attempted_leads: rows.length,
+    eligible_leads: limited.length,
+    skipped_active_targets: skippedActiveTargets,
+    skipped_recent_pushes: skippedRecentPushes,
+  }
+}
+
 async function insertCampaignActions(
   crm: ReturnType<typeof getCrmOperationalClient>,
   runId: string,
@@ -464,9 +642,32 @@ async function insertLeadActions(
   return inserted
 }
 
-export async function pushEquifaxRunToCrm(runId: string) {
+export async function pushEquifaxRunToCrm(runId: string, filters?: Partial<EquifaxCrmPushFilters>) {
   const crm = getCrmOperationalClient()
-  const feed = await getEquifaxRunActionFeed(runId)
+  const run = await fetchRun(runId)
+  const allRows = await fetchRunItems(runId)
+  const filtered = await filterRowsForCrmPush(crm, allRows, filters)
+  const summary = summarizePortfolio(filtered.rows)
+  const scenarioTitle = getScenarioTitle(run)
+  const scenarioKey = getScenarioKey(run)
+  const campaignName = `Equifax | ${scenarioTitle}`
+
+  const feed: CommercialActionFeed = {
+    source_system: 'rut_intelligence_equifax',
+    generated_at: new Date().toISOString(),
+    portfolio_status: {
+      overall_health_score: round(summary.averageLeadScore, 2),
+      campaigns_at_risk: summary.red > 0 ? 1 : 0,
+      critical_campaigns: deriveSeverity(summary) === 'critical' ? 1 : 0,
+      anomaly_count: summary.red,
+    },
+    executive_summary: buildExecutiveSummary(run, summary, campaignName),
+    campaign_instructions: [
+      buildCampaignInstruction(run, filtered.rows, summary, campaignName),
+    ],
+    lead_instructions: filtered.rows.map(row => buildLeadInstruction(row, campaignName, scenarioKey)),
+    recommendations: [],
+  }
 
   const { data: insertedRun, error: runError } = await crm
     .from('commercial_brain_action_runs')
@@ -478,6 +679,11 @@ export async function pushEquifaxRunToCrm(runId: string) {
       metadata: {
         source_module: 'equifax-bdd',
         equifax_run_id: runId,
+        push_filters: filtered.filters,
+        attempted_leads: filtered.attempted_leads,
+        eligible_leads: filtered.eligible_leads,
+        skipped_active_targets: filtered.skipped_active_targets,
+        skipped_recent_pushes: filtered.skipped_recent_pushes,
         campaign_instructions: feed.campaign_instructions.length,
         lead_instructions: feed.lead_instructions.length,
       },
@@ -505,8 +711,12 @@ export async function pushEquifaxRunToCrm(runId: string) {
     run_id: runId,
     crm_run_id: crmRunId,
     source_system: feed.source_system,
+    attempted_leads: filtered.attempted_leads,
+    eligible_leads: filtered.eligible_leads,
     campaign_instructions: campaignCount,
     lead_instructions: leadCount,
+    skipped_active_targets: filtered.skipped_active_targets,
+    skipped_recent_pushes: filtered.skipped_recent_pushes,
     pushed_at: new Date().toISOString(),
     apply_result: applyResult ?? null,
   }

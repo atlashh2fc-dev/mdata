@@ -369,13 +369,15 @@ function deriveContactLabel(params: {
   const contactRate = safeRate(params.effectiveContacts, Math.max(params.totalInteractions, 1))
   const noContactRate = safeRate(params.noContactEvents, Math.max(params.totalInteractions, 1))
 
+  if (params.totalInteractions <= 0) return false
   if (params.salesEvents > 0) return true
   if (params.interestEvents > 0 || params.callbackEvents > 0) return true
-  if (params.effectiveContacts >= 2) return true
-  if (params.effectiveContacts >= 1 && params.totalInteractions <= 2) return true
-  if (params.effectiveContacts >= 1 && noContactRate < 0.7) return true
-  if (params.clickedEvents > 0 && params.openedEvents > 0) return true
-  if (contactRate >= 0.4 && params.totalInteractions >= 2) return true
+  if (params.effectiveContacts <= 0) return false
+  if (params.noContactEvents === 0) return true
+  if (params.effectiveContacts >= 3) return true
+  if (params.effectiveContacts >= 2 && noContactRate <= 0.35) return true
+  if (contactRate >= 0.75 && noContactRate <= 0.25 && params.totalInteractions >= 2) return true
+  if (params.clickedEvents > 0 && params.openedEvents > 0 && noContactRate <= 0.2) return true
 
   return false
 }
@@ -388,8 +390,7 @@ function deriveInterestLabel(params: {
   effectiveContacts: number
 }) {
   if (params.interestEvents > 0 || params.callbackEvents > 0) return true
-  if (params.clickedEvents > 0 && params.effectiveContacts > 0) return true
-  if (params.bestManagementEvents > 0 && params.effectiveContacts > 0) return true
+  if (params.clickedEvents > 0 && params.effectiveContacts > 0 && params.bestManagementEvents > 0) return true
   return false
 }
 

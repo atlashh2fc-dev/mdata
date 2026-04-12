@@ -61,7 +61,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'run_id es requerido' }, { status: 400 })
       }
 
-      const data = await pushEquifaxRunToCrm(body.run_id)
+      const data = await pushEquifaxRunToCrm(body.run_id, {
+        allowed_temperatures: Array.isArray(body?.allowed_temperatures) ? body.allowed_temperatures : undefined,
+        min_lead_score: body?.min_lead_score,
+        min_contact_probability: body?.min_contact_probability,
+        min_purchase_probability: body?.min_purchase_probability,
+        exclude_existing_customers: body?.exclude_existing_customers === true,
+        exclude_active_crm_targets: body?.exclude_active_crm_targets !== false,
+        exclude_recent_crm_days: body?.exclude_recent_crm_days,
+        max_leads: body?.max_leads ?? null,
+      })
       return NextResponse.json({ success: true, data })
     }
 

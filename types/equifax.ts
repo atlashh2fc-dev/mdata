@@ -128,10 +128,25 @@ export interface EquifaxCrmPushResult {
   run_id: string
   crm_run_id: string
   source_system: string
+  attempted_leads: number
+  eligible_leads: number
   campaign_instructions: number
   lead_instructions: number
+  skipped_active_targets: number
+  skipped_recent_pushes: number
   pushed_at: string
   apply_result: Record<string, unknown> | null
+}
+
+export interface EquifaxCrmPushFilters {
+  allowed_temperatures: Array<'green' | 'yellow' | 'red'>
+  min_lead_score: number
+  min_contact_probability: number
+  min_purchase_probability: number
+  exclude_existing_customers: boolean
+  exclude_active_crm_targets: boolean
+  exclude_recent_crm_days: number
+  max_leads: number | null
 }
 
 export interface EquifaxProjectionBucket {

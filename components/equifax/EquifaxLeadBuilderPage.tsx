@@ -24,6 +24,7 @@ import {
 } from '@/lib/utils/formatters'
 import type {
   EquifaxCatalogSummary,
+  EquifaxCrmPushFilters,
   EquifaxPipelineLatestResponse,
   EquifaxPipelineRunResult,
   EquifaxCrmPushResult,
@@ -204,6 +205,16 @@ export function EquifaxLeadBuilderPage() {
   const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
   const [result, setResult] = useState<EquifaxLeadGenerationResult | null>(null)
   const [crmPushResult, setCrmPushResult] = useState<EquifaxCrmPushResult | null>(null)
+  const [crmPushFilters, setCrmPushFilters] = useState<EquifaxCrmPushFilters>({
+    allowed_temperatures: ['green', 'yellow'],
+    min_lead_score: 35,
+    min_contact_probability: 35,
+    min_purchase_probability: 10,
+    exclude_existing_customers: false,
+    exclude_active_crm_targets: true,
+    exclude_recent_crm_days: 7,
+    max_leads: null,
+  })
   const [pipelineOverview, setPipelineOverview] = useState<EquifaxPipelineLatestResponse | null>(null)
   const [pipelineRunResult, setPipelineRunResult] = useState<EquifaxPipelineRunResult | null>(null)
   const [salesImportResult, setSalesImportResult] = useState<EquifaxSalesImportResult | null>(null)
@@ -442,6 +453,14 @@ export function EquifaxLeadBuilderPage() {
         body: JSON.stringify({
           action: 'push_to_crm',
           run_id: result.run_id,
+          allowed_temperatures: crmPushFilters.allowed_temperatures,
+          min_lead_score: crmPushFilters.min_lead_score,
+          min_contact_probability: crmPushFilters.min_contact_probability,
+          min_purchase_probability: crmPushFilters.min_purchase_probability,
+          exclude_existing_customers: crmPushFilters.exclude_existing_customers,
+          exclude_active_crm_targets: crmPushFilters.exclude_active_crm_targets,
+          exclude_recent_crm_days: crmPushFilters.exclude_recent_crm_days,
+          max_leads: crmPushFilters.max_leads,
         }),
       })
       const json = await parseApiResponse<{ success?: boolean; data?: EquifaxCrmPushResult; error?: string }>(res)
@@ -1147,7 +1166,7 @@ export function EquifaxLeadBuilderPage() {
           <section className="card p-5">
             {crmPushResult?.run_id === result.run_id && (
               <div className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                Run enviado al CRM. Se creó el run {crmPushResult.crm_run_id} con {formatNumber(crmPushResult.lead_instructions)} leads y {formatNumber(crmPushResult.campaign_instructions)} instrucción(es) de campaña.
+                Run enviado al CRM. Se creó el run {crmPushResult.crm_run_id} con {formatNumber(crmPushResult.lead_instructions)} leads sobre {formatNumber(crmPushResult.attempted_leads)} evaluados. Se filtraron {formatNumber(crmPushResult.skipped_active_targets)} activos y {formatNumber(crmPushResult.skipped_recent_pushes)} pushes recientes.
               </div>
             )}
 
@@ -1187,6 +1206,122 @@ export function EquifaxLeadBuilderPage() {
                   <div className="text-lg font-semibold text-rose-200">{formatNumber(result.summary.red_leads)}</div>
                   <div className="text-[11px] uppercase tracking-[0.16em] text-rose-300/80">Rojo</div>
                 </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/35 p-4">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <Upload className="h-4 w-4 text-cyan-300" />
+                Gobierno de push al CRM
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Mínimo lead score</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={crmPushFilters.min_lead_score}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, min_lead_score: Number(event.target.value) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Mínimo contacto</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={crmPushFilters.min_contact_probability}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, min_contact_probability: Number(event.target.value) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Mínimo compra</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={crmPushFilters.min_purchase_probability}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, min_purchase_probability: Number(event.target.value) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Máximo leads a empujar</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={crmPushFilters.max_leads ?? ''}
+                    onChange={event => setCrmPushFilters(prev => ({
+                      ...prev,
+                      max_leads: event.target.value ? Number(event.target.value) : null,
+                    }))}
+                    placeholder="Sin tope"
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3">
+                  <div className="text-xs font-medium text-slate-400">Semáforos a incluir</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(['green', 'yellow', 'red'] as const).map(temperature => {
+                      const checked = crmPushFilters.allowed_temperatures.includes(temperature)
+                      return (
+                        <label key={temperature} className="inline-flex items-center gap-2 text-xs text-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={event => {
+                              setCrmPushFilters(prev => ({
+                                ...prev,
+                                allowed_temperatures: event.target.checked
+                                  ? [...new Set([...prev.allowed_temperatures, temperature])]
+                                  : prev.allowed_temperatures.filter(item => item !== temperature),
+                              }))
+                            }}
+                          />
+                          <span>{getTemperatureLabel(temperature)}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Bloqueo por pushes recientes</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={90}
+                    value={crmPushFilters.exclude_recent_crm_days}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, exclude_recent_crm_days: Number(event.target.value) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+
+                <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={crmPushFilters.exclude_active_crm_targets}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, exclude_active_crm_targets: event.target.checked }))}
+                  />
+                  <span>Excluir leads activos en CRM</span>
+                </label>
+
+                <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={crmPushFilters.exclude_existing_customers}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, exclude_existing_customers: event.target.checked }))}
+                  />
+                  <span>Excluir clientes Equifax actuales</span>
+                </label>
               </div>
             </div>
 
