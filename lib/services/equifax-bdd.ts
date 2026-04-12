@@ -1,5 +1,6 @@
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import { cleanRut } from '@/lib/utils/rut'
+import { PDFParse } from 'pdf-parse'
 import type {
   EquifaxCatalogSummary,
   EquifaxLeadGenerationParams,
@@ -227,6 +228,190 @@ function normalizeProductRecord(record: Record<string, unknown>) {
     pricing_notes: pickFirstValue(record, ['precio', 'pricing', 'ticket', 'pricing_notes']),
     filters: {},
     raw_payload: record,
+  }
+}
+
+function sanitizeDocumentText(text: string): string {
+  return text
+    .replace(/\r/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
+function buildFallbackProductsFromDocument(text: string, fileName: string): Array<Record<string, unknown>> {
+  const sanitizedText = sanitizeDocumentText(text)
+  const lines = sanitizedText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  const sections: Array<{ title: string; body: string[] }> = []
+
+  for (const line of lines) {
+    const isHeadingCandidate =
+      line.length >= 5 &&
+      line.length <= 90 &&
+      line.split(/\s+/g).length <= 8 &&
+      (
+        line === line.toUpperCase() ||
+        /^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9\s\-/:]+$/.test(line)
+      )
+
+    if (isHeadingCandidate && sections.length < 8) {
+      sections.push({ title: line, body: [] })
+      continue
+    }
+
+    if (sections.length === 0) continue
+    if (sections[sections.length - 1].body.join(' ').length > 420) continue
+    sections[sections.length - 1].body.push(line)
+  }
+
+  const products = sections
+    .filter(section => section.body.length > 0)
+    .map(section => ({
+      nombre: section.title,
+      categoria: 'PDF',
+      descripcion: section.body.join(' ').slice(0, 500),
+      rubro: null,
+      keywords: tokenizeKeywordCandidates([section.title, section.body.join(' ')]).slice(0, 8),
+      pain_points: [],
+      raw_source_type: 'pdf',
+      raw_source_file: fileName,
+    }))
+
+  if (products.length > 0) return products
+
+  const baseName = fileName.replace(/\.[^.]+$/, '')
+  return [{
+    nombre: baseName || 'Producto Equifax desde PDF',
+    categoria: 'PDF',
+    descripcion: sanitizedText.slice(0, 900),
+    rubro: null,
+    keywords: tokenizeKeywordCandidates([sanitizedText]).slice(0, 12),
+    pain_points: [],
+    raw_source_type: 'pdf',
+    raw_source_file: fileName,
+  }]
+}
+
+async function extractProductsFromDocumentWithAI(
+  text: string,
+  fileName: string
+): Promise<Array<Record<string, unknown>>> {
+  const sanitizedText = sanitizeDocumentText(text)
+  const fallback = buildFallbackProductsFromDocument(sanitizedText, fileName)
+  const apiKey = process.env.INCEPTION_API_KEY
+
+  if (!apiKey) return fallback
+
+  const truncatedText = sanitizedText.slice(0, 16000)
+  const messages = [
+    {
+      role: 'system',
+      content: `Eres un parser de material comercial de Equifax en Chile.
+Devuelve SIEMPRE JSON válido con una lista de productos detectados en un PDF o brochure.
+Extrae solo productos o servicios comercializables.
+Si hay bundles, planes o variantes, sepáralos cuando tenga sentido comercial.`,
+    },
+    {
+      role: 'user',
+      content: `Archivo: ${fileName}
+
+Texto extraído del PDF:
+${truncatedText}
+
+Devuelve estrictamente un JSON de este tipo:
+{
+  "products": [
+    {
+      "nombre": "string",
+      "categoria": "string o null",
+      "descripcion": "string o null",
+      "rubro": "string o null",
+      "keywords": ["kw1", "kw2"],
+      "pain_points": ["dolor 1", "dolor 2"],
+      "pricing_notes": "string o null"
+    }
+  ]
+}
+
+Si solo detectas un producto general, devuélvelo igual.`,
+    },
+  ]
+
+  try {
+    const response = await fetch(INCEPTION_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: INCEPTION_MODEL,
+        messages,
+        max_tokens: 1400,
+        temperature: 0.1,
+      }),
+    })
+
+    if (!response.ok) return fallback
+
+    const json = await response.json()
+    const content = json?.choices?.[0]?.message?.content ?? ''
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return fallback
+
+    const parsed = JSON.parse(jsonMatch[1] ?? jsonMatch[0]) as {
+      products?: Array<Record<string, unknown>>
+    }
+
+    const products = Array.isArray(parsed.products)
+      ? parsed.products
+          .filter(product => typeof product === 'object' && product !== null)
+          .map(product => ({
+            ...product,
+            raw_source_type: 'pdf',
+            raw_source_file: fileName,
+          }))
+      : []
+
+    return products.length > 0 ? products : fallback
+  } catch (error) {
+    console.error('[extractProductsFromDocumentWithAI]', error)
+    return fallback
+  }
+}
+
+export async function extractEquifaxProductsFromPdf(
+  buffer: Buffer,
+  fileName: string,
+  userId?: string
+): Promise<{ inserted: number; items: EquifaxProductCatalogItem[]; extracted_products: number }> {
+  const parser = new PDFParse({ data: buffer })
+
+  try {
+    const result = await parser.getText()
+    const extractedText = sanitizeDocumentText(result.text ?? '')
+
+    if (!extractedText) {
+      throw new Error('No se pudo extraer texto útil desde el PDF.')
+    }
+
+    const products = await extractProductsFromDocumentWithAI(extractedText, fileName)
+    const enrichedProducts = products.map(product => ({
+      ...product,
+      extracted_text_preview: extractedText.slice(0, 2000),
+    }))
+
+    const saved = await saveEquifaxProducts(enrichedProducts, userId)
+    return {
+      ...saved,
+      extracted_products: products.length,
+    }
+  } finally {
+    await parser.destroy()
   }
 }
 

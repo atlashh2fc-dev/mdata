@@ -125,6 +125,7 @@ export function EquifaxLeadBuilderPage() {
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<EquifaxLeadGenerationResult | null>(null)
   const [salesImportResult, setSalesImportResult] = useState<EquifaxSalesImportResult | null>(null)
+  const [productImportMessage, setProductImportMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function loadCatalog() {
@@ -186,24 +187,46 @@ export function EquifaxLeadBuilderPage() {
 
     setSavingProducts(true)
     setError(null)
+    setProductImportMessage(null)
 
     try {
-      const rows = await parseSpreadsheet(file)
-      if (rows.length === 0) {
-        throw new Error('El archivo no trae filas válidas de productos.')
+      const lowerName = file.name.toLowerCase()
+      let insertedIds: string[] = []
+
+      if (lowerName.endsWith('.pdf')) {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const res = await fetch('/api/equifax/catalog', {
+          method: 'POST',
+          body: formData,
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'No se pudo procesar el PDF.')
+
+        insertedIds = (json.data?.items ?? []).map((item: EquifaxProductCatalogItem) => item.id)
+        setProductImportMessage(
+          `PDF procesado: ${formatNumber(json.data?.extracted_products ?? insertedIds.length)} producto(s) extraído(s).`
+        )
+      } else {
+        const rows = await parseSpreadsheet(file)
+        if (rows.length === 0) {
+          throw new Error('El archivo no trae filas válidas de productos.')
+        }
+
+        const res = await fetch('/api/equifax/catalog', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ rows }),
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'No se pudo guardar el catálogo.')
+
+        insertedIds = (json.data?.items ?? []).map((item: EquifaxProductCatalogItem) => item.id)
+        setProductImportMessage(`Se cargaron ${formatNumber(insertedIds.length)} producto(s) desde planilla.`)
       }
-
-      const res = await fetch('/api/equifax/catalog', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ rows }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'No se pudo guardar el catálogo.')
-
-      const insertedIds = (json.data?.items ?? []).map((item: EquifaxProductCatalogItem) => item.id)
       setSelectedProductIds(prev => [...new Set([...insertedIds, ...prev])])
       await loadCatalog()
     } catch (err) {
@@ -348,7 +371,7 @@ export function EquifaxLeadBuilderPage() {
               <div>
                 <h2 className="text-sm font-semibold text-white">2. Catálogo de productos Equifax</h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  Sube un CSV/XLSX con columnas como `nombre`, `categoria`, `descripcion`, `rubro`, `keywords`.
+                  Sube un `CSV/XLSX` o un `PDF` comercial para extraer `nombre`, `categoria`, `descripcion`, `rubro` y `keywords`.
                 </p>
               </div>
               {savingProducts && <Spinner size="sm" />}
@@ -356,14 +379,24 @@ export function EquifaxLeadBuilderPage() {
 
             <label className="mt-4 flex cursor-pointer items-center justify-center gap-3 rounded-2xl border border-dashed border-amber-500/35 bg-amber-500/5 px-4 py-6 text-sm text-amber-200 transition hover:bg-amber-500/10">
               <Upload className="h-4 w-4" />
-              <span>Subir catálogo de productos</span>
+              <span>Subir catálogo o PDF comercial</span>
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls,.csv,.pdf"
                 className="hidden"
                 onChange={handleProductUpload}
               />
             </label>
+
+            <p className="mt-3 text-xs text-slate-500">
+              Ejemplo: brochure PDF, ficha de producto, propuesta comercial o planilla estructurada.
+            </p>
+
+            {productImportMessage && (
+              <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                {productImportMessage}
+              </div>
+            )}
 
             <div className="mt-5 flex items-center justify-between">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">

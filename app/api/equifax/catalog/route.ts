@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import {
+  extractEquifaxProductsFromPdf,
   getEquifaxCatalogSummary,
   getEquifaxProductCatalog,
   saveEquifaxProducts,
@@ -50,14 +51,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   }
 
-  const body = await req.json()
-  const rows = Array.isArray(body?.rows) ? body.rows : []
-
-  if (rows.length === 0) {
-    return NextResponse.json({ error: 'Debes enviar al menos un producto.' }, { status: 400 })
-  }
-
   try {
+    const contentType = req.headers.get('content-type') ?? ''
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData()
+      const file = formData.get('file')
+
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: 'Debes adjuntar un PDF válido.' }, { status: 400 })
+      }
+
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        return NextResponse.json({ error: 'Por ahora el upload documental acepta solo PDF.' }, { status: 400 })
+      }
+
+      const buffer = Buffer.from(await file.arrayBuffer())
+      const result = await extractEquifaxProductsFromPdf(buffer, file.name, user.id)
+      return NextResponse.json({ success: true, data: result })
+    }
+
+    const body = await req.json()
+    const rows = Array.isArray(body?.rows) ? body.rows : []
+
+    if (rows.length === 0) {
+      return NextResponse.json({ error: 'Debes enviar al menos un producto.' }, { status: 400 })
+    }
+
     const result = await saveEquifaxProducts(rows, user.id)
     return NextResponse.json({ success: true, data: result })
   } catch (error) {
