@@ -31,6 +31,17 @@ type CatalogResponse = {
   products: EquifaxProductCatalogItem[]
 }
 
+async function parseApiResponse<T>(res: Response): Promise<T> {
+  const contentType = res.headers.get('content-type') ?? ''
+
+  if (contentType.includes('application/json')) {
+    return res.json() as Promise<T>
+  }
+
+  const text = await res.text()
+  throw new Error(text || 'La API respondió en un formato inesperado.')
+}
+
 function StatCard({
   label,
   value,
@@ -134,9 +145,9 @@ export function EquifaxLeadBuilderPage() {
 
     try {
       const res = await fetch('/api/equifax/catalog')
-      const json = await res.json()
+      const json = await parseApiResponse<{ success?: boolean; data?: CatalogResponse; error?: string }>(res)
       if (!res.ok) throw new Error(json.error ?? 'No se pudo cargar Equifax.')
-      setCatalog(json.data)
+      setCatalog(json.data ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando módulo Equifax.')
     } finally {
@@ -168,10 +179,10 @@ export function EquifaxLeadBuilderPage() {
         method: 'POST',
         body: formData,
       })
-      const json = await res.json()
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxSalesImportResult; error?: string }>(res)
       if (!res.ok) throw new Error(json.error ?? 'No se pudo importar el Excel.')
 
-      setSalesImportResult(json.data)
+      setSalesImportResult(json.data ?? null)
       await loadCatalog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo importar ventas.')
@@ -201,7 +212,7 @@ export function EquifaxLeadBuilderPage() {
           method: 'POST',
           body: formData,
         })
-        const json = await res.json()
+        const json = await parseApiResponse<{ success?: boolean; data?: { items?: EquifaxProductCatalogItem[]; extracted_products?: number }; error?: string }>(res)
         if (!res.ok) throw new Error(json.error ?? 'No se pudo procesar el PDF.')
 
         insertedIds = (json.data?.items ?? []).map((item: EquifaxProductCatalogItem) => item.id)
@@ -221,7 +232,7 @@ export function EquifaxLeadBuilderPage() {
           },
           body: JSON.stringify({ rows }),
         })
-        const json = await res.json()
+        const json = await parseApiResponse<{ success?: boolean; data?: { items?: EquifaxProductCatalogItem[] }; error?: string }>(res)
         if (!res.ok) throw new Error(json.error ?? 'No se pudo guardar el catálogo.')
 
         insertedIds = (json.data?.items ?? []).map((item: EquifaxProductCatalogItem) => item.id)
@@ -257,9 +268,9 @@ export function EquifaxLeadBuilderPage() {
           min_email_count: minEmailCount,
         }),
       })
-      const json = await res.json()
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxLeadGenerationResult; error?: string }>(res)
       if (!res.ok) throw new Error(json.error ?? 'No se pudo generar la base.')
-      setResult(json.data)
+      setResult(json.data ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo generar leads.')
     } finally {

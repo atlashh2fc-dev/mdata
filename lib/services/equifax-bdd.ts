@@ -1,6 +1,5 @@
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import { cleanRut } from '@/lib/utils/rut'
-import { PDFParse } from 'pdf-parse'
 import type {
   EquifaxCatalogSummary,
   EquifaxLeadGenerationParams,
@@ -389,6 +388,7 @@ export async function extractEquifaxProductsFromPdf(
   fileName: string,
   userId?: string
 ): Promise<{ inserted: number; items: EquifaxProductCatalogItem[]; extracted_products: number }> {
+  const { PDFParse } = await import('pdf-parse')
   const parser = new PDFParse({ data: buffer })
 
   try {
