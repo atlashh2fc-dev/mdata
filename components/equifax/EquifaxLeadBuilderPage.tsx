@@ -4,12 +4,15 @@ import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
   BrainCircuit,
+  Cpu,
   Database,
   Download,
   Mail,
   Phone,
   RefreshCcw,
+  ShieldCheck,
   Target,
+  TrendingUp,
   Upload,
 } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
@@ -21,6 +24,8 @@ import {
 } from '@/lib/utils/formatters'
 import type {
   EquifaxCatalogSummary,
+  EquifaxPipelineLatestResponse,
+  EquifaxPipelineRunResult,
   EquifaxCrmPushResult,
   EquifaxLeadGenerationResult,
   EquifaxLeadPreviewResult,
@@ -86,6 +91,22 @@ function getTemperatureLabel(temperature: 'green' | 'yellow' | 'red') {
   if (temperature === 'green') return 'Verde'
   if (temperature === 'yellow') return 'Amarillo'
   return 'Rojo'
+}
+
+function getPipelineModeLabel(mode?: string | null) {
+  if (mode === 'force') return 'Force'
+  if (mode === 'dry-run') return 'Dry run'
+  return 'Safe'
+}
+
+function getPipelineStatusStyles(status?: string | null) {
+  if (status === 'success') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+  if (status === 'failed') return 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+  return 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+}
+
+function formatPercent(value: unknown) {
+  return `${formatNumber(Number(value ?? 0))}%`
 }
 
 async function parseSpreadsheet(file: File) {
@@ -176,10 +197,15 @@ export function EquifaxLeadBuilderPage() {
   const [analyzing, setAnalyzing] = useState(false)
   const [generatingScenarioKey, setGeneratingScenarioKey] = useState<string | null>(null)
   const [pushingToCrm, setPushingToCrm] = useState(false)
+  const [loadingPipeline, setLoadingPipeline] = useState(false)
+  const [runningPipeline, setRunningPipeline] = useState(false)
+  const [pipelineMode, setPipelineMode] = useState<'safe' | 'dry-run' | 'force'>('safe')
   const [preview, setPreview] = useState<EquifaxLeadPreviewResult | null>(null)
   const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
   const [result, setResult] = useState<EquifaxLeadGenerationResult | null>(null)
   const [crmPushResult, setCrmPushResult] = useState<EquifaxCrmPushResult | null>(null)
+  const [pipelineOverview, setPipelineOverview] = useState<EquifaxPipelineLatestResponse | null>(null)
+  const [pipelineRunResult, setPipelineRunResult] = useState<EquifaxPipelineRunResult | null>(null)
   const [salesImportResult, setSalesImportResult] = useState<EquifaxSalesImportResult | null>(null)
   const [productImportMessage, setProductImportMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -200,8 +226,24 @@ export function EquifaxLeadBuilderPage() {
     }
   }
 
+  async function loadPipelineOverview() {
+    setLoadingPipeline(true)
+
+    try {
+      const res = await fetch('/api/equifax/pipeline?section=latest')
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxPipelineLatestResponse; error?: string }>(res)
+      if (!res.ok) throw new Error(json.error ?? 'No se pudo cargar el control del modelo Equifax.')
+      setPipelineOverview(json.data ?? null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cargar el control del modelo Equifax.')
+    } finally {
+      setLoadingPipeline(false)
+    }
+  }
+
   useEffect(() => {
     loadCatalog()
+    loadPipelineOverview()
   }, [])
 
   const selectedProducts = useMemo(() => {
@@ -233,6 +275,11 @@ export function EquifaxLeadBuilderPage() {
   )
 
   const isPreviewStale = Boolean(preview && previewRequestKey && previewRequestKey !== currentRequestKey)
+  const latestPipelineRun = pipelineOverview?.latest as Record<string, unknown> | null
+  const latestTraining = latestPipelineRun?.training_payload as Record<string, unknown> | null
+  const latestTargets = Array.isArray(latestTraining?.targets)
+    ? latestTraining.targets as Array<Record<string, unknown>>
+    : []
 
   async function handleSalesImport(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -407,6 +454,32 @@ export function EquifaxLeadBuilderPage() {
     }
   }
 
+  async function handleRunPipeline() {
+    setRunningPipeline(true)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/equifax/pipeline', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'run',
+          mode: pipelineMode,
+        }),
+      })
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxPipelineRunResult; error?: string }>(res)
+      if (!res.ok) throw new Error(json.error ?? 'No se pudo ejecutar el pipeline Equifax.')
+      setPipelineRunResult(json.data ?? null)
+      await loadPipelineOverview()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo ejecutar el pipeline Equifax.')
+    } finally {
+      setRunningPipeline(false)
+    }
+  }
+
   if (loading) {
     return <LoadingState text="Cargando módulo Equifax..." />
   }
@@ -470,6 +543,225 @@ export function EquifaxLeadBuilderPage() {
             icon={BrainCircuit}
           />
         </div>
+
+        <section className="card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-white">Control del modelo Equifax</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                Estado del aprendizaje automático, guardrails de activación, proyección comercial y ejecución manual del pipeline.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={pipelineMode}
+                onChange={event => setPipelineMode(event.target.value as 'safe' | 'dry-run' | 'force')}
+                className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-500"
+              >
+                <option value="safe">Modo safe</option>
+                <option value="dry-run">Modo dry-run</option>
+                <option value="force">Modo force</option>
+              </select>
+              <button
+                onClick={handleRunPipeline}
+                disabled={runningPipeline}
+                className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {runningPipeline ? <Spinner size="sm" /> : <RefreshCcw className="h-4 w-4" />}
+                Ejecutar pipeline
+              </button>
+            </div>
+          </div>
+
+          {pipelineRunResult && (
+            <div className="mt-4 rounded-2xl border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+              Pipeline ejecutado. Run {pipelineRunResult.run_id} · modo {getPipelineModeLabel(pipelineRunResult.trigger_mode)} · {formatNumber(pipelineRunResult.refreshed_rutids)} RUTs refrescados.
+            </div>
+          )}
+
+          <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Última corrida</div>
+                  {loadingPipeline && <Spinner size="sm" />}
+                </div>
+
+                {latestPipelineRun ? (
+                  <div className="mt-3 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', getPipelineStatusStyles(String(latestPipelineRun.status ?? 'running')))}>
+                        {String(latestPipelineRun.status ?? 'running')}
+                      </span>
+                      <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300">
+                        {getPipelineModeLabel(String(latestPipelineRun.trigger_mode ?? 'safe'))}
+                      </span>
+                      <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300">
+                        {String(latestPipelineRun.trigger_source ?? 'manual')}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                        <div className="text-lg font-semibold text-white">{formatNumber(Number(latestPipelineRun.refreshed_rutids ?? 0))}</div>
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">RUTs refrescados</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+                        <div className="text-lg font-semibold text-white">{formatNumber(Number(latestPipelineRun.models_trained ?? 0))}</div>
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Targets evaluados</div>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-slate-400">
+                      Inició {formatDate(String(latestPipelineRun.started_at ?? null))} · terminó {formatDate(String(latestPipelineRun.finished_at ?? null))}
+                    </div>
+                    {Boolean(latestPipelineRun.notes) && (
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-300">
+                        {String(latestPipelineRun.notes)}
+                      </div>
+                    )}
+                    {Boolean(latestPipelineRun.error_message) && (
+                      <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                        {String(latestPipelineRun.error_message)}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="Sin corridas registradas"
+                    description="Cuando ejecutes el pipeline, aquí verás el estado del aprendizaje y las proyecciones."
+                  />
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-4">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <Cpu className="h-4 w-4 text-cyan-300" />
+                  Modelos activos
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(pipelineOverview?.active_models?.length ?? 0) > 0 ? pipelineOverview?.active_models.map(model => {
+                    const validation = (model.metrics?.validation ?? {}) as Record<string, unknown>
+                    return (
+                      <div key={`${model.target}-${model.model_version}`} className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-200">
+                              {model.target}
+                            </span>
+                            <span className="text-sm font-medium text-white">{model.model_version}</span>
+                          </div>
+                          <span className="text-[11px] text-slate-500">{formatDate(model.trained_at)}</span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                          <div>Valid loss: {formatNumber(Number(validation.log_loss ?? 0))}</div>
+                          <div>Accuracy: {formatPercent(validation.accuracy)}</div>
+                          <div>Top decile: {formatPercent(validation.top_decile_precision)}</div>
+                          <div>Filas: {formatNumber(model.trained_rows)}</div>
+                        </div>
+                      </div>
+                    )
+                  }) : (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-400">
+                      Sin modelos activos visibles todavía.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-4">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <TrendingUp className="h-4 w-4 text-emerald-300" />
+                  Proyección esperada
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {[
+                    { key: 'portfolio', label: 'Portfolio completo', bucket: pipelineOverview?.projections?.portfolio },
+                    { key: 'top_1000', label: 'Top 1.000', bucket: pipelineOverview?.projections?.top_1000 },
+                    { key: 'top_3000', label: 'Top 3.000', bucket: pipelineOverview?.projections?.top_3000 },
+                    { key: 'top_10000', label: 'Top 10.000', bucket: pipelineOverview?.projections?.top_10000 },
+                  ].map(item => (
+                    <div key={item.key} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                      <div className="text-sm font-semibold text-white">{item.label}</div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="text-lg font-semibold text-cyan-300">{formatNumber(item.bucket?.expected_contacts ?? 0)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Contactos esp.</div>
+                        </div>
+                        <div>
+                          <div className="text-lg font-semibold text-amber-300">{formatNumber(item.bucket?.expected_interests ?? 0)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Intereses esp.</div>
+                        </div>
+                        <div>
+                          <div className="text-lg font-semibold text-emerald-300">{formatNumber(item.bucket?.expected_purchases ?? 0)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Compras esp.</div>
+                        </div>
+                        <div>
+                          <div className="text-lg font-semibold text-white">{formatPercent(item.bucket?.avg_lead_score ?? 0)}</div>
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Lead score prom.</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+                        <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-emerald-200">
+                          {formatNumber(item.bucket?.green ?? 0)} verdes
+                        </span>
+                        <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-amber-200">
+                          {formatNumber(item.bucket?.yellow ?? 0)} amarillos
+                        </span>
+                        <span className="rounded-full border border-rose-500/25 bg-rose-500/10 px-2 py-1 text-rose-200">
+                          {formatNumber(item.bucket?.red ?? 0)} rojos
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-4">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <ShieldCheck className="h-4 w-4 text-cyan-300" />
+                  Guardrails de entrenamiento
+                </div>
+                <div className="mt-3 space-y-2">
+                  {latestTargets.length > 0 ? latestTargets.map(target => (
+                    <div key={String(target.target)} className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300">
+                            {String(target.target)}
+                          </span>
+                          <span className={cn(
+                            'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                            target.activated
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                              : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                          )}>
+                            {target.activated ? 'Activo' : 'No activo'}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500">{String(target.activation_reason ?? 'sin motivo')}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                        <div>Val. loss: {formatNumber(Number(target.validation_log_loss ?? 0))}</div>
+                        <div>Heurística loss: {formatNumber(Number(target.heuristic_validation_log_loss ?? 0))}</div>
+                        <div>Val. accuracy: {formatPercent(target.validation_accuracy)}</div>
+                        <div>Top decile: {formatPercent(target.validation_top_decile_precision)}</div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-400">
+                      La última corrida todavía no trae targets evaluados visibles.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
           <section className="card p-5">

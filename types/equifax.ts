@@ -167,6 +167,22 @@ export interface EquifaxPipelineRunResult {
   finished_at: string
 }
 
+export interface EquifaxActiveModelSummary {
+  target: 'contact' | 'interest' | 'purchase'
+  model_version: string
+  model_type: string
+  trained_rows: number
+  trained_at: string
+  metrics: Record<string, unknown>
+  metadata: Record<string, unknown>
+}
+
+export interface EquifaxPipelineLatestResponse {
+  latest: Record<string, unknown> | null
+  projections: EquifaxProjectionSummary
+  active_models: EquifaxActiveModelSummary[]
+}
+
 export interface EquifaxLeadFeatureSnapshot {
   rutid: string
   company_name: string | null

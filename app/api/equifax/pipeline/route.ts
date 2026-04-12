@@ -45,6 +45,21 @@ async function getLatestPipelineRun() {
   return data ?? null
 }
 
+async function getActiveModels() {
+  const { data, error } = await db
+    .from('equifax_scoring_models')
+    .select('target,model_version,model_type,trained_rows,metrics,metadata,trained_at')
+    .eq('model_key', 'equifax-lead')
+    .eq('is_active', true)
+    .order('target', { ascending: true })
+
+  if (error) {
+    throw new Error(`No se pudieron leer los modelos activos Equifax: ${error.message}`)
+  }
+
+  return data ?? []
+}
+
 export async function GET(req: NextRequest) {
   const secretAuthorized = hasOpsSecret(req)
   const user = secretAuthorized ? null : await requireAuthenticatedUser()
@@ -57,7 +72,8 @@ export async function GET(req: NextRequest) {
     if (section === 'latest') {
       const latest = await getLatestPipelineRun()
       const projections = await buildEquifaxProjectionSummary()
-      return NextResponse.json({ success: true, data: { latest, projections } })
+      const activeModels = await getActiveModels()
+      return NextResponse.json({ success: true, data: { latest, projections, active_models: activeModels } })
     }
 
     const mode = (req.nextUrl.searchParams.get('mode') ?? 'safe') as 'safe' | 'force' | 'dry-run'
@@ -88,7 +104,8 @@ export async function POST(req: NextRequest) {
     if (action === 'latest') {
       const latest = await getLatestPipelineRun()
       const projections = await buildEquifaxProjectionSummary()
-      return NextResponse.json({ success: true, data: { latest, projections } })
+      const activeModels = await getActiveModels()
+      return NextResponse.json({ success: true, data: { latest, projections, active_models: activeModels } })
     }
 
     const mode = (body?.mode ?? 'safe') as 'safe' | 'force' | 'dry-run'
