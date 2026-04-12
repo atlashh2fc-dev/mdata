@@ -393,25 +393,33 @@ export async function extractEquifaxProductsFromPdf(
 
   try {
     const result = await parser.getText()
-    const extractedText = sanitizeDocumentText(result.text ?? '')
-
-    if (!extractedText) {
-      throw new Error('No se pudo extraer texto útil desde el PDF.')
-    }
-
-    const products = await extractProductsFromDocumentWithAI(extractedText, fileName)
-    const enrichedProducts = products.map(product => ({
-      ...product,
-      extracted_text_preview: extractedText.slice(0, 2000),
-    }))
-
-    const saved = await saveEquifaxProducts(enrichedProducts, userId)
-    return {
-      ...saved,
-      extracted_products: products.length,
-    }
+    return extractEquifaxProductsFromText(result.text ?? '', fileName, userId)
   } finally {
     await parser.destroy()
+  }
+}
+
+export async function extractEquifaxProductsFromText(
+  text: string,
+  fileName: string,
+  userId?: string
+): Promise<{ inserted: number; items: EquifaxProductCatalogItem[]; extracted_products: number }> {
+  const extractedText = sanitizeDocumentText(text)
+
+  if (!extractedText) {
+    throw new Error('No se pudo extraer texto útil desde el documento.')
+  }
+
+  const products = await extractProductsFromDocumentWithAI(extractedText, fileName)
+  const enrichedProducts = products.map(product => ({
+    ...product,
+    extracted_text_preview: extractedText.slice(0, 2000),
+  }))
+
+  const saved = await saveEquifaxProducts(enrichedProducts, userId)
+  return {
+    ...saved,
+    extracted_products: products.length,
   }
 }
 

@@ -81,6 +81,19 @@ async function parseSpreadsheet(file: File) {
   })
 }
 
+async function extractPdfTextInBrowser(file: File) {
+  const { PDFParse } = await import('pdf-parse')
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const parser = new PDFParse({ data: bytes })
+
+  try {
+    const result = await parser.getText()
+    return String(result.text ?? '').trim()
+  } finally {
+    await parser.destroy()
+  }
+}
+
 function downloadCsv(rows: EquifaxLeadGenerationResult['rows']) {
   if (!rows.length) return
 
@@ -205,12 +218,20 @@ export function EquifaxLeadBuilderPage() {
       let insertedIds: string[] = []
 
       if (lowerName.endsWith('.pdf')) {
-        const formData = new FormData()
-        formData.append('file', file)
+        const extractedText = await extractPdfTextInBrowser(file)
+        if (!extractedText) {
+          throw new Error('No pude extraer texto útil desde el PDF.')
+        }
 
         const res = await fetch('/api/equifax/catalog', {
           method: 'POST',
-          body: formData,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            file_name: file.name,
+            document_text: extractedText.slice(0, 120000),
+          }),
         })
         const json = await parseApiResponse<{ success?: boolean; data?: { items?: EquifaxProductCatalogItem[]; extracted_products?: number }; error?: string }>(res)
         if (!res.ok) throw new Error(json.error ?? 'No se pudo procesar el PDF.')

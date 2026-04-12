@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import {
   extractEquifaxProductsFromPdf,
+  extractEquifaxProductsFromText,
   getEquifaxCatalogSummary,
   getEquifaxProductCatalog,
   saveEquifaxProducts,
@@ -73,6 +74,13 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
     const rows = Array.isArray(body?.rows) ? body.rows : []
+    const documentText = typeof body?.document_text === 'string' ? body.document_text : null
+    const fileName = typeof body?.file_name === 'string' ? body.file_name : 'documento.pdf'
+
+    if (documentText) {
+      const result = await extractEquifaxProductsFromText(documentText, fileName, user.id)
+      return NextResponse.json({ success: true, data: result })
+    }
 
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Debes enviar al menos un producto.' }, { status: 400 })
