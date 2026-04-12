@@ -83,6 +83,7 @@ async function parseSpreadsheet(file: File) {
 
 async function extractPdfTextInBrowser(file: File) {
   const { PDFParse } = await import('pdf-parse')
+  PDFParse.setWorker('/pdf.worker.min.mjs')
   const bytes = new Uint8Array(await file.arrayBuffer())
   const parser = new PDFParse({ data: bytes })
 
