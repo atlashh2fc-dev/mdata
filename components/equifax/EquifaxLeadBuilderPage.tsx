@@ -71,6 +71,22 @@ function StatCard({
   )
 }
 
+function getTemperatureStyles(temperature: 'green' | 'yellow' | 'red') {
+  if (temperature === 'green') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+  }
+  if (temperature === 'yellow') {
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+  }
+  return 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+}
+
+function getTemperatureLabel(temperature: 'green' | 'yellow' | 'red') {
+  if (temperature === 'green') return 'Verde'
+  if (temperature === 'yellow') return 'Amarillo'
+  return 'Rojo'
+}
+
 async function parseSpreadsheet(file: File) {
   const buffer = await file.arrayBuffer()
   const workbook = XLSX.read(buffer, { type: 'array', raw: false })
@@ -113,6 +129,13 @@ function downloadCsv(rows: EquifaxLeadGenerationResult['rows']) {
     'purchase_propensity_score',
     'equifax_fit_score',
     'priority_score',
+    'contact_probability',
+    'interest_probability',
+    'purchase_probability',
+    'lead_score',
+    'lead_temperature',
+    'recommended_channel',
+    'recommended_hour',
     'is_existing_customer',
     'last_equifax_sale_at',
     'services_bought',
@@ -132,7 +155,7 @@ function downloadCsv(rows: EquifaxLeadGenerationResult['rows']) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'equifax-leads.csv'
+  link.download = 'equifax-leads-crm.csv'
   link.click()
   URL.revokeObjectURL(url)
 }
@@ -368,7 +391,7 @@ export function EquifaxLeadBuilderPage() {
             className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/15"
           >
             <Download className="h-4 w-4" />
-            Exportar CSV
+            Exportar CSV CRM
           </button>
         ) : null}
       />
@@ -725,6 +748,21 @@ export function EquifaxLeadBuilderPage() {
                         </div>
                       </div>
 
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-center">
+                          <div className="text-sm font-semibold text-emerald-200">{formatNumber(scenario.summary.green_leads)}</div>
+                          <div className="text-[10px] uppercase tracking-[0.16em] text-emerald-300/80">Verde</div>
+                        </div>
+                        <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-center">
+                          <div className="text-sm font-semibold text-amber-200">{formatNumber(scenario.summary.yellow_leads)}</div>
+                          <div className="text-[10px] uppercase tracking-[0.16em] text-amber-300/80">Amarillo</div>
+                        </div>
+                        <div className="rounded-xl border border-rose-500/20 bg-rose-500/8 px-3 py-2 text-center">
+                          <div className="text-sm font-semibold text-rose-200">{formatNumber(scenario.summary.red_leads)}</div>
+                          <div className="text-[10px] uppercase tracking-[0.16em] text-rose-300/80">Rojo</div>
+                        </div>
+                      </div>
+
                       <div className="mt-4 space-y-2">
                         {scenario.highlights.map(highlight => (
                           <div key={`${scenario.key}-${highlight}`} className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-300">
@@ -742,9 +780,14 @@ export function EquifaxLeadBuilderPage() {
                         <div className="mt-2 space-y-2">
                           {scenario.sample_rows.slice(0, 4).map(row => (
                             <div key={`${scenario.key}-${row.rutid}`} className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-2">
-                              <div className="font-medium text-white">{row.company_name}</div>
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="font-medium text-white">{row.company_name}</div>
+                                <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', getTemperatureStyles(row.lead_temperature))}>
+                                  {getTemperatureLabel(row.lead_temperature)}
+                                </span>
+                              </div>
                               <div className="mt-1 text-xs text-slate-400">
-                                {row.region ?? 'Sin región'} · Score {formatNumber(row.priority_score)} · {row.best_phone ?? 'Sin teléfono'}
+                                {row.region ?? 'Sin región'} · Score {formatNumber(row.priority_score)} · Contacto {formatNumber(row.contact_probability)}% · Compra {formatNumber(row.purchase_probability)}%
                               </div>
                             </div>
                           ))}
@@ -776,7 +819,7 @@ export function EquifaxLeadBuilderPage() {
                   {result.scenario_title} · Run {result.run_id} · {formatNumber(result.generated_count)} leads generados sobre {formatNumber(result.requested_volume)} solicitados
                 </p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-4">
+              <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-7">
                 <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-center">
                   <div className="text-lg font-semibold text-white">{formatNumber(result.summary.prospects)}</div>
                   <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Prospects</div>
@@ -792,6 +835,18 @@ export function EquifaxLeadBuilderPage() {
                 <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-center">
                   <div className="text-lg font-semibold text-white">{formatNumber(result.summary.avg_equifax_fit_score)}</div>
                   <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Fit Equifax</div>
+                </div>
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-center">
+                  <div className="text-lg font-semibold text-emerald-200">{formatNumber(result.summary.green_leads)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-emerald-300/80">Verde</div>
+                </div>
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-center">
+                  <div className="text-lg font-semibold text-amber-200">{formatNumber(result.summary.yellow_leads)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-amber-300/80">Amarillo</div>
+                </div>
+                <div className="rounded-xl border border-rose-500/20 bg-rose-500/8 px-3 py-2 text-center">
+                  <div className="text-lg font-semibold text-rose-200">{formatNumber(result.summary.red_leads)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-rose-300/80">Rojo</div>
                 </div>
               </div>
             </div>
@@ -819,7 +874,7 @@ export function EquifaxLeadBuilderPage() {
                       <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-[0.16em] text-slate-500">
                         <th className="pb-2 pr-4">Empresa</th>
                         <th className="pb-2 pr-4">Contacto</th>
-                        <th className="pb-2 pr-4">Scores</th>
+                        <th className="pb-2 pr-4">Probabilidades</th>
                         <th className="pb-2 pr-4">Señales</th>
                       </tr>
                     </thead>
@@ -827,7 +882,12 @@ export function EquifaxLeadBuilderPage() {
                       {result.rows.slice(0, 120).map(row => (
                         <tr key={row.rutid} className="border-b border-slate-900/70 align-top">
                           <td className="py-3 pr-4">
-                            <div className="font-medium text-white">{row.company_name}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-medium text-white">{row.company_name}</div>
+                              <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', getTemperatureStyles(row.lead_temperature))}>
+                                {getTemperatureLabel(row.lead_temperature)}
+                              </span>
+                            </div>
                             <div className="mt-1 text-xs text-slate-500">{row.rutid}</div>
                             <div className="text-xs text-slate-500">{row.region ?? 'Sin región'} · {row.comuna ?? 'Sin comuna'}</div>
                           </td>
@@ -845,12 +905,15 @@ export function EquifaxLeadBuilderPage() {
                             </div>
                           </td>
                           <td className="py-3 pr-4">
-                            <div className="font-semibold text-cyan-300">{formatNumber(row.priority_score)}</div>
+                            <div className="font-semibold text-cyan-300">Lead {formatNumber(row.lead_score)}%</div>
                             <div className="mt-1 text-xs text-slate-400">
-                              Contacto {formatNumber(row.contactability_score)} · Compra {formatNumber(row.purchase_propensity_score)}
+                              Contacto {formatNumber(row.contact_probability)}% · Interés {formatNumber(row.interest_probability)}%
                             </div>
                             <div className="text-xs text-slate-500">
-                              Fit Equifax {formatNumber(row.equifax_fit_score)}
+                              Compra {formatNumber(row.purchase_probability)}% · Fit Equifax {formatNumber(row.equifax_fit_score)}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              Canal {row.recommended_channel ?? 'sin canal'}{row.recommended_hour !== null ? ` · ${String(row.recommended_hour).padStart(2, '0')}:00` : ''}
                             </div>
                           </td>
                           <td className="py-3 pr-4">

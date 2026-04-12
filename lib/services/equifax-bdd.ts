@@ -1,4 +1,5 @@
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
+import { getEquifaxLeadScoresMap } from '@/lib/services/equifax-scoring'
 import { cleanRut } from '@/lib/utils/rut'
 import type {
   EquifaxCatalogSummary,
@@ -1062,6 +1063,9 @@ function buildRunSummary(rows: EquifaxLeadResultItem[]) {
     avg_contactability_score: avg(rows.map(row => row.contactability_score)),
     avg_purchase_propensity_score: avg(rows.map(row => row.purchase_propensity_score)),
     avg_equifax_fit_score: avg(rows.map(row => row.equifax_fit_score)),
+    green_leads: rows.filter(row => row.lead_temperature === 'green').length,
+    yellow_leads: rows.filter(row => row.lead_temperature === 'yellow').length,
+    red_leads: rows.filter(row => row.lead_temperature === 'red').length,
   }
 }
 
@@ -1098,6 +1102,9 @@ function buildScenarioHighlights(rows: EquifaxLeadResultItem[], requestedVolume:
   const bothContact = rows.filter(row => row.phone_count > 0 && row.email_count > 0).length
   const withPhone = rows.filter(row => row.phone_count > 0).length
   const withEmail = rows.filter(row => row.email_count > 0).length
+  const greenLeads = rows.filter(row => row.lead_temperature === 'green').length
+  const yellowLeads = rows.filter(row => row.lead_temperature === 'yellow').length
+  const redLeads = rows.filter(row => row.lead_temperature === 'red').length
   const regionCounts = new Map<string, number>()
   for (const row of rows) {
     if (!row.region) continue
@@ -1112,6 +1119,7 @@ function buildScenarioHighlights(rows: EquifaxLeadResultItem[], requestedVolume:
   return [
     `${rows.length} leads elegibles sobre ${requestedVolume} solicitados`,
     `${bothContact} con teléfono y email · ${withPhone} con teléfono · ${withEmail} con email`,
+    `${greenLeads} verdes · ${yellowLeads} amarillos · ${redLeads} rojos`,
     topRegions.length ? `Mayor concentración: ${topRegions.join(' · ')}` : 'Sin preferencia regional dominante',
   ]
 }
@@ -1153,6 +1161,13 @@ async function insertRunItemsInChunks(runId: string, rows: EquifaxLeadResultItem
         purchase_propensity_score: row.purchase_propensity_score,
         equifax_fit_score: row.equifax_fit_score,
         priority_score: row.priority_score,
+        contact_probability: row.contact_probability,
+        interest_probability: row.interest_probability,
+        purchase_probability: row.purchase_probability,
+        lead_score: row.lead_score,
+        lead_temperature: row.lead_temperature,
+        recommended_channel: row.recommended_channel,
+        recommended_hour: row.recommended_hour,
         is_existing_customer: row.is_existing_customer,
         last_equifax_sale_at: row.last_equifax_sale_at,
         services_bought: row.services_bought,
@@ -1359,9 +1374,10 @@ async function prepareEquifaxCandidates(
 
   const candidates = await fetchCandidateCompanies(sampleSize, regions, aiProfile)
   const candidateRutids = candidates.map(row => row.rutid)
-  const [scoresMap, customerMap] = await Promise.all([
+  const [scoresMap, customerMap, equifaxScoreMap] = await Promise.all([
     fetchPersonaScoresMap(candidateRutids),
     fetchCustomerSummaryMap(candidateRutids),
+    getEquifaxLeadScoresMap(candidateRutids),
   ])
 
   const ranked: ScoredLeadCandidate[] = []
@@ -1406,6 +1422,29 @@ async function prepareEquifaxCandidates(
       )
     )
 
+    const equifaxLeadScore = equifaxScoreMap.get(candidate.rutid)
+    const contactProbability = round(
+      equifaxLeadScore?.contact_probability ?? contactability,
+      2
+    )
+    const interestProbability = round(
+      equifaxLeadScore?.interest_probability ??
+      clamp(contactability * 0.45 + purchase * 0.2 + (isExistingCustomer ? 12 : 0)),
+      2
+    )
+    const purchaseProbability = round(
+      equifaxLeadScore?.purchase_probability ?? purchase,
+      2
+    )
+    const leadScore = round(
+      equifaxLeadScore?.lead_score ??
+      clamp(contactProbability * 0.45 + interestProbability * 0.25 + purchaseProbability * 0.3),
+      2
+    )
+    const leadTemperature = equifaxLeadScore?.lead_temperature ?? 'red'
+    const recommendedChannel = equifaxLeadScore?.recommended_channel ?? (phoneCount > 0 ? 'phone' : emailCount > 0 ? 'email' : null)
+    const recommendedHour = equifaxLeadScore?.recommended_hour ?? null
+
     const keywordMetrics = scoreKeywordMatches(
       companyName,
       aiProfile.include_keywords,
@@ -1423,17 +1462,21 @@ async function prepareEquifaxCandidates(
         ? (aiProfile.prefer_existing_customers ? 100 : 0) * aiProfile.weights.existing_customer
         : 30 * aiProfile.weights.existing_customer) +
       (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
-      Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage -
+      Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
+      purchaseProbability * 0.08 +
+      interestProbability * 0.05 -
       enterprisePenalty * 0.2
     )
 
     const priorityScore = clamp(
-      contactability * aiProfile.weights.contactability +
-      purchase * aiProfile.weights.purchase +
+      contactProbability * aiProfile.weights.contactability +
+      purchaseProbability * aiProfile.weights.purchase +
       Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
       (isExistingCustomer ? 100 : 20) * aiProfile.weights.existing_customer +
       keywordMetrics.score * aiProfile.weights.keyword_match +
-      (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence -
+      (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
+      interestProbability * 0.12 +
+      leadScore * 0.18 -
       enterprisePenalty * 0.45
     )
 
@@ -1446,10 +1489,17 @@ async function prepareEquifaxCandidates(
       best_email: scoreRow?.best_email ?? candidate.email ?? null,
       phone_count: phoneCount,
       email_count: emailCount,
-      contactability_score: round(contactability, 2),
-      purchase_propensity_score: round(purchase, 2),
+      contactability_score: contactProbability,
+      purchase_propensity_score: purchaseProbability,
       equifax_fit_score: round(equifaxFit, 2),
       priority_score: round(priorityScore, 2),
+      contact_probability: contactProbability,
+      interest_probability: interestProbability,
+      purchase_probability: purchaseProbability,
+      lead_score: leadScore,
+      lead_temperature: leadTemperature,
+      recommended_channel: recommendedChannel,
+      recommended_hour: recommendedHour,
       base_priority_score: round(priorityScore, 2),
       coverage_score: round(Number(candidate.cobertura_pct ?? 0), 2),
       keyword_hits: keywordMetrics.includeHits,
@@ -1461,8 +1511,8 @@ async function prepareEquifaxCandidates(
         emailCount,
         isExistingCustomer,
         keywordHits: keywordMetrics.includeHits,
-        contactability,
-        purchase,
+        contactability: contactProbability,
+        purchase: purchaseProbability,
         company: candidate,
         customerSummary,
       }),
