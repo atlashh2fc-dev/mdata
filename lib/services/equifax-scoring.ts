@@ -121,12 +121,68 @@ type TrainingRow = EquifaxLeadFeatureSnapshot & {
 type TrainModelResult = {
   version: string
   trained_rows: number
+  train_rows: number
+  validation_rows: number
+  activation_mode: 'safe' | 'force' | 'dry-run'
+  activated_targets: Array<'contact' | 'interest' | 'purchase'>
   targets: Array<{
     target: 'contact' | 'interest' | 'purchase'
+    activated: boolean
+    activation_reason: string
     log_loss: number
     accuracy: number
     positive_rate: number
+    validation_log_loss: number
+    validation_accuracy: number
+    validation_brier_score: number
+    validation_top_decile_precision: number
+    heuristic_validation_log_loss: number
+    heuristic_validation_accuracy: number
+    heuristic_validation_brier_score: number
+    heuristic_validation_top_decile_precision: number
   }>
+}
+
+type EvaluationMetrics = {
+  log_loss: number
+  accuracy: number
+  brier_score: number
+  top_decile_precision: number
+  positive_rate: number
+  sample_size: number
+}
+
+type ProjectionBucket = {
+  total_leads: number
+  avg_lead_score: number
+  avg_contact_probability: number
+  avg_interest_probability: number
+  avg_purchase_probability: number
+  expected_contacts: number
+  expected_interests: number
+  expected_purchases: number
+  green: number
+  yellow: number
+  red: number
+}
+
+type ProjectionSummary = {
+  generated_at: string
+  portfolio: ProjectionBucket
+  top_1000: ProjectionBucket
+  top_3000: ProjectionBucket
+  top_10000: ProjectionBucket
+}
+
+type EquifaxPipelineRunResult = {
+  run_id: string
+  trigger_source: string
+  trigger_mode: 'safe' | 'force' | 'dry-run'
+  refreshed_rutids: number
+  refreshed_batches: number
+  training: TrainModelResult | null
+  projections: ProjectionSummary
+  finished_at: string
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -154,6 +210,11 @@ function normalizeKeyword(value: string) {
 function safeRate(numerator: number, denominator: number) {
   if (!denominator) return 0
   return numerator / denominator
+}
+
+function safeAverage(values: number[]) {
+  if (!values.length) return 0
+  return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
 function clamp(value: number, min = 0, max = 100) {
@@ -184,6 +245,14 @@ function diffDays(date?: string | null) {
   const parsed = parseDate(date)
   if (!parsed) return null
   return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / (1000 * 60 * 60 * 24)))
+}
+
+function hashString(value: string) {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0
+  }
+  return Math.abs(hash)
 }
 
 function looksLikeEquifaxCampaign(value?: string | null) {
@@ -776,6 +845,81 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
   return score
 }
 
+function getHeuristicProbabilityForTarget(feature: EquifaxLeadFeatureSnapshot, target: 'contact' | 'interest' | 'purchase') {
+  const heuristic = buildHeuristicScore(feature)
+  if (target === 'contact') return heuristic.contact_probability / 100
+  if (target === 'interest') return heuristic.interest_probability / 100
+  return heuristic.purchase_probability / 100
+}
+
+function evaluatePredictions(labels: number[], predictions: number[]): EvaluationMetrics {
+  const sampleSize = labels.length
+  if (!sampleSize) {
+    return {
+      log_loss: 0,
+      accuracy: 0,
+      brier_score: 0,
+      top_decile_precision: 0,
+      positive_rate: 0,
+      sample_size: 0,
+    }
+  }
+
+  let logLoss = 0
+  let correct = 0
+  let brierScore = 0
+  let positiveCount = 0
+
+  for (let index = 0; index < sampleSize; index += 1) {
+    const label = labels[index]
+    const prediction = clamp(predictions[index], 1e-6, 1 - 1e-6)
+    positiveCount += label
+    logLoss += -(
+      label * Math.log(prediction) +
+      (1 - label) * Math.log(1 - prediction)
+    )
+    brierScore += (prediction - label) ** 2
+    if ((prediction >= 0.5 ? 1 : 0) === label) correct += 1
+  }
+
+  const topCount = Math.max(1, Math.ceil(sampleSize * 0.1))
+  const ranked = labels
+    .map((label, index) => ({ label, prediction: predictions[index] }))
+    .sort((left, right) => right.prediction - left.prediction)
+    .slice(0, topCount)
+  const topDecilePrecision = ranked.reduce((sum, item) => sum + item.label, 0) / topCount
+
+  return {
+    log_loss: round(logLoss / sampleSize, 6),
+    accuracy: round(correct / sampleSize, 6),
+    brier_score: round(brierScore / sampleSize, 6),
+    top_decile_precision: round(topDecilePrecision, 6),
+    positive_rate: round(positiveCount / sampleSize, 6),
+    sample_size: sampleSize,
+  }
+}
+
+function splitRowsForTraining(rows: TrainingRow[]) {
+  const trainRows: TrainingRow[] = []
+  const validationRows: TrainingRow[] = []
+
+  for (const row of rows) {
+    const bucket = hashString(row.rutid) % 10
+    if (bucket < 8) trainRows.push(row)
+    else validationRows.push(row)
+  }
+
+  if (trainRows.length < 50 || validationRows.length < 20) {
+    const fallbackSplit = Math.max(1, Math.floor(rows.length * 0.8))
+    return {
+      trainRows: rows.slice(0, fallbackSplit),
+      validationRows: rows.slice(fallbackSplit),
+    }
+  }
+
+  return { trainRows, validationRows }
+}
+
 async function loadActiveLogisticModels() {
   const { data, error } = await db
     .from('equifax_scoring_models')
@@ -807,6 +951,85 @@ async function loadActiveLogisticModels() {
   }
 
   return models
+}
+
+async function loadActiveModelRows() {
+  const { data, error } = await db
+    .from('equifax_scoring_models')
+    .select('target,model_version,model_type,intercept,feature_names,coefficients,metrics,metadata')
+    .eq('model_key', MODEL_KEY)
+    .eq('is_active', true)
+
+  if (error) {
+    console.error('[loadActiveModelRows]', error)
+    return new Map<'contact' | 'interest' | 'purchase', LogisticModelRow>()
+  }
+
+  return new Map(
+    ((data ?? []) as LogisticModelRow[]).map(row => [row.target, row])
+  )
+}
+
+async function restoreLatestHistoricalModel(
+  target: 'contact' | 'interest' | 'purchase',
+  skipVersion?: string
+) {
+  const { data, error } = await db
+    .from('equifax_scoring_models')
+    .select('id,model_version')
+    .eq('model_key', MODEL_KEY)
+    .eq('target', target)
+    .eq('model_type', 'logistic')
+    .order('trained_at', { ascending: false })
+    .limit(10)
+
+  if (error) {
+    console.error('[restoreLatestHistoricalModel]', error)
+    return null
+  }
+
+  const candidate = ((data ?? []) as Array<{ id: string; model_version: string }>)
+    .find(row => row.model_version !== skipVersion)
+
+  if (!candidate?.id) return null
+
+  const { error: updateError } = await db
+    .from('equifax_scoring_models')
+    .update({ is_active: true })
+    .eq('id', candidate.id)
+
+  if (updateError) {
+    console.error('[restoreLatestHistoricalModel:update]', updateError)
+    return null
+  }
+
+  return candidate.model_version
+}
+
+function shouldActivateCandidateModel(params: {
+  target: 'contact' | 'interest' | 'purchase'
+  activationMode: 'safe' | 'force' | 'dry-run'
+  candidateMetrics: EvaluationMetrics
+  heuristicMetrics: EvaluationMetrics
+}) {
+  if (params.activationMode === 'dry-run') {
+    return { activated: false, reason: 'dry-run' }
+  }
+
+  if (params.activationMode === 'force') {
+    return { activated: true, reason: 'force-activate' }
+  }
+
+  const beatsHeuristicLoss = params.candidateMetrics.log_loss <= params.heuristicMetrics.log_loss * 1.01
+  const beatsHeuristicBrier = params.candidateMetrics.brier_score <= params.heuristicMetrics.brier_score * 1.01
+  const keepsAccuracy = params.candidateMetrics.accuracy >= params.heuristicMetrics.accuracy - 0.025
+  const keepsPrecision = params.candidateMetrics.top_decile_precision >= params.heuristicMetrics.top_decile_precision * 0.95
+
+  if (beatsHeuristicLoss && beatsHeuristicBrier && keepsAccuracy && keepsPrecision) {
+    return { activated: true, reason: 'safe-improvement' }
+  }
+
+  return { activated: false, reason: 'guardrail-blocked' }
 }
 
 async function ensureActiveLogisticModels() {
@@ -1170,6 +1393,23 @@ function trainBinaryLogisticModel(
   }
 }
 
+function predictProbabilityFromModel(
+  model: ReturnType<typeof trainBinaryLogisticModel>,
+  row: TrainingRow
+) {
+  let value = model.intercept
+
+  for (const featureName of TRAINING_FEATURES) {
+    const raw = getFeatureValue(row, featureName)
+    const mean = toNumber(model.means[featureName])
+    const std = Math.max(toNumber(model.stds[featureName]), 1e-6)
+    const standardized = (raw - mean) / std
+    value += standardized * toNumber(model.coefficients[featureName])
+  }
+
+  return clamp(sigmoid(value), 0, 1)
+}
+
 async function fetchTrainingRows() {
   const rows: TrainingRow[] = []
   let from = 0
@@ -1196,21 +1436,171 @@ async function fetchTrainingRows() {
   return rows
 }
 
+async function createPipelineRun(params: {
+  triggerSource: string
+  triggerMode: 'safe' | 'force' | 'dry-run'
+}) {
+  const { data, error } = await db
+    .from('equifax_scoring_pipeline_runs')
+    .insert({
+      trigger_source: params.triggerSource,
+      trigger_mode: params.triggerMode,
+      status: 'running',
+      started_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (error || !data?.id) {
+    console.error('[createPipelineRun]', error)
+    throw new Error('No se pudo crear la corrida del pipeline Equifax.')
+  }
+
+  return String(data.id)
+}
+
+async function updatePipelineRun(runId: string, payload: Record<string, unknown>) {
+  const { error } = await db
+    .from('equifax_scoring_pipeline_runs')
+    .update({
+      ...payload,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', runId)
+
+  if (error) {
+    console.error('[updatePipelineRun]', error)
+  }
+}
+
+async function collectEquifaxFeedbackRutids() {
+  const rutids = new Set<string>()
+  let from = 0
+
+  while (true) {
+    const { data, error } = await db
+      .from('contact_center_feedback')
+      .select('rutid,matched_rutid,campaign_name')
+      .or([
+        'campaign_name.ilike.%equifax%',
+        'campaign_name.ilike.%dicom%',
+        'campaign_name.ilike.%riesgo comercial%',
+        'campaign_name.ilike.%verificacion comercial%',
+        'campaign_name.ilike.%informe comercial%',
+      ].join(','))
+      .range(from, from + FETCH_CHUNK_SIZE - 1)
+
+    if (error) {
+      console.error('[collectEquifaxFeedbackRutids]', error)
+      throw new Error('No se pudieron leer los RUTs Equifax con feedback.')
+    }
+
+    const rows = (data ?? []) as Array<{
+      rutid: string | null
+      matched_rutid: string | null
+      campaign_name: string | null
+    }>
+
+    for (const row of rows) {
+      const rutid = String(row.matched_rutid ?? row.rutid ?? '').trim()
+      if (rutid) rutids.add(rutid)
+    }
+
+    if (rows.length < FETCH_CHUNK_SIZE) break
+    from += FETCH_CHUNK_SIZE
+  }
+
+  return [...rutids]
+}
+
+async function fetchScoreProjectionRows() {
+  const rows: EquifaxLeadScoreSnapshot[] = []
+  let from = 0
+
+  while (true) {
+    const { data, error } = await db
+      .from('equifax_lead_scores')
+      .select('rutid,model_version,model_type,contact_probability,interest_probability,purchase_probability,fit_score,lead_score,lead_temperature,recommended_channel,recommended_hour,reason_tags,score_breakdown,scored_at')
+      .order('lead_score', { ascending: false })
+      .range(from, from + FETCH_CHUNK_SIZE - 1)
+
+    if (error) {
+      console.error('[fetchScoreProjectionRows]', error)
+      throw new Error('No se pudieron leer los scores Equifax para proyección.')
+    }
+
+    const subset = (data ?? []) as EquifaxLeadScoreSnapshot[]
+    rows.push(...subset)
+    if (subset.length < FETCH_CHUNK_SIZE) break
+    from += FETCH_CHUNK_SIZE
+  }
+
+  return rows
+}
+
+function summarizeProjectionBucket(rows: EquifaxLeadScoreSnapshot[]): ProjectionBucket {
+  const total = rows.length
+  const avgLeadScore = safeAverage(rows.map(row => toNumber(row.lead_score)))
+  const avgContact = safeAverage(rows.map(row => toNumber(row.contact_probability)))
+  const avgInterest = safeAverage(rows.map(row => toNumber(row.interest_probability)))
+  const avgPurchase = safeAverage(rows.map(row => toNumber(row.purchase_probability)))
+
+  return {
+    total_leads: total,
+    avg_lead_score: round(avgLeadScore, 2),
+    avg_contact_probability: round(avgContact, 2),
+    avg_interest_probability: round(avgInterest, 2),
+    avg_purchase_probability: round(avgPurchase, 2),
+    expected_contacts: round(rows.reduce((sum, row) => sum + toNumber(row.contact_probability), 0) / 100, 2),
+    expected_interests: round(rows.reduce((sum, row) => sum + toNumber(row.interest_probability), 0) / 100, 2),
+    expected_purchases: round(rows.reduce((sum, row) => sum + toNumber(row.purchase_probability), 0) / 100, 2),
+    green: rows.filter(row => row.lead_temperature === 'green').length,
+    yellow: rows.filter(row => row.lead_temperature === 'yellow').length,
+    red: rows.filter(row => row.lead_temperature === 'red').length,
+  }
+}
+
+export async function buildEquifaxProjectionSummary(): Promise<ProjectionSummary> {
+  const rows = await fetchScoreProjectionRows()
+
+  return {
+    generated_at: new Date().toISOString(),
+    portfolio: summarizeProjectionBucket(rows),
+    top_1000: summarizeProjectionBucket(rows.slice(0, 1000)),
+    top_3000: summarizeProjectionBucket(rows.slice(0, 3000)),
+    top_10000: summarizeProjectionBucket(rows.slice(0, 10000)),
+  }
+}
+
 export async function trainEquifaxLogisticModels(options?: {
   activate?: boolean
   version?: string
+  activationMode?: 'safe' | 'force' | 'dry-run'
 }) {
   const rows = await fetchTrainingRows()
   if (rows.length < 80) {
     throw new Error('Aún no hay suficientes features con feedback para entrenar modelos Equifax.')
   }
 
+  const { trainRows, validationRows } = splitRowsForTraining(rows)
+  if (trainRows.length < 60 || validationRows.length < 20) {
+    throw new Error('No hay split suficiente entre train y validación para entrenar con guardrails.')
+  }
+
   const version = options?.version ?? `logistic-${new Date().toISOString().replace(/[:.]/g, '-')}`
+  const activationMode = options?.activationMode ?? (options?.activate === false ? 'dry-run' : 'safe')
   const trainedTargets: TrainModelResult['targets'] = []
   const targetsToInsert: Array<{
     target: 'contact' | 'interest' | 'purchase'
     model: ReturnType<typeof trainBinaryLogisticModel>
+    activate: boolean
+    activationReason: string
+    candidateMetrics: EvaluationMetrics
+    heuristicMetrics: EvaluationMetrics
   }> = []
+  const activeModelRows = await loadActiveModelRows()
+  const activatedTargets: Array<'contact' | 'interest' | 'purchase'> = []
+  const targetActivationState = new Map<'contact' | 'interest' | 'purchase', boolean>()
 
   for (const target of ['contact', 'interest', 'purchase'] as const) {
     const labels: number[] = rows.map(row => {
@@ -1220,27 +1610,60 @@ export async function trainEquifaxLogisticModels(options?: {
     })
     const positiveCount = labels.reduce((sum, value) => sum + value, 0)
     const negativeCount = labels.length - positiveCount
-    const positiveRate = safeRate(labels.reduce((sum, value) => sum + value, 0), labels.length)
+    const positiveRate = safeRate(positiveCount, labels.length)
     if (positiveRate <= 0.02 || positiveRate >= 0.98 || positiveCount < 40 || negativeCount < 40) {
       continue
     }
 
-    const model = trainBinaryLogisticModel(rows, target)
-    targetsToInsert.push({ target, model })
+    const validationLabels: number[] = validationRows.map(row => {
+      if (target === 'contact') return row.label_contact ? 1 : 0
+      if (target === 'interest') return row.label_interest ? 1 : 0
+      return row.label_purchase ? 1 : 0
+    })
+    const validationPositiveCount = validationLabels.reduce((sum, value) => sum + value, 0)
+    const validationNegativeCount = validationLabels.length - validationPositiveCount
+    if (validationPositiveCount < 10 || validationNegativeCount < 10) {
+      continue
+    }
+
+    const model = trainBinaryLogisticModel(trainRows, target)
+    const logisticPredictions = validationRows.map(row => predictProbabilityFromModel(model, row))
+    const heuristicPredictions = validationRows.map(row => getHeuristicProbabilityForTarget(row, target))
+
+    const candidateMetrics = evaluatePredictions(validationLabels, logisticPredictions)
+    const heuristicMetrics = evaluatePredictions(validationLabels, heuristicPredictions)
+
+    const activationDecision = shouldActivateCandidateModel({
+      target,
+      activationMode,
+      candidateMetrics,
+      heuristicMetrics,
+    })
+
+    targetsToInsert.push({
+      target,
+      model,
+      activate: options?.activate !== false && activationDecision.activated,
+      activationReason: activationDecision.reason,
+      candidateMetrics,
+      heuristicMetrics,
+    })
   }
 
   if (targetsToInsert.length === 0) {
     throw new Error('Aún no hay suficiente variabilidad en labels para entrenar modelos logísticos Equifax.')
   }
 
-  if (options?.activate !== false) {
-    await db
-      .from('equifax_scoring_models')
-      .update({ is_active: false })
-      .eq('model_key', MODEL_KEY)
-  }
-
   for (const item of targetsToInsert) {
+    if (item.activate) {
+      await db
+        .from('equifax_scoring_models')
+        .update({ is_active: false })
+        .eq('model_key', MODEL_KEY)
+        .eq('target', item.target)
+    }
+
+    const currentActiveMetrics = activeModelRows.get(item.target)?.metrics ?? null
     const { error } = await db
       .from('equifax_scoring_models')
       .insert({
@@ -1248,15 +1671,24 @@ export async function trainEquifaxLogisticModels(options?: {
         model_version: version,
         model_type: 'logistic',
         target: item.target,
-        is_active: options?.activate !== false,
+        is_active: item.activate,
         trained_rows: rows.length,
         feature_names: [...TRAINING_FEATURES],
         coefficients: item.model.coefficients,
         intercept: item.model.intercept,
-        metrics: item.model.metrics,
+        metrics: {
+          train: item.model.metrics,
+          validation: item.candidateMetrics,
+          heuristic_validation: item.heuristicMetrics,
+          previous_active_metrics: currentActiveMetrics,
+        },
         metadata: {
           means: item.model.means,
           stds: item.model.stds,
+          train_rows: trainRows.length,
+          validation_rows: validationRows.length,
+          activation_mode: activationMode,
+          activation_reason: item.activationReason,
         },
       })
 
@@ -1265,17 +1697,146 @@ export async function trainEquifaxLogisticModels(options?: {
       throw new Error('No se pudo guardar el modelo logístico Equifax.')
     }
 
+    if (item.activate) activatedTargets.push(item.target)
+    targetActivationState.set(item.target, item.activate)
+
     trainedTargets.push({
       target: item.target,
+      activated: item.activate,
+      activation_reason: item.activationReason,
       log_loss: toNumber(item.model.metrics.log_loss),
       accuracy: toNumber(item.model.metrics.accuracy),
       positive_rate: toNumber(item.model.metrics.positive_rate),
+      validation_log_loss: item.candidateMetrics.log_loss,
+      validation_accuracy: item.candidateMetrics.accuracy,
+      validation_brier_score: item.candidateMetrics.brier_score,
+      validation_top_decile_precision: item.candidateMetrics.top_decile_precision,
+      heuristic_validation_log_loss: item.heuristicMetrics.log_loss,
+      heuristic_validation_accuracy: item.heuristicMetrics.accuracy,
+      heuristic_validation_brier_score: item.heuristicMetrics.brier_score,
+      heuristic_validation_top_decile_precision: item.heuristicMetrics.top_decile_precision,
     })
   }
+
+  for (const target of ['contact', 'interest', 'purchase'] as const) {
+    if (targetActivationState.get(target)) continue
+    if (activeModelRows.has(target)) continue
+
+    const restoredVersion = await restoreLatestHistoricalModel(target, version)
+    if (restoredVersion) {
+      activatedTargets.push(target)
+      const existingIndex = trainedTargets.findIndex(item => item.target === target)
+      if (existingIndex >= 0) {
+        trainedTargets[existingIndex] = {
+          ...trainedTargets[existingIndex],
+          activated: true,
+          activation_reason: `restored-${restoredVersion}`,
+        }
+      } else {
+        trainedTargets.push({
+          target,
+          activated: true,
+          activation_reason: `restored-${restoredVersion}`,
+          log_loss: 0,
+          accuracy: 0,
+          positive_rate: 0,
+          validation_log_loss: 0,
+          validation_accuracy: 0,
+          validation_brier_score: 0,
+          validation_top_decile_precision: 0,
+          heuristic_validation_log_loss: 0,
+          heuristic_validation_accuracy: 0,
+          heuristic_validation_brier_score: 0,
+          heuristic_validation_top_decile_precision: 0,
+        })
+      }
+    }
+  }
+
+  const uniqueActivatedTargets = [...new Set(activatedTargets)] as Array<'contact' | 'interest' | 'purchase'>
 
   return {
     version,
     trained_rows: rows.length,
+    train_rows: trainRows.length,
+    validation_rows: validationRows.length,
+    activation_mode: activationMode,
+    activated_targets: uniqueActivatedTargets,
     targets: trainedTargets,
   } satisfies TrainModelResult
+}
+
+export async function runEquifaxScoringPipeline(options?: {
+  triggerSource?: string
+  activationMode?: 'safe' | 'force' | 'dry-run'
+}) {
+  const triggerSource = options?.triggerSource ?? 'manual'
+  const activationMode = options?.activationMode ?? 'safe'
+  const runId = await createPipelineRun({
+    triggerSource,
+    triggerMode: activationMode,
+  })
+
+  try {
+    const rutids = await collectEquifaxFeedbackRutids()
+    let refreshedBatches = 0
+
+    for (const subset of chunk(rutids, UPSERT_CHUNK_SIZE)) {
+      await refreshEquifaxLeadScoresForRutids(subset)
+      refreshedBatches += 1
+    }
+
+    let training: TrainModelResult | null = null
+    try {
+      training = await trainEquifaxLogisticModels({
+        activate: activationMode !== 'dry-run',
+        activationMode,
+      })
+    } catch (error) {
+      console.warn('[runEquifaxScoringPipeline:training]', error instanceof Error ? error.message : error)
+    }
+
+    if (training?.activated_targets.length) {
+      for (const subset of chunk(rutids, UPSERT_CHUNK_SIZE)) {
+        await refreshEquifaxLeadScoresForRutids(subset)
+      }
+    }
+
+    const projections = await buildEquifaxProjectionSummary()
+    const finishedAt = new Date().toISOString()
+
+    await updatePipelineRun(runId, {
+      status: 'success',
+      refreshed_rutids: rutids.length,
+      refreshed_batches: refreshedBatches,
+      models_trained: training?.targets.length ?? 0,
+      activated_targets: training?.activated_targets ?? [],
+      model_version: training?.version ?? null,
+      training_payload: training,
+      projection_payload: projections,
+      notes: training?.activated_targets.length
+        ? `Se activaron ${training.activated_targets.join(', ')}`
+        : 'No se activaron targets nuevos; se mantuvieron los modelos vigentes',
+      finished_at: finishedAt,
+    })
+
+    return {
+      run_id: runId,
+      trigger_source: triggerSource,
+      trigger_mode: activationMode,
+      refreshed_rutids: rutids.length,
+      refreshed_batches: refreshedBatches,
+      training,
+      projections,
+      finished_at: finishedAt,
+    } satisfies EquifaxPipelineRunResult
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error desconocido en pipeline Equifax.'
+    await updatePipelineRun(runId, {
+      status: 'failed',
+      error_message: message,
+      finished_at: new Date().toISOString(),
+    })
+    throw error
+  }
 }

@@ -134,6 +134,39 @@ export interface EquifaxCrmPushResult {
   apply_result: Record<string, unknown> | null
 }
 
+export interface EquifaxProjectionBucket {
+  total_leads: number
+  avg_lead_score: number
+  avg_contact_probability: number
+  avg_interest_probability: number
+  avg_purchase_probability: number
+  expected_contacts: number
+  expected_interests: number
+  expected_purchases: number
+  green: number
+  yellow: number
+  red: number
+}
+
+export interface EquifaxProjectionSummary {
+  generated_at: string
+  portfolio: EquifaxProjectionBucket
+  top_1000: EquifaxProjectionBucket
+  top_3000: EquifaxProjectionBucket
+  top_10000: EquifaxProjectionBucket
+}
+
+export interface EquifaxPipelineRunResult {
+  run_id: string
+  trigger_source: string
+  trigger_mode: 'safe' | 'force' | 'dry-run'
+  refreshed_rutids: number
+  refreshed_batches: number
+  training: Record<string, unknown> | null
+  projections: EquifaxProjectionSummary
+  finished_at: string
+}
+
 export interface EquifaxLeadFeatureSnapshot {
   rutid: string
   company_name: string | null

@@ -28,6 +28,7 @@
     "ops:equifax:refresh:scores": "npx --yes tsx scripts/equifax/refresh-lead-scores.ts",
     "ops:equifax:train:logit": "npx --yes tsx scripts/equifax/train-logistic-model.ts",
     "ops:equifax:bootstrap:model": "npx --yes tsx scripts/equifax/bootstrap-logistic-model.ts",
+    "ops:equifax:pipeline": "npx --yes tsx scripts/equifax/run-scoring-pipeline.ts",
     "ops:equifax:crm:feed": "npx --yes tsx scripts/equifax/generate-action-feed.ts",
     "ops:equifax:crm:push": "npx --yes tsx scripts/equifax/push-run-to-crm.ts",
     "ops:verify": "node --env-file=.env.local scripts/master-sync/verify-migration.mjs",
