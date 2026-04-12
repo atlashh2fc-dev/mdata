@@ -41,6 +41,8 @@ type ProductProfile = {
   exclude_keywords: string[]
   buyer_signals: string[]
   prefer_existing_customers: boolean
+  size_preference: 'any' | 'pyme' | 'enterprise'
+  avoid_enterprise_keywords: string[]
   weights: {
     contactability: number
     purchase: number
@@ -116,6 +118,11 @@ type PreparedEquifaxCandidates = {
   candidates: ScoredLeadCandidate[]
   universeAnalyzed: number
   eligibleMatches: number
+}
+
+type PromptDirectives = {
+  sizePreference: 'any' | 'pyme' | 'enterprise'
+  avoidEnterpriseKeywords: string[]
 }
 
 const EQUFAX_SCENARIOS: ScenarioConfig[] = [
@@ -271,6 +278,84 @@ function tokenizeKeywordCandidates(values: Array<string | null>): string[] {
   return uniqueStrings(tokens).slice(0, 24)
 }
 
+function extractPromptDirectives(prompt?: string | null): PromptDirectives {
+  const normalizedPrompt = normalizeKeyword(prompt ?? '')
+  if (!normalizedPrompt) {
+    return {
+      sizePreference: 'any',
+      avoidEnterpriseKeywords: [],
+    }
+  }
+
+  const prefersPyme =
+    /\bpyme?s?\b/.test(normalizedPrompt) ||
+    /\bnegocios?\b/.test(normalizedPrompt) ||
+    /\bmedianas?\b/.test(normalizedPrompt) ||
+    /\bpequenas?\b/.test(normalizedPrompt) ||
+    normalizedPrompt.includes('no grandes empresas') ||
+    normalizedPrompt.includes('no priorices grandes') ||
+    normalizedPrompt.includes('evita grandes empresas') ||
+    normalizedPrompt.includes('sin grandes empresas')
+
+  const prefersEnterprise =
+    normalizedPrompt.includes('grandes empresas') &&
+    !normalizedPrompt.includes('no grandes empresas')
+
+  const explicitTokens = new Set<string>()
+
+  const genericMatches = [
+    { pattern: /\bbancos?\b|\bbank\b/, token: 'banco' },
+    { pattern: /\bcopec\b/, token: 'copec' },
+    { pattern: /\bseguros?\b/, token: 'seguros' },
+    { pattern: /\bholding\b/, token: 'holding' },
+    { pattern: /\bretail\b/, token: 'retail' },
+    { pattern: /\bafp\b/, token: 'afp' },
+    { pattern: /\bisapre\b/, token: 'isapre' },
+  ]
+
+  for (const matcher of genericMatches) {
+    if (matcher.pattern.test(normalizedPrompt)) {
+      explicitTokens.add(matcher.token)
+    }
+  }
+
+  const exampleClauseMatches = normalizedPrompt.match(/como\s+([a-z0-9\s,]+?)(?:\s+debemos|\s+y\s+negocios|\s+y\s+no|\s+quiero|[\.\n]|$)/)
+  if (exampleClauseMatches?.[1]) {
+    const rawTokens = exampleClauseMatches[1]
+      .split(/\s+o\s+|,|\sy\s/g)
+      .map(token => normalizeKeyword(token))
+      .filter(token => token.length >= 4)
+
+    for (const token of rawTokens) {
+      explicitTokens.add(token)
+    }
+  }
+
+  if (prefersPyme) {
+    ;[
+      'banco',
+      'bank',
+      'holding',
+      'seguros',
+      'afp',
+      'isapre',
+      'retail',
+      'copec',
+      'cencosud',
+      'falabella',
+      'walmart',
+      'enel',
+      'entel',
+      'latam',
+    ].forEach(token => explicitTokens.add(token))
+  }
+
+  return {
+    sizePreference: prefersPyme ? 'pyme' : prefersEnterprise ? 'enterprise' : 'any',
+    avoidEnterpriseKeywords: uniqueStrings([...explicitTokens]).map(normalizeKeyword).filter(Boolean),
+  }
+}
+
 function clamp(value: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, value))
 }
@@ -278,6 +363,49 @@ function clamp(value: number, min = 0, max = 100): number {
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits
   return Math.round(value * factor) / factor
+}
+
+function scoreEnterprisePenalty(companyName: string, profile: ProductProfile): number {
+  if (profile.size_preference !== 'pyme') return 0
+
+  const normalizedName = normalizeKeyword(companyName)
+  let penalty = 0
+
+  for (const keyword of profile.avoid_enterprise_keywords) {
+    if (!keyword) continue
+    if (normalizedName.includes(keyword)) {
+      penalty += keyword.length <= 5 ? 85 : 70
+    }
+  }
+
+  const genericEnterpriseIndicators = [
+    'banco',
+    'bank',
+    'holding',
+    'seguros',
+    'afp',
+    'isapre',
+    'retail',
+    'energia',
+    'petroleo',
+    'telecom',
+  ]
+
+  for (const indicator of genericEnterpriseIndicators) {
+    if (normalizedName.includes(indicator)) {
+      penalty += 35
+    }
+  }
+
+  if (/\bs a\b/.test(normalizedName) || normalizedName.endsWith(' sa')) {
+    penalty += 10
+  }
+
+  if (normalizedName.split(/\s+/g).length >= 6) {
+    penalty += 8
+  }
+
+  return clamp(penalty, 0, 100)
 }
 
 function normalizeProductRecord(record: Record<string, unknown>) {
@@ -501,6 +629,7 @@ export async function extractEquifaxProductsFromText(
 }
 
 function buildFallbackProfile(products: ReturnType<typeof normalizeProductRecord>[], prompt?: string | null): ProductProfile {
+  const directives = extractPromptDirectives(prompt)
   const productKeywords = tokenizeKeywordCandidates(
     products.flatMap(product => [
       product.name,
@@ -520,9 +649,12 @@ function buildFallbackProfile(products: ReturnType<typeof normalizeProductRecord
       'empresa con datos de contacto disponibles',
       'patrimonio o cobertura superior al promedio',
       'razon social alineada al rubro objetivo',
+      ...(directives.sizePreference === 'pyme' ? ['foco en pymes y negocios medianos, evitando grandes corporaciones'] : []),
       ...(prompt ? [prompt] : []),
     ]).slice(0, 8),
     prefer_existing_customers: true,
+    size_preference: directives.sizePreference,
+    avoid_enterprise_keywords: directives.avoidEnterpriseKeywords,
     weights: {
       contactability: 0.34,
       purchase: 0.3,
@@ -550,6 +682,7 @@ async function buildCampaignProfileWithAI(
       content: `Eres un estratega B2B para ventas de Equifax en Chile.
 Devuelve SIEMPRE un JSON válido y compacto.
 Debes traducir productos comerciales en una pauta de priorización para scoring masivo sobre una base de empresas.
+Si el usuario pide excluir grandes empresas, bancos, holdings o enfocarse en pymes, debes reflejarlo explícitamente.
 Los campos weights deben sumar aproximadamente 1.`,
     },
     {
@@ -570,6 +703,8 @@ Devuelve:
   "exclude_keywords": [],
   "buyer_signals": ["signal1", "signal2"],
   "prefer_existing_customers": true,
+  "size_preference": "any | pyme | enterprise",
+  "avoid_enterprise_keywords": ["banco", "holding"],
   "weights": {
     "contactability": 0.0,
     "purchase": 0.0,
@@ -611,6 +746,13 @@ Devuelve:
       exclude_keywords: uniqueStrings((parsed.exclude_keywords ?? []).map(item => normalizeKeyword(item))).filter(Boolean),
       buyer_signals: uniqueStrings(parsed.buyer_signals ?? fallback.buyer_signals).slice(0, 10),
       prefer_existing_customers: parsed.prefer_existing_customers ?? fallback.prefer_existing_customers,
+      size_preference: parsed.size_preference === 'pyme' || parsed.size_preference === 'enterprise'
+        ? parsed.size_preference
+        : fallback.size_preference,
+      avoid_enterprise_keywords: uniqueStrings(
+        ((parsed.avoid_enterprise_keywords as string[] | undefined) ?? fallback.avoid_enterprise_keywords)
+          .map(item => normalizeKeyword(item))
+      ).filter(Boolean),
       weights: {
         contactability: Number(weights.contactability ?? fallback.weights.contactability),
         purchase: Number(weights.purchase ?? fallback.weights.purchase),
@@ -755,7 +897,7 @@ async function fetchExistingCustomerCandidates(limit: number, regions: string[])
   return rows
 }
 
-async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
+async function fetchCandidateCompanies(sampleSize: number, regions: string[], profile: ProductProfile) {
   const [patrimonialRows, coverageRows, existingRows] = await Promise.all([
     fetchCandidateCompaniesOrdered(sampleSize, regions, 'score_patrimonial'),
     fetchCandidateCompaniesOrdered(Math.ceil(sampleSize * 0.6), regions, 'cobertura_pct'),
@@ -773,14 +915,16 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[]) {
         Number(Boolean(left.fono_cel)) * 24 +
         Number(left.cobertura_pct ?? 0) * 0.4 +
         Number(left.score_patrimonial ?? 0) * 0.35 +
-        Number(Boolean(left.tiene_empresa)) * 12
+        Number(Boolean(left.tiene_empresa)) * 12 -
+        scoreEnterprisePenalty(left.razon_social_empresa ?? '', profile) * 0.8
 
       const rightScore =
         Number(Boolean(right.email)) * 18 +
         Number(Boolean(right.fono_cel)) * 24 +
         Number(right.cobertura_pct ?? 0) * 0.4 +
         Number(right.score_patrimonial ?? 0) * 0.35 +
-        Number(Boolean(right.tiene_empresa)) * 12
+        Number(Boolean(right.tiene_empresa)) * 12 -
+        scoreEnterprisePenalty(right.razon_social_empresa ?? '', profile) * 0.8
 
       return rightScore - leftScore
     })
@@ -1213,7 +1357,7 @@ async function prepareEquifaxCandidates(
   const aiProfile = await buildCampaignProfileWithAI(products, summary.top_services, params.prompt)
   const sampleSize = Math.min(MAX_CANDIDATES, Math.max(volume * 8, 12000))
 
-  const candidates = await fetchCandidateCompanies(sampleSize, regions)
+  const candidates = await fetchCandidateCompanies(sampleSize, regions, aiProfile)
   const candidateRutids = candidates.map(row => row.rutid)
   const [scoresMap, customerMap] = await Promise.all([
     fetchPersonaScoresMap(candidateRutids),
@@ -1268,7 +1412,10 @@ async function prepareEquifaxCandidates(
       aiProfile.exclude_keywords
     )
 
+    const enterprisePenalty = scoreEnterprisePenalty(companyName, aiProfile)
+
     if (keywordMetrics.excludeHits > 0) continue
+    if (aiProfile.size_preference === 'pyme' && enterprisePenalty >= 85) continue
 
     const equifaxFit = clamp(
       keywordMetrics.score * aiProfile.weights.keyword_match +
@@ -1276,7 +1423,8 @@ async function prepareEquifaxCandidates(
         ? (aiProfile.prefer_existing_customers ? 100 : 0) * aiProfile.weights.existing_customer
         : 30 * aiProfile.weights.existing_customer) +
       (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
-      Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage
+      Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage -
+      enterprisePenalty * 0.2
     )
 
     const priorityScore = clamp(
@@ -1285,7 +1433,8 @@ async function prepareEquifaxCandidates(
       Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
       (isExistingCustomer ? 100 : 20) * aiProfile.weights.existing_customer +
       keywordMetrics.score * aiProfile.weights.keyword_match +
-      (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence
+      (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence -
+      enterprisePenalty * 0.45
     )
 
     ranked.push({
