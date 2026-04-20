@@ -70,13 +70,7 @@ async function searchPersonasByNameMatch(
   )] as string[]
 
   if (uniqueRutIds.length === 0) {
-    return {
-      data: [],
-      total: 0,
-      page: Math.floor(from / Math.max(to - from + 1, 1)) + 1,
-      page_size: Math.max(to - from + 1, 1),
-      total_pages: 0,
-    }
+    return null
   }
 
   const { data, error: fetchError } = await db
@@ -166,10 +160,11 @@ export async function searchPersonas(
       const padded = term.replace(/[.\-\s]/g, '').toUpperCase().padStart(10, '0')
       query = query.eq('rutid', padded)
     } else {
-      const tokens = getSearchTokens(term)
+      const normalizedTerm = normalizePersonNameTerm(term)
+      const tokens = getSearchTokens(normalizedTerm)
       if (tokens.length >= 2 && !term.includes('@')) {
         const directNameMatch = await searchPersonasByNameMatch(
-          term,
+          normalizedTerm,
           from,
           to,
           safeSortBy,
@@ -187,7 +182,7 @@ export async function searchPersonas(
         }
       } else {
         query = query.or(
-          `nombre_completo.ilike.%${term}%,nombres.ilike.%${term}%,paterno.ilike.%${term}%,materno.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
+          `nombre_completo.ilike.%${normalizedTerm}%,nombres.ilike.%${normalizedTerm}%,paterno.ilike.%${normalizedTerm}%,materno.ilike.%${normalizedTerm}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
         )
       }
     }
