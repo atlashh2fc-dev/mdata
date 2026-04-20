@@ -16,6 +16,8 @@ type MasterRow = {
   razon_social_empresa: string | null
   region_canonica: string | null
   comuna_canonica: string | null
+  email: string | null
+  fono_cel: string | null
   score_patrimonial: number | null
   cobertura_pct: number | null
   totalavaluos: number | null
@@ -174,6 +176,45 @@ type ProjectionSummary = {
   top_10000: ProjectionBucket
 }
 
+type CrosscheckTemperature = 'all' | 'green' | 'yellow' | 'red'
+
+type CrosscheckBucket = {
+  temperature: CrosscheckTemperature
+  sample_size: number
+  share: number
+  avg_lead_score: number
+  avg_contact_probability: number
+  avg_interest_probability: number
+  avg_purchase_probability: number
+  actual_contact_rate: number
+  actual_interest_rate: number
+  actual_purchase_rate: number
+  actual_contact_and_purchase_rate: number
+  avg_phone_count: number
+  avg_email_count: number
+  avg_coverage_pct: number
+}
+
+type CrosscheckSummary = {
+  generated_at: string
+  model_version: string
+  model_type: string
+  sample_size: number
+  thresholds: {
+    green: {
+      min_contact_probability: number
+      min_purchase_probability: number
+      min_lead_score: number
+    }
+    yellow: {
+      min_contact_probability: number
+      min_lead_score: number
+    }
+  }
+  overall: CrosscheckBucket
+  by_temperature: CrosscheckBucket[]
+}
+
 type EquifaxPipelineRunResult = {
   run_id: string
   trigger_source: string
@@ -182,7 +223,17 @@ type EquifaxPipelineRunResult = {
   refreshed_batches: number
   training: TrainModelResult | null
   projections: ProjectionSummary
+  crosscheck: CrosscheckSummary | null
   finished_at: string
+}
+
+type RefreshUniverseOptions = {
+  limit?: number | null
+  regions?: string[]
+  requireContact?: 'any' | 'phone' | 'email' | 'none'
+  batchSize?: number
+  orderBy?: 'score_patrimonial' | 'cobertura_pct' | 'rutid'
+  dryRun?: boolean
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -441,11 +492,59 @@ async function fetchRowsInChunks<T>(
 async function fetchMasterRowsMap(rutids: string[]) {
   const rows = await fetchRowsInChunks<MasterRow>(
     'master_personas_view',
-    'rutid,razon_social_empresa,region_canonica,comuna_canonica,score_patrimonial,cobertura_pct,totalavaluos,n_autos,n_bienes_raices',
+    'rutid,razon_social_empresa,region_canonica,comuna_canonica,email,fono_cel,score_patrimonial,cobertura_pct,totalavaluos,n_autos,n_bienes_raices',
     rutids
   )
 
   return new Map(rows.map(row => [row.rutid, row]))
+}
+
+async function collectUniverseRutidsForRefresh(options?: RefreshUniverseOptions) {
+  const limit = options?.limit && options.limit > 0
+    ? Math.round(options.limit)
+    : Number.MAX_SAFE_INTEGER
+  const regions = uniqueStrings(options?.regions ?? [])
+  const requireContact = options?.requireContact ?? 'any'
+  const orderBy = options?.orderBy ?? 'score_patrimonial'
+  const rutids: string[] = []
+
+  for (let from = 0; rutids.length < limit; from += FETCH_CHUNK_SIZE) {
+    let query = db
+      .from('master_personas_view')
+      .select('rutid')
+      .not('razon_social_empresa', 'is', null)
+      .order(orderBy, {
+        ascending: orderBy === 'rutid',
+        nullsFirst: orderBy === 'rutid',
+      })
+      .range(from, from + FETCH_CHUNK_SIZE - 1)
+
+    if (regions.length > 0) {
+      query = query.in('region_canonica', regions)
+    }
+
+    if (requireContact === 'phone') {
+      query = query.not('fono_cel', 'is', null)
+    } else if (requireContact === 'email') {
+      query = query.not('email', 'is', null)
+    } else if (requireContact === 'any') {
+      query = query.or('email.not.is.null,fono_cel.not.is.null')
+    }
+
+    const { data, error } = await query
+    if (error) {
+      console.error('[collectUniverseRutidsForRefresh]', error)
+      throw new Error('No se pudo leer el universo de empresas para scoring masivo.')
+    }
+
+    const chunkRows = (data ?? []) as Array<{ rutid: string | null }>
+    const chunkRutids = uniqueStrings(chunkRows.map(row => row.rutid))
+    rutids.push(...chunkRutids)
+
+    if (chunkRows.length < FETCH_CHUNK_SIZE) break
+  }
+
+  return uniqueStrings(rutids).slice(0, limit)
 }
 
 async function fetchPersonaScoresMap(rutids: string[]) {
@@ -584,6 +683,10 @@ function buildFeatureRow(params: {
   feedback?: AggregatedFeedback
 }) {
   const { rutid, master, persona, customer, feedback } = params
+  const knownPhoneCount = Math.max(toNumber(persona?.known_phone_count), master?.fono_cel ? 1 : 0)
+  const knownEmailCount = Math.max(toNumber(persona?.known_email_count), master?.email ? 1 : 0)
+  const bestPhone = persona?.best_phone ?? master?.fono_cel ?? null
+  const bestEmail = persona?.best_email ?? master?.email ?? null
   const totalInteractions = feedback?.totalInteractions ?? 0
   const equifaxInteractions = feedback?.equifaxInteractions ?? 0
   const contactBase = equifaxInteractions > 0 ? equifaxInteractions : totalInteractions
@@ -619,8 +722,8 @@ function buildFeatureRow(params: {
     days_since_last_contact: diffDays(feedback?.lastContactAt),
     days_since_last_interest: diffDays(feedback?.lastInterestAt),
     days_since_last_sale_feedback: diffDays(feedback?.lastSaleFeedbackAt),
-    best_phone: persona?.best_phone ?? null,
-    best_email: persona?.best_email ?? null,
+    best_phone: bestPhone,
+    best_email: bestEmail,
   }
 
   const labelContact = deriveContactLabel({
@@ -663,8 +766,8 @@ function buildFeatureRow(params: {
     equifax_recurrent_sales_count: toNumber(customer?.recurrent_sales_count),
     equifax_one_time_sales_count: toNumber(customer?.one_time_sales_count),
     equifax_total_amount: round(toNumber(customer?.total_amount), 2),
-    known_phone_count: toNumber(persona?.known_phone_count),
-    known_email_count: toNumber(persona?.known_email_count),
+    known_phone_count: knownPhoneCount,
+    known_email_count: knownEmailCount,
     feedback_total_interactions: totalInteractions,
     feedback_equifax_interactions: equifaxInteractions,
     effective_contacts: effectiveContacts,
@@ -1266,6 +1369,39 @@ export async function refreshEquifaxLeadScoresForRutids(rutids: string[]) {
   return map
 }
 
+export async function refreshEquifaxLeadScoresForUniverse(options?: RefreshUniverseOptions) {
+  const startedAt = new Date().toISOString()
+  const rutids = await collectUniverseRutidsForRefresh(options)
+  const batchSize = Math.max(100, Math.min(2000, Math.round(options?.batchSize ?? UPSERT_CHUNK_SIZE)))
+  let refreshedRutids = 0
+  let refreshedBatches = 0
+
+  if (!options?.dryRun) {
+    for (const subset of chunk(rutids, batchSize)) {
+      await refreshEquifaxLeadScoresForRutids(subset)
+      refreshedRutids += subset.length
+      refreshedBatches += 1
+    }
+  }
+
+  return {
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+    selected_rutids: rutids.length,
+    refreshed_rutids: options?.dryRun ? 0 : refreshedRutids,
+    refreshed_batches: options?.dryRun ? 0 : refreshedBatches,
+    dry_run: options?.dryRun === true,
+    filters: {
+      limit: options?.limit ?? null,
+      regions: uniqueStrings(options?.regions ?? []),
+      require_contact: options?.requireContact ?? 'any',
+      batch_size: batchSize,
+      order_by: options?.orderBy ?? 'score_patrimonial',
+    },
+    sample_rutids: rutids.slice(0, 15),
+  }
+}
+
 const TRAINING_FEATURES = [
   'known_phone_count',
   'known_email_count',
@@ -1561,6 +1697,49 @@ function summarizeProjectionBucket(rows: EquifaxLeadScoreSnapshot[]): Projection
   }
 }
 
+function summarizeCrosscheckBucket(
+  temperature: CrosscheckTemperature,
+  rows: Array<{
+    lead_score: number
+    contact_probability: number
+    interest_probability: number
+    purchase_probability: number
+    known_phone_count: number
+    known_email_count: number
+    coverage_pct: number
+    label_contact: boolean
+    label_interest: boolean
+    label_purchase: boolean
+  }>,
+  totalSampleSize: number
+): CrosscheckBucket {
+  const sampleSize = rows.length
+  const safeAvg = (values: number[]) => sampleSize ? safeAverage(values) : 0
+
+  return {
+    temperature,
+    sample_size: sampleSize,
+    share: round(safeRate(sampleSize, Math.max(totalSampleSize, 1)), 4),
+    avg_lead_score: round(safeAvg(rows.map(row => row.lead_score)), 2),
+    avg_contact_probability: round(safeAvg(rows.map(row => row.contact_probability)), 2),
+    avg_interest_probability: round(safeAvg(rows.map(row => row.interest_probability)), 2),
+    avg_purchase_probability: round(safeAvg(rows.map(row => row.purchase_probability)), 2),
+    actual_contact_rate: round(safeRate(rows.filter(row => row.label_contact).length, Math.max(sampleSize, 1)), 4),
+    actual_interest_rate: round(safeRate(rows.filter(row => row.label_interest).length, Math.max(sampleSize, 1)), 4),
+    actual_purchase_rate: round(safeRate(rows.filter(row => row.label_purchase).length, Math.max(sampleSize, 1)), 4),
+    actual_contact_and_purchase_rate: round(
+      safeRate(
+        rows.filter(row => row.label_contact && row.label_purchase).length,
+        Math.max(sampleSize, 1)
+      ),
+      4
+    ),
+    avg_phone_count: round(safeAvg(rows.map(row => row.known_phone_count)), 2),
+    avg_email_count: round(safeAvg(rows.map(row => row.known_email_count)), 2),
+    avg_coverage_pct: round(safeAvg(rows.map(row => row.coverage_pct)), 2),
+  }
+}
+
 export async function buildEquifaxProjectionSummary(): Promise<ProjectionSummary> {
   const rows = await fetchScoreProjectionRows()
 
@@ -1570,6 +1749,63 @@ export async function buildEquifaxProjectionSummary(): Promise<ProjectionSummary
     top_1000: summarizeProjectionBucket(rows.slice(0, 1000)),
     top_3000: summarizeProjectionBucket(rows.slice(0, 3000)),
     top_10000: summarizeProjectionBucket(rows.slice(0, 10000)),
+  }
+}
+
+export async function buildEquifaxModelCrosscheckSummary(): Promise<CrosscheckSummary | null> {
+  const rows = await fetchTrainingRows()
+  if (!rows.length) return null
+
+  const models = await loadActiveLogisticModels()
+  const sampleRows = rows.map(row => {
+    const heuristic = buildHeuristicScore(row)
+    const combined = combineScores(row, heuristic, models)
+
+    return {
+      lead_temperature: combined.lead_temperature,
+      lead_score: combined.lead_score,
+      contact_probability: combined.contact_probability,
+      interest_probability: combined.interest_probability,
+      purchase_probability: combined.purchase_probability,
+      known_phone_count: row.known_phone_count,
+      known_email_count: row.known_email_count,
+      coverage_pct: toNumber(row.feature_payload.cobertura_pct),
+      label_contact: row.label_contact,
+      label_interest: row.label_interest,
+      label_purchase: row.label_purchase,
+    }
+  })
+
+  const overall = summarizeCrosscheckBucket('all', sampleRows, sampleRows.length)
+  const byTemperature = (['green', 'yellow', 'red'] as const).map(temperature =>
+    summarizeCrosscheckBucket(
+      temperature,
+      sampleRows.filter(row => row.lead_temperature === temperature),
+      sampleRows.length
+    )
+  )
+
+  const firstRow = rows[0]
+  const firstCombined = combineScores(firstRow, buildHeuristicScore(firstRow), models)
+
+  return {
+    generated_at: new Date().toISOString(),
+    model_version: firstCombined.model_version,
+    model_type: firstCombined.model_type,
+    sample_size: sampleRows.length,
+    thresholds: {
+      green: {
+        min_contact_probability: 60,
+        min_purchase_probability: 35,
+        min_lead_score: 65,
+      },
+      yellow: {
+        min_contact_probability: 35,
+        min_lead_score: 42,
+      },
+    },
+    overall,
+    by_temperature: byTemperature,
   }
 }
 
@@ -1804,6 +2040,7 @@ export async function runEquifaxScoringPipeline(options?: {
     }
 
     const projections = await buildEquifaxProjectionSummary()
+    const crosscheck = await buildEquifaxModelCrosscheckSummary()
     const finishedAt = new Date().toISOString()
 
     await updatePipelineRun(runId, {
@@ -1829,6 +2066,7 @@ export async function runEquifaxScoringPipeline(options?: {
       refreshed_batches: refreshedBatches,
       training,
       projections,
+      crosscheck,
       finished_at: finishedAt,
     } satisfies EquifaxPipelineRunResult
   } catch (error) {

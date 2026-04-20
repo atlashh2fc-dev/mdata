@@ -279,7 +279,8 @@ export type Database = {
           total_ruts: number | null; con_nombre: number | null; con_email: number | null
           con_fono: number | null; con_autos: number | null; total_autos: number | null
           con_empresa: number | null; con_domicilio: number | null; con_bienes_raices: number | null
-          total_avaluos: number | null; jobs_completados: number | null
+          total_avaluos: number | null; total_propiedades_cargadas: number | null
+          jobs_completados: number | null
           jobs_fallidos: number | null; total_segmentos: number | null; last_refreshed: string | null
         }
       }

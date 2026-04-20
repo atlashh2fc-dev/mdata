@@ -1,11 +1,16 @@
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import { getEquifaxLeadScoresMap } from '@/lib/services/equifax-scoring'
+import {
+  detectEquifaxNonTargetCompany,
+  normalizeEquifaxKeyword,
+} from '@/lib/services/equifax-targeting'
 import { cleanRut } from '@/lib/utils/rut'
 import type {
   EquifaxCatalogSummary,
   EquifaxLeadGenerationParams,
   EquifaxLeadPreviewResult,
   EquifaxLeadGenerationResult,
+  EquifaxLeadScoreSnapshot,
   EquifaxLeadResultItem,
   EquifaxLeadScenario,
   EquifaxProductCatalogItem,
@@ -16,6 +21,7 @@ const INCEPTION_API_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
 const INCEPTION_MODEL = 'mercury-2'
 const FETCH_CHUNK_SIZE = 1000
 const MAX_CANDIDATES = 60000
+const MIN_SCORED_UNIVERSE_SAMPLE = 8000
 const INSERT_CHUNK_SIZE = 500
 
 type ImportedSaleRow = {
@@ -119,11 +125,23 @@ type PreparedEquifaxCandidates = {
   candidates: ScoredLeadCandidate[]
   universeAnalyzed: number
   eligibleMatches: number
+  universeSource: 'sampled_master' | 'scored_universe'
 }
 
 type PromptDirectives = {
   sizePreference: 'any' | 'pyme' | 'enterprise'
   avoidEnterpriseKeywords: string[]
+}
+
+type CandidateSelectionContext = {
+  candidate: CandidateCompany
+  aiProfile: ProductProfile
+  scoreRow?: PersonaScoreRow
+  customerSummary?: CustomerSummaryRow
+  equifaxLeadScore?: EquifaxLeadScoreSnapshot
+  includeExistingCustomers: boolean
+  minPhoneCount: number
+  minEmailCount: number
 }
 
 const EQUFAX_SCENARIOS: ScenarioConfig[] = [
@@ -169,6 +187,20 @@ const EQUFAX_SCENARIOS: ScenarioConfig[] = [
       prospect: 0.14,
     },
   },
+  {
+    key: 'solo_verdes',
+    title: 'Base 4 · Solo verdes priorizados',
+    description: 'Parte desde leads ya scoreados como verdes y reordena por contacto disponible, propensión de compra e historial útil.',
+    recommendation: 'Úsala cuando quieras una base nueva enfocada solo en oportunidades listas para gestión inmediata.',
+    weights: {
+      base: 0.28,
+      contactability: 0.24,
+      purchase: 0.18,
+      fit: 0.18,
+      existing: 0.08,
+      prospect: 0.04,
+    },
+  },
 ]
 
 function normalizeRutForDb(value: string | null | undefined): string | null {
@@ -179,13 +211,7 @@ function normalizeRutForDb(value: string | null | undefined): string | null {
 }
 
 function normalizeKeyword(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return normalizeEquifaxKeyword(value)
 }
 
 function normalizeTextArray(value: unknown): string[] {
@@ -668,6 +694,45 @@ function buildFallbackProfile(products: ReturnType<typeof normalizeProductRecord
   }
 }
 
+function buildScoredUniverseFallbackProfile(prompt?: string | null): ProductProfile {
+  const directives = extractPromptDirectives(prompt)
+  const promptKeywords = tokenizeKeywordCandidates([prompt ?? null])
+
+  return {
+    include_keywords: promptKeywords,
+    exclude_keywords: [],
+    buyer_signals: uniqueStrings([
+      'lead score verde confirmado',
+      'contactabilidad alta',
+      'propension de compra alta',
+      'contacto disponible para gestion comercial',
+      ...(prompt ? [prompt] : []),
+    ]).slice(0, 8),
+    prefer_existing_customers: true,
+    size_preference: directives.sizePreference,
+    avoid_enterprise_keywords: directives.avoidEnterpriseKeywords,
+    weights: {
+      contactability: 0.42,
+      purchase: 0.26,
+      coverage: 0.08,
+      existing_customer: 0.08,
+      keyword_match: promptKeywords.length > 0 ? 0.08 : 0.02,
+      company_presence: 0.08,
+    },
+    notes: 'Perfil genérico para explotar universo scoreado, aun sin catálogo de productos explícito.',
+  }
+}
+
+function normalizeAllowedTemperatures(
+  value?: Array<'green' | 'yellow' | 'red'> | null
+): Array<'green' | 'yellow' | 'red'> {
+  const allowed = Array.isArray(value)
+    ? value.filter(item => item === 'green' || item === 'yellow' || item === 'red')
+    : []
+
+  return allowed.length > 0 ? uniqueStrings(allowed) as Array<'green' | 'yellow' | 'red'> : ['green', 'yellow', 'red']
+}
+
 async function buildCampaignProfileWithAI(
   products: ReturnType<typeof normalizeProductRecord>[],
   topServices: EquifaxCatalogSummary['top_services'],
@@ -797,6 +862,90 @@ function dedupeCandidateCompanies(rows: CandidateCompany[]) {
   }
 
   return [...map.values()]
+}
+
+async function fetchCandidateCompaniesByRutids(rutids: string[], regions: string[]) {
+  const map = new Map<string, CandidateCompany>()
+  if (rutids.length === 0) return map
+
+  for (let start = 0; start < rutids.length; start += FETCH_CHUNK_SIZE) {
+    let query = db
+      .from('master_personas_view')
+      .select(`
+        rutid,
+        razon_social_empresa,
+        region_canonica,
+        comuna_canonica,
+        email,
+        fono_cel,
+        score_patrimonial,
+        cobertura_pct,
+        tiene_empresa,
+        tiene_autos,
+        tiene_bienes_raices,
+        n_autos,
+        n_bienes_raices
+      `)
+      .in('rutid', rutids.slice(start, start + FETCH_CHUNK_SIZE))
+
+    if (regions.length > 0) {
+      query = query.in('region_canonica', regions)
+    }
+
+    const { data, error } = await query
+    if (error) {
+      console.error('[fetchCandidateCompaniesByRutids]', error)
+      throw new Error('No se pudo leer el universo empresarial scoreado.')
+    }
+
+    for (const row of (data ?? []) as CandidateCompany[]) {
+      map.set(row.rutid, row)
+    }
+  }
+
+  return map
+}
+
+async function fetchScoredUniverseRows(
+  limit: number,
+  allowedTemperatures: Array<'green' | 'yellow' | 'red'>
+) {
+  const rows: EquifaxLeadScoreSnapshot[] = []
+
+  for (let start = 0; start < limit; start += FETCH_CHUNK_SIZE) {
+    const { data, error } = await db
+      .from('equifax_lead_scores')
+      .select(`
+        rutid,
+        model_version,
+        model_type,
+        contact_probability,
+        interest_probability,
+        purchase_probability,
+        fit_score,
+        lead_score,
+        lead_temperature,
+        recommended_channel,
+        recommended_hour,
+        reason_tags,
+        score_breakdown,
+        scored_at
+      `)
+      .in('lead_temperature', allowedTemperatures)
+      .order('lead_score', { ascending: false })
+      .range(start, Math.min(start + FETCH_CHUNK_SIZE - 1, limit - 1))
+
+    if (error) {
+      console.error('[fetchScoredUniverseRows]', error)
+      throw new Error('No se pudo leer el universo scoreado Equifax.')
+    }
+
+    const chunk = (data ?? []) as EquifaxLeadScoreSnapshot[]
+    rows.push(...chunk)
+    if (chunk.length < FETCH_CHUNK_SIZE) break
+  }
+
+  return rows.slice(0, limit)
 }
 
 async function fetchCandidateCompaniesOrdered(
@@ -1008,6 +1157,152 @@ function scoreKeywordMatches(companyName: string, includeKeywords: string[], exc
     includeHits,
     excludeHits,
     score: clamp(includeHits * 16 - excludeHits * 20, 0, 100),
+  }
+}
+
+function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLeadCandidate | null {
+  const {
+    candidate,
+    aiProfile,
+    scoreRow,
+    customerSummary,
+    equifaxLeadScore,
+    includeExistingCustomers,
+    minPhoneCount,
+    minEmailCount,
+  } = params
+
+  const companyName = candidate.razon_social_empresa?.trim()
+  if (!companyName) return null
+  if (detectEquifaxNonTargetCompany(companyName)) return null
+
+  const isExistingCustomer = Boolean(customerSummary)
+  if (!includeExistingCustomers && isExistingCustomer) return null
+
+  const phoneCount = Math.max(
+    Number(scoreRow?.known_phone_count ?? 0),
+    candidate.fono_cel ? 1 : 0
+  )
+  const emailCount = Math.max(
+    Number(scoreRow?.known_email_count ?? 0),
+    candidate.email ? 1 : 0
+  )
+
+  if (phoneCount < minPhoneCount) return null
+  if (emailCount < minEmailCount) return null
+
+  const contactability = clamp(
+    Number(
+      scoreRow?.contactability_score ??
+      phoneCount * 18 +
+      emailCount * 10 +
+      Number(candidate.cobertura_pct ?? 0) * 0.35
+    )
+  )
+
+  const purchase = clamp(
+    Number(
+      scoreRow?.purchase_propensity_score ??
+      Number(candidate.score_patrimonial ?? 0) * 0.65 +
+      (candidate.tiene_empresa ? 12 : 0) +
+      (candidate.tiene_bienes_raices ? 10 : 0) +
+      (candidate.tiene_autos ? 6 : 0)
+    )
+  )
+
+  const contactProbability = round(
+    equifaxLeadScore?.contact_probability ?? contactability,
+    2
+  )
+  const interestProbability = round(
+    equifaxLeadScore?.interest_probability ??
+    clamp(contactability * 0.45 + purchase * 0.2 + (isExistingCustomer ? 12 : 0)),
+    2
+  )
+  const purchaseProbability = round(
+    equifaxLeadScore?.purchase_probability ?? purchase,
+    2
+  )
+  const leadScore = round(
+    equifaxLeadScore?.lead_score ??
+    clamp(contactProbability * 0.45 + interestProbability * 0.25 + purchaseProbability * 0.3),
+    2
+  )
+  const leadTemperature = equifaxLeadScore?.lead_temperature ?? 'red'
+  const recommendedChannel = equifaxLeadScore?.recommended_channel ?? (phoneCount > 0 ? 'phone' : emailCount > 0 ? 'email' : null)
+  const recommendedHour = equifaxLeadScore?.recommended_hour ?? null
+
+  const keywordMetrics = scoreKeywordMatches(
+    companyName,
+    aiProfile.include_keywords,
+    aiProfile.exclude_keywords
+  )
+
+  const enterprisePenalty = scoreEnterprisePenalty(companyName, aiProfile)
+
+  if (keywordMetrics.excludeHits > 0) return null
+  if (aiProfile.size_preference === 'pyme' && enterprisePenalty >= 85) return null
+
+  const equifaxFit = clamp(
+    keywordMetrics.score * aiProfile.weights.keyword_match +
+    (isExistingCustomer
+      ? (aiProfile.prefer_existing_customers ? 100 : 0) * aiProfile.weights.existing_customer
+      : 30 * aiProfile.weights.existing_customer) +
+    (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
+    Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
+    purchaseProbability * 0.08 +
+    interestProbability * 0.05 -
+    enterprisePenalty * 0.2
+  )
+
+  const priorityScore = clamp(
+    contactProbability * aiProfile.weights.contactability +
+    purchaseProbability * aiProfile.weights.purchase +
+    Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
+    (isExistingCustomer ? 100 : 20) * aiProfile.weights.existing_customer +
+    keywordMetrics.score * aiProfile.weights.keyword_match +
+    (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
+    interestProbability * 0.12 +
+    leadScore * 0.18 -
+    enterprisePenalty * 0.45
+  )
+
+  return {
+    rutid: candidate.rutid,
+    company_name: companyName,
+    region: candidate.region_canonica,
+    comuna: candidate.comuna_canonica,
+    best_phone: scoreRow?.best_phone ?? candidate.fono_cel ?? null,
+    best_email: scoreRow?.best_email ?? candidate.email ?? null,
+    phone_count: phoneCount,
+    email_count: emailCount,
+    contactability_score: contactProbability,
+    purchase_propensity_score: purchaseProbability,
+    equifax_fit_score: round(equifaxFit, 2),
+    priority_score: round(priorityScore, 2),
+    contact_probability: contactProbability,
+    interest_probability: interestProbability,
+    purchase_probability: purchaseProbability,
+    lead_score: leadScore,
+    lead_temperature: leadTemperature,
+    recommended_channel: recommendedChannel,
+    recommended_hour: recommendedHour,
+    base_priority_score: round(priorityScore, 2),
+    coverage_score: round(Number(candidate.cobertura_pct ?? 0), 2),
+    keyword_hits: keywordMetrics.includeHits,
+    is_existing_customer: isExistingCustomer,
+    last_equifax_sale_at: customerSummary?.last_sale_at ?? null,
+    services_bought: customerSummary?.services_bought ?? [],
+    reason_tags: buildLeadReasons({
+      phoneCount,
+      emailCount,
+      isExistingCustomer,
+      keywordHits: keywordMetrics.includeHits,
+      contactability: contactProbability,
+      purchase: purchaseProbability,
+      company: candidate,
+      customerSummary,
+    }),
   }
 }
 
@@ -1332,18 +1627,39 @@ async function prepareEquifaxCandidates(
   params: EquifaxLeadGenerationParams
 ): Promise<PreparedEquifaxCandidates> {
   const volume = clamp(Math.round(params.volume || 1000), 1, 10000)
+  const isGreenOnlyScenario = params.scenario_key === 'solo_verdes'
+  const universeSource =
+    params.universe_source === 'scored_universe' || isGreenOnlyScenario
+      ? 'scored_universe'
+      : 'sampled_master'
   const includeExistingCustomers = params.include_existing_customers !== false
   const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
   const minEmailCount = Math.max(0, Math.round(params.min_email_count ?? 0))
   const regions = uniqueStrings((params.regions ?? []).map(item => item.trim()).filter(Boolean))
+  const allowedTemperatures: Array<'green' | 'yellow' | 'red'> = isGreenOnlyScenario
+    ? ['green']
+    : normalizeAllowedTemperatures(params.allowed_temperatures)
+  const scoredUniverseLimit = Math.min(
+    MAX_CANDIDATES,
+    Math.max(
+      volume,
+      Math.round(params.scored_universe_limit ?? Math.max(volume * 12, MIN_SCORED_UNIVERSE_SAMPLE))
+    )
+  )
 
+  const shouldUseActiveCatalogByDefault = universeSource === 'scored_universe' && !(params.product_ids?.length)
   const storedProducts = params.product_ids?.length
     ? await db
         .from('equifax_product_catalog')
         .select('*')
         .in('id', params.product_ids)
         .eq('is_active', true)
-    : { data: [], error: null }
+    : shouldUseActiveCatalogByDefault
+      ? await db
+          .from('equifax_product_catalog')
+          .select('*')
+          .eq('is_active', true)
+      : { data: [], error: null }
 
   if (storedProducts.error) {
     console.error('[generateEquifaxLeads:storedProducts]', storedProducts.error)
@@ -1364,159 +1680,71 @@ async function prepareEquifaxCandidates(
   }))
 
   const products = [...normalizedStored, ...normalizedTransient]
-  if (!products.length) {
+  if (!products.length && universeSource !== 'scored_universe') {
     throw new Error('Debes subir o seleccionar al menos un producto para generar leads.')
   }
 
-  const summary = await getEquifaxCatalogSummary()
-  const aiProfile = await buildCampaignProfileWithAI(products, summary.top_services, params.prompt)
-  const sampleSize = Math.min(MAX_CANDIDATES, Math.max(volume * 8, 12000))
-
-  const candidates = await fetchCandidateCompanies(sampleSize, regions, aiProfile)
-  const candidateRutids = candidates.map(row => row.rutid)
-  const [scoresMap, customerMap, equifaxScoreMap] = await Promise.all([
-    fetchPersonaScoresMap(candidateRutids),
-    fetchCustomerSummaryMap(candidateRutids),
-    getEquifaxLeadScoresMap(candidateRutids),
-  ])
+  const aiProfile = products.length
+    ? await buildCampaignProfileWithAI(products, (await getEquifaxCatalogSummary()).top_services, params.prompt)
+    : buildScoredUniverseFallbackProfile(params.prompt)
 
   const ranked: ScoredLeadCandidate[] = []
+  let universeAnalyzed = 0
 
-  for (const candidate of candidates) {
-    const companyName = candidate.razon_social_empresa?.trim()
-    if (!companyName) continue
+  if (universeSource === 'scored_universe') {
+    const scoredUniverseRows = await fetchScoredUniverseRows(scoredUniverseLimit, allowedTemperatures)
+    const candidateRutids = scoredUniverseRows.map(row => row.rutid)
+    const [candidateMap, scoresMap, customerMap] = await Promise.all([
+      fetchCandidateCompaniesByRutids(candidateRutids, regions),
+      fetchPersonaScoresMap(candidateRutids),
+      fetchCustomerSummaryMap(candidateRutids),
+    ])
 
-    const scoreRow = scoresMap.get(candidate.rutid)
-    const customerSummary = customerMap.get(candidate.rutid)
-    const isExistingCustomer = Boolean(customerSummary)
-    if (!includeExistingCustomers && isExistingCustomer) continue
+    universeAnalyzed = scoredUniverseRows.length
 
-    const phoneCount = Math.max(
-      Number(scoreRow?.known_phone_count ?? 0),
-      candidate.fono_cel ? 1 : 0
-    )
-    const emailCount = Math.max(
-      Number(scoreRow?.known_email_count ?? 0),
-      candidate.email ? 1 : 0
-    )
+    for (const equifaxLeadScore of scoredUniverseRows) {
+      const candidate = candidateMap.get(equifaxLeadScore.rutid)
+      if (!candidate) continue
 
-    if (phoneCount < minPhoneCount) continue
-    if (emailCount < minEmailCount) continue
+      const rankedCandidate = buildScoredLeadCandidate({
+        candidate,
+        aiProfile,
+        scoreRow: scoresMap.get(candidate.rutid),
+        customerSummary: customerMap.get(candidate.rutid),
+        equifaxLeadScore,
+        includeExistingCustomers,
+        minPhoneCount,
+        minEmailCount,
+      })
 
-    const contactability = clamp(
-      Number(
-        scoreRow?.contactability_score ??
-        phoneCount * 18 +
-        emailCount * 10 +
-        Number(candidate.cobertura_pct ?? 0) * 0.35
-      )
-    )
+      if (rankedCandidate) ranked.push(rankedCandidate)
+    }
+  } else {
+    const sampleSize = Math.min(MAX_CANDIDATES, Math.max(volume * 8, 12000))
+    const candidates = await fetchCandidateCompanies(sampleSize, regions, aiProfile)
+    const candidateRutids = candidates.map(row => row.rutid)
+    const [scoresMap, customerMap, equifaxScoreMap] = await Promise.all([
+      fetchPersonaScoresMap(candidateRutids),
+      fetchCustomerSummaryMap(candidateRutids),
+      getEquifaxLeadScoresMap(candidateRutids),
+    ])
 
-    const purchase = clamp(
-      Number(
-        scoreRow?.purchase_propensity_score ??
-        Number(candidate.score_patrimonial ?? 0) * 0.65 +
-        (candidate.tiene_empresa ? 12 : 0) +
-        (candidate.tiene_bienes_raices ? 10 : 0) +
-        (candidate.tiene_autos ? 6 : 0)
-      )
-    )
+    universeAnalyzed = candidates.length
 
-    const equifaxLeadScore = equifaxScoreMap.get(candidate.rutid)
-    const contactProbability = round(
-      equifaxLeadScore?.contact_probability ?? contactability,
-      2
-    )
-    const interestProbability = round(
-      equifaxLeadScore?.interest_probability ??
-      clamp(contactability * 0.45 + purchase * 0.2 + (isExistingCustomer ? 12 : 0)),
-      2
-    )
-    const purchaseProbability = round(
-      equifaxLeadScore?.purchase_probability ?? purchase,
-      2
-    )
-    const leadScore = round(
-      equifaxLeadScore?.lead_score ??
-      clamp(contactProbability * 0.45 + interestProbability * 0.25 + purchaseProbability * 0.3),
-      2
-    )
-    const leadTemperature = equifaxLeadScore?.lead_temperature ?? 'red'
-    const recommendedChannel = equifaxLeadScore?.recommended_channel ?? (phoneCount > 0 ? 'phone' : emailCount > 0 ? 'email' : null)
-    const recommendedHour = equifaxLeadScore?.recommended_hour ?? null
+    for (const candidate of candidates) {
+      const rankedCandidate = buildScoredLeadCandidate({
+        candidate,
+        aiProfile,
+        scoreRow: scoresMap.get(candidate.rutid),
+        customerSummary: customerMap.get(candidate.rutid),
+        equifaxLeadScore: equifaxScoreMap.get(candidate.rutid),
+        includeExistingCustomers,
+        minPhoneCount,
+        minEmailCount,
+      })
 
-    const keywordMetrics = scoreKeywordMatches(
-      companyName,
-      aiProfile.include_keywords,
-      aiProfile.exclude_keywords
-    )
-
-    const enterprisePenalty = scoreEnterprisePenalty(companyName, aiProfile)
-
-    if (keywordMetrics.excludeHits > 0) continue
-    if (aiProfile.size_preference === 'pyme' && enterprisePenalty >= 85) continue
-
-    const equifaxFit = clamp(
-      keywordMetrics.score * aiProfile.weights.keyword_match +
-      (isExistingCustomer
-        ? (aiProfile.prefer_existing_customers ? 100 : 0) * aiProfile.weights.existing_customer
-        : 30 * aiProfile.weights.existing_customer) +
-      (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
-      Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
-      purchaseProbability * 0.08 +
-      interestProbability * 0.05 -
-      enterprisePenalty * 0.2
-    )
-
-    const priorityScore = clamp(
-      contactProbability * aiProfile.weights.contactability +
-      purchaseProbability * aiProfile.weights.purchase +
-      Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
-      (isExistingCustomer ? 100 : 20) * aiProfile.weights.existing_customer +
-      keywordMetrics.score * aiProfile.weights.keyword_match +
-      (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
-      interestProbability * 0.12 +
-      leadScore * 0.18 -
-      enterprisePenalty * 0.45
-    )
-
-    ranked.push({
-      rutid: candidate.rutid,
-      company_name: companyName,
-      region: candidate.region_canonica,
-      comuna: candidate.comuna_canonica,
-      best_phone: scoreRow?.best_phone ?? candidate.fono_cel ?? null,
-      best_email: scoreRow?.best_email ?? candidate.email ?? null,
-      phone_count: phoneCount,
-      email_count: emailCount,
-      contactability_score: contactProbability,
-      purchase_propensity_score: purchaseProbability,
-      equifax_fit_score: round(equifaxFit, 2),
-      priority_score: round(priorityScore, 2),
-      contact_probability: contactProbability,
-      interest_probability: interestProbability,
-      purchase_probability: purchaseProbability,
-      lead_score: leadScore,
-      lead_temperature: leadTemperature,
-      recommended_channel: recommendedChannel,
-      recommended_hour: recommendedHour,
-      base_priority_score: round(priorityScore, 2),
-      coverage_score: round(Number(candidate.cobertura_pct ?? 0), 2),
-      keyword_hits: keywordMetrics.includeHits,
-      is_existing_customer: isExistingCustomer,
-      last_equifax_sale_at: customerSummary?.last_sale_at ?? null,
-      services_bought: customerSummary?.services_bought ?? [],
-      reason_tags: buildLeadReasons({
-        phoneCount,
-        emailCount,
-        isExistingCustomer,
-        keywordHits: keywordMetrics.includeHits,
-        contactability: contactProbability,
-        purchase: purchaseProbability,
-        company: candidate,
-        customerSummary,
-      }),
-    })
+      if (rankedCandidate) ranked.push(rankedCandidate)
+    }
   }
 
   ranked.sort((left, right) => right.base_priority_score - left.base_priority_score)
@@ -1525,8 +1753,9 @@ async function prepareEquifaxCandidates(
     volume,
     aiProfile,
     candidates: ranked,
-    universeAnalyzed: candidates.length,
+    universeAnalyzed,
     eligibleMatches: ranked.length,
+    universeSource,
   }
 }
 
@@ -1534,18 +1763,28 @@ export async function previewEquifaxLeadScenarios(
   params: EquifaxLeadGenerationParams
 ): Promise<EquifaxLeadPreviewResult> {
   const prepared = await prepareEquifaxCandidates(params)
+  const greenPrepared =
+    params.scenario_key === 'solo_verdes'
+      ? prepared
+      : await prepareEquifaxCandidates({
+          ...params,
+          scenario_key: 'solo_verdes',
+          universe_source: 'scored_universe',
+          allowed_temperatures: ['green'],
+        })
 
   const scenarios = EQUFAX_SCENARIOS.map<EquifaxLeadScenario>(scenario => {
-    const applied = applyScenarioToCandidates(prepared.candidates, scenario, prepared.volume)
+    const sourcePrepared = scenario.key === 'solo_verdes' ? greenPrepared : prepared
+    const applied = applyScenarioToCandidates(sourcePrepared.candidates, scenario, sourcePrepared.volume)
     return {
       key: scenario.key,
       title: scenario.title,
       description: scenario.description,
       recommendation: scenario.recommendation,
       generated_count: applied.selectedRows.length,
-      requested_volume: prepared.volume,
+      requested_volume: sourcePrepared.volume,
       summary: applied.summary,
-      highlights: buildScenarioHighlights(applied.selectedRows, prepared.volume),
+      highlights: buildScenarioHighlights(applied.selectedRows, sourcePrepared.volume),
       sample_rows: applied.selectedRows.slice(0, 12),
     }
   })
@@ -1558,6 +1797,7 @@ export async function previewEquifaxLeadScenarios(
     universe_analyzed: prepared.universeAnalyzed,
     eligible_matches: prepared.eligibleMatches,
     recommended_scenario_key: recommendedScenario?.key ?? EQUFAX_SCENARIOS[0].key,
+    universe_source: prepared.universeSource,
     ai_profile: prepared.aiProfile as Record<string, unknown>,
     scenarios,
   }
@@ -1572,6 +1812,9 @@ export async function generateEquifaxLeads(
   const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
   const minEmailCount = Math.max(0, Math.round(params.min_email_count ?? 0))
   const regions = uniqueStrings((params.regions ?? []).map(item => item.trim()).filter(Boolean))
+  const allowedTemperatures: Array<'green' | 'yellow' | 'red'> = params.scenario_key === 'solo_verdes'
+    ? ['green']
+    : normalizeAllowedTemperatures(params.allowed_temperatures)
   const scenario = resolveScenarioConfig(params.scenario_key)
   const applied = applyScenarioToCandidates(prepared.candidates, scenario, prepared.volume)
   const selectedRows = applied.selectedRows
@@ -1590,11 +1833,18 @@ export async function generateEquifaxLeads(
         scenario_title: scenario.title,
         transient_products: params.transient_products ?? [],
       },
-      filter_payload: { regions },
+      filter_payload: {
+        regions,
+        universe_source: prepared.universeSource,
+        allowed_temperatures: allowedTemperatures,
+        scored_universe_limit: params.scored_universe_limit ?? null,
+      },
       ai_profile: {
         ...prepared.aiProfile,
         selected_scenario_key: scenario.key,
         selected_scenario_title: scenario.title,
+        universe_source: prepared.universeSource,
+        allowed_temperatures: allowedTemperatures,
       },
       summary: applied.summary,
       created_by: userId ?? null,
@@ -1626,12 +1876,15 @@ export async function generateEquifaxLeads(
     run_id: runId,
     scenario_key: scenario.key,
     scenario_title: scenario.title,
+    universe_source: prepared.universeSource,
     generated_count: selectedRows.length,
     requested_volume: prepared.volume,
     ai_profile: {
       ...prepared.aiProfile,
       selected_scenario_key: scenario.key,
       selected_scenario_title: scenario.title,
+      universe_source: prepared.universeSource,
+      allowed_temperatures: allowedTemperatures,
     } as Record<string, unknown>,
     summary: applied.summary,
     rows: selectedRows,

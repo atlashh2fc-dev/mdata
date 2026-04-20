@@ -110,6 +110,10 @@ function formatPercent(value: unknown) {
   return `${formatNumber(Number(value ?? 0))}%`
 }
 
+function formatRatioAsPercent(value: unknown) {
+  return `${formatNumber(Number(value ?? 0) * 100)}%`
+}
+
 async function parseSpreadsheet(file: File) {
   const buffer = await file.arrayBuffer()
   const workbook = XLSX.read(buffer, { type: 'array', raw: false })
@@ -291,6 +295,8 @@ export function EquifaxLeadBuilderPage() {
   const latestTargets = Array.isArray(latestTraining?.targets)
     ? latestTraining.targets as Array<Record<string, unknown>>
     : []
+  const crosscheckOverall = pipelineOverview?.crosscheck?.overall ?? null
+  const crosscheckByTemperature = pipelineOverview?.crosscheck?.by_temperature ?? []
 
   async function handleSalesImport(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -778,6 +784,75 @@ export function EquifaxLeadBuilderPage() {
                   )}
                 </div>
               </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-4">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                  Cross-check histórico del semáforo
+                </div>
+
+                {pipelineOverview?.crosscheck ? (
+                  <div className="mt-3 space-y-3">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3 text-xs text-slate-300">
+                      Valida el modelo actual contra RUTs con feedback real. Muestra si cada color sostiene contacto y compra observada, en vez de asumir que el umbral está bien.
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                        <div className="text-lg font-semibold text-white">{formatNumber(pipelineOverview.crosscheck.sample_size)}</div>
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Casos con feedback</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                        <div className="text-lg font-semibold text-white">{pipelineOverview.crosscheck.model_type}</div>
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Modelo evaluado</div>
+                      </div>
+                    </div>
+
+                    {crosscheckOverall && (
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3 text-xs text-slate-300">
+                        <div className="mb-2 text-sm font-semibold text-white">Base histórica total</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>Contacto real: {formatRatioAsPercent(crosscheckOverall.actual_contact_rate)}</div>
+                          <div>Compra real: {formatRatioAsPercent(crosscheckOverall.actual_purchase_rate)}</div>
+                          <div>Teléfonos prom.: {formatNumber(crosscheckOverall.avg_phone_count)}</div>
+                          <div>Emails prom.: {formatNumber(crosscheckOverall.avg_email_count)}</div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      {crosscheckByTemperature.map(bucket => (
+                        <div key={bucket.temperature} className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', getTemperatureStyles(bucket.temperature as 'green' | 'yellow' | 'red'))}>
+                              {getTemperatureLabel(bucket.temperature as 'green' | 'yellow' | 'red')}
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              {formatNumber(bucket.sample_size)} casos · {formatRatioAsPercent(bucket.share)} de la muestra
+                            </span>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                            <div>Contacto pred.: {formatPercent(bucket.avg_contact_probability)}</div>
+                            <div>Contacto real: {formatRatioAsPercent(bucket.actual_contact_rate)}</div>
+                            <div>Compra pred.: {formatPercent(bucket.avg_purchase_probability)}</div>
+                            <div>Compra real: {formatRatioAsPercent(bucket.actual_purchase_rate)}</div>
+                            <div>Lead score prom.: {formatPercent(bucket.avg_lead_score)}</div>
+                            <div>Cobertura prom.: {formatPercent(bucket.avg_coverage_pct)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3 text-xs text-slate-400">
+                      Verde exige contacto &gt;= {formatNumber(pipelineOverview.crosscheck.thresholds.green.min_contact_probability)}%, compra &gt;= {formatNumber(pipelineOverview.crosscheck.thresholds.green.min_purchase_probability)}% y lead score &gt;= {formatNumber(pipelineOverview.crosscheck.thresholds.green.min_lead_score)}. Amarillo exige contacto &gt;= {formatNumber(pipelineOverview.crosscheck.thresholds.yellow.min_contact_probability)}% y lead score &gt;= {formatNumber(pipelineOverview.crosscheck.thresholds.yellow.min_lead_score)}.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-400">
+                    Todavía no hay suficiente feedback histórico para cruzar colores vs. resultados reales.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>
@@ -1166,7 +1241,7 @@ export function EquifaxLeadBuilderPage() {
           <section className="card p-5">
             {crmPushResult?.run_id === result.run_id && (
               <div className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                Run enviado al CRM. Se creó el run {crmPushResult.crm_run_id} con {formatNumber(crmPushResult.lead_instructions)} leads sobre {formatNumber(crmPushResult.attempted_leads)} evaluados. Se filtraron {formatNumber(crmPushResult.skipped_active_targets)} activos y {formatNumber(crmPushResult.skipped_recent_pushes)} pushes recientes.
+                Run enviado al CRM. Se creó el run {crmPushResult.crm_run_id} con {formatNumber(crmPushResult.lead_instructions)} leads sobre {formatNumber(crmPushResult.attempted_leads)} evaluados. Se filtraron {formatNumber(crmPushResult.skipped_active_targets)} activos, {formatNumber(crmPushResult.skipped_non_target_entities)} no target y {formatNumber(crmPushResult.skipped_recent_pushes)} pushes recientes.
               </div>
             )}
 

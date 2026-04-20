@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { db } from '@/lib/db/supabase'
+import { detectEquifaxNonTargetCompany } from '@/lib/services/equifax-targeting'
 import type {
   CampaignActionInstruction,
   CampaignSeverity,
@@ -62,6 +63,12 @@ type CrmRecentPushRow = {
   created_at: string | null
 }
 
+type EquifaxCrmPushContext = {
+  cohortLabel: string | null
+  cohortTag: string | null
+  priorityBoost: number
+}
+
 function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value))
 }
@@ -117,6 +124,33 @@ function normalizeRutid(value?: string | null) {
 
   const trimmed = compact.replace(/^0+/, '')
   return trimmed || null
+}
+
+function normalizeTag(value?: string | null) {
+  if (!value) return null
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return normalized || null
+}
+
+function getPushContext(run: EquifaxRunRow): EquifaxCrmPushContext {
+  const rawLabel = typeof run.ai_profile?.crm_cohort_label === 'string'
+    ? run.ai_profile.crm_cohort_label.trim()
+    : null
+  const rawTag = typeof run.ai_profile?.crm_reason_tag === 'string'
+    ? run.ai_profile.crm_reason_tag.trim()
+    : null
+  const priorityBoost = Math.max(0, Math.min(30, Number(run.ai_profile?.crm_priority_boost ?? 0)))
+
+  return {
+    cohortLabel: rawLabel || null,
+    cohortTag: rawTag || normalizeTag(rawLabel),
+    priorityBoost: Number.isFinite(priorityBoost) ? priorityBoost : 0,
+  }
 }
 
 function subtractDays(days: number) {
@@ -309,6 +343,14 @@ function getScenarioKey(run: EquifaxRunRow) {
     : 'equifax-prioritized'
 }
 
+function getCrmCampaignName() {
+  return 'Equifax'
+}
+
+function getCampaignDisplayLabel(run: EquifaxRunRow) {
+  return `${getCrmCampaignName()} | ${getScenarioTitle(run)}`
+}
+
 function summarizePortfolio(rows: EquifaxRunItemRow[]): PortfolioSummary {
   const green = rows.filter(row => row.lead_temperature === 'green').length
   const yellow = rows.filter(row => row.lead_temperature === 'yellow').length
@@ -443,25 +485,30 @@ function deriveNextBestAction(row: EquifaxRunItemRow) {
 function buildLeadInstruction(
   row: EquifaxRunItemRow,
   campaignName: string,
-  scenarioKey: string
+  scenarioKey: string,
+  context?: EquifaxCrmPushContext
 ): LeadActionInstruction {
+  const priorityBoost = Number(context?.priorityBoost ?? 0)
   const reasonTags = uniqueStrings([
     ...(row.reason_tags ?? []),
     `equifax-${scenarioKey}`,
     row.lead_temperature ? `temp-${row.lead_temperature}` : null,
     row.is_existing_customer ? 'equifax-cliente' : 'equifax-prospecto',
+    context?.cohortTag ? `cohorte-${context.cohortTag}` : null,
   ])
 
   return {
     rutid: row.rutid,
     campaign_name: campaignName,
-    dynamic_priority_score: round(Number(row.lead_score ?? 0), 2),
+    dynamic_priority_score: clamp(round(Number(row.lead_score ?? 0) + priorityBoost, 2)),
     contact_probability: round(Number(row.contact_probability ?? 0), 2),
     conversion_probability: round(Number(row.purchase_probability ?? 0), 2),
     fatigue_score: deriveFatigueScore(row),
     optimal_window: buildWindowLabel(row.recommended_hour),
     recommended_channel: deriveRecommendedChannel(row),
-    next_best_action: deriveNextBestAction(row),
+    next_best_action: context?.cohortLabel
+      ? `${deriveNextBestAction(row)} · cohorte ${context.cohortLabel}`
+      : deriveNextBestAction(row),
     reason_tags: reasonTags.slice(0, 10),
   }
 }
@@ -492,19 +539,19 @@ function buildCampaignInstruction(
 function buildExecutiveSummary(
   run: EquifaxRunRow,
   summary: PortfolioSummary,
-  campaignName: string
+  campaignLabel: string
 ) {
   const requestedVolume = Number(run.requested_volume ?? summary.total)
-  return `${campaignName}: ${summary.total} leads listos sobre ${requestedVolume} solicitados, con ${summary.green} verdes, ${summary.yellow} amarillos y ${summary.red} rojos. Lead score promedio ${round(summary.averageLeadScore, 1)}%, contacto ${round(summary.averageContactProbability, 1)}% y compra ${round(summary.averagePurchaseProbability, 1)}%.`
+  return `${campaignLabel}: ${summary.total} leads listos sobre ${requestedVolume} solicitados, con ${summary.green} verdes, ${summary.yellow} amarillos y ${summary.red} rojos. Lead score promedio ${round(summary.averageLeadScore, 1)}%, contacto ${round(summary.averageContactProbability, 1)}% y compra ${round(summary.averagePurchaseProbability, 1)}%.`
 }
 
 export async function getEquifaxRunActionFeed(runId: string): Promise<CommercialActionFeed> {
   const run = await fetchRun(runId)
-  const rows = await fetchRunItems(runId)
+  const rows = (await fetchRunItems(runId)).filter(row => !detectEquifaxNonTargetCompany(row.company_name))
   const summary = summarizePortfolio(rows)
-  const scenarioTitle = getScenarioTitle(run)
+  const campaignLabel = getCampaignDisplayLabel(run)
   const scenarioKey = getScenarioKey(run)
-  const campaignName = `Equifax | ${scenarioTitle}`
+  const campaignName = getCrmCampaignName()
 
   return {
     source_system: 'rut_intelligence_equifax',
@@ -515,7 +562,7 @@ export async function getEquifaxRunActionFeed(runId: string): Promise<Commercial
       critical_campaigns: deriveSeverity(summary) === 'critical' ? 1 : 0,
       anomaly_count: summary.red,
     },
-    executive_summary: buildExecutiveSummary(run, summary, campaignName),
+    executive_summary: buildExecutiveSummary(run, summary, campaignLabel),
     campaign_instructions: [
       buildCampaignInstruction(run, rows, summary, campaignName),
     ],
@@ -531,6 +578,7 @@ async function filterRowsForCrmPush(
 ) {
   const normalizedFilters = normalizePushFilters(filters)
   let skippedActiveTargets = 0
+  let skippedNonTargetEntities = 0
   let skippedRecentPushes = 0
 
   const rutids = rows.map(row => row.rutid)
@@ -544,6 +592,10 @@ async function filterRowsForCrmPush(
   ])
 
   const filtered = rows.filter(row => {
+    if (detectEquifaxNonTargetCompany(row.company_name)) {
+      skippedNonTargetEntities += 1
+      return false
+    }
     if (!normalizedFilters.allowed_temperatures.includes(row.lead_temperature ?? 'red')) return false
     if (Number(row.lead_score ?? 0) < normalizedFilters.min_lead_score) return false
     if (Number(row.contact_probability ?? 0) < normalizedFilters.min_contact_probability) return false
@@ -574,7 +626,34 @@ async function filterRowsForCrmPush(
     attempted_leads: rows.length,
     eligible_leads: limited.length,
     skipped_active_targets: skippedActiveTargets,
+    skipped_non_target_entities: skippedNonTargetEntities,
     skipped_recent_pushes: skippedRecentPushes,
+  }
+}
+
+function buildCleanupLeadInstruction(
+  row: EquifaxRunItemRow,
+  campaignName: string
+): LeadActionInstruction {
+  const nonTargetMatch = detectEquifaxNonTargetCompany(row.company_name)
+  const reasonTags = uniqueStrings([
+    ...(row.reason_tags ?? []),
+    'equifax-cleanup',
+    'equifax-no-target',
+    nonTargetMatch?.tag ?? null,
+  ])
+
+  return {
+    rutid: row.rutid,
+    campaign_name: campaignName,
+    dynamic_priority_score: 0,
+    contact_probability: 0,
+    conversion_probability: 0,
+    fatigue_score: 100,
+    optimal_window: 'Sin ventana',
+    recommended_channel: 'other',
+    next_best_action: 'Excluir del playbook Equifax: entidad no target',
+    reason_tags: reasonTags.slice(0, 10),
   }
 }
 
@@ -648,9 +727,10 @@ export async function pushEquifaxRunToCrm(runId: string, filters?: Partial<Equif
   const allRows = await fetchRunItems(runId)
   const filtered = await filterRowsForCrmPush(crm, allRows, filters)
   const summary = summarizePortfolio(filtered.rows)
-  const scenarioTitle = getScenarioTitle(run)
+  const campaignLabel = getCampaignDisplayLabel(run)
   const scenarioKey = getScenarioKey(run)
-  const campaignName = `Equifax | ${scenarioTitle}`
+  const campaignName = getCrmCampaignName()
+  const pushContext = getPushContext(run)
 
   const feed: CommercialActionFeed = {
     source_system: 'rut_intelligence_equifax',
@@ -661,11 +741,11 @@ export async function pushEquifaxRunToCrm(runId: string, filters?: Partial<Equif
       critical_campaigns: deriveSeverity(summary) === 'critical' ? 1 : 0,
       anomaly_count: summary.red,
     },
-    executive_summary: buildExecutiveSummary(run, summary, campaignName),
+    executive_summary: buildExecutiveSummary(run, summary, campaignLabel),
     campaign_instructions: [
       buildCampaignInstruction(run, filtered.rows, summary, campaignName),
     ],
-    lead_instructions: filtered.rows.map(row => buildLeadInstruction(row, campaignName, scenarioKey)),
+    lead_instructions: filtered.rows.map(row => buildLeadInstruction(row, campaignName, scenarioKey, pushContext)),
     recommendations: [],
   }
 
@@ -683,9 +763,15 @@ export async function pushEquifaxRunToCrm(runId: string, filters?: Partial<Equif
         attempted_leads: filtered.attempted_leads,
         eligible_leads: filtered.eligible_leads,
         skipped_active_targets: filtered.skipped_active_targets,
+        skipped_non_target_entities: filtered.skipped_non_target_entities,
         skipped_recent_pushes: filtered.skipped_recent_pushes,
         campaign_instructions: feed.campaign_instructions.length,
         lead_instructions: feed.lead_instructions.length,
+        summary,
+        campaign_label: campaignLabel,
+        cohort_label: pushContext.cohortLabel,
+        cohort_tag: pushContext.cohortTag,
+        priority_boost: pushContext.priorityBoost,
       },
     })
     .select('id')
@@ -716,7 +802,90 @@ export async function pushEquifaxRunToCrm(runId: string, filters?: Partial<Equif
     campaign_instructions: campaignCount,
     lead_instructions: leadCount,
     skipped_active_targets: filtered.skipped_active_targets,
+    skipped_non_target_entities: filtered.skipped_non_target_entities,
     skipped_recent_pushes: filtered.skipped_recent_pushes,
+    pushed_at: new Date().toISOString(),
+    apply_result: applyResult ?? null,
+  }
+}
+
+export async function deprioritizeNonTargetEquifaxRunInCrm(runId: string) {
+  const crm = getCrmOperationalClient()
+  const sourceRun = await fetchRun(runId)
+  const campaignName = getCrmCampaignName()
+  const allRows = await fetchRunItems(runId)
+  const nonTargetRows = allRows.filter(row => detectEquifaxNonTargetCompany(row.company_name))
+
+  if (!nonTargetRows.length) {
+    return {
+      run_id: runId,
+      crm_run_id: null,
+      source_system: 'rut_intelligence_equifax_cleanup',
+      attempted_leads: allRows.length,
+      non_target_leads: 0,
+      lead_instructions: 0,
+      pushed_at: new Date().toISOString(),
+      apply_result: null,
+    }
+  }
+
+  const feed: CommercialActionFeed = {
+    source_system: 'rut_intelligence_equifax_cleanup',
+    generated_at: new Date().toISOString(),
+    portfolio_status: {
+      overall_health_score: 0,
+      campaigns_at_risk: 0,
+      critical_campaigns: 0,
+      anomaly_count: nonTargetRows.length,
+    },
+    executive_summary: `${campaignName}: depuracion de ${nonTargetRows.length} entidades no target detectadas en run ${runId}.`,
+    campaign_instructions: [],
+    lead_instructions: nonTargetRows.map(row => buildCleanupLeadInstruction(row, campaignName)),
+    recommendations: [],
+  }
+
+  const { data: insertedRun, error: runError } = await crm
+    .from('commercial_brain_action_runs')
+    .insert({
+      source_system: feed.source_system,
+      generated_at: feed.generated_at,
+      portfolio_status: feed.portfolio_status,
+      executive_summary: feed.executive_summary,
+      metadata: {
+        source_module: 'equifax-bdd',
+        cleanup_type: 'deprioritize_non_target',
+        source_equifax_run_id: runId,
+        source_run_created_at: sourceRun.created_at,
+        attempted_leads: allRows.length,
+        non_target_leads: nonTargetRows.length,
+        lead_instructions: feed.lead_instructions.length,
+      },
+    })
+    .select('id')
+    .single()
+
+  if (runError || !insertedRun?.id) {
+    throw new Error(`No pude crear el run CRM de limpieza Equifax: ${runError?.message ?? 'sin id'}`)
+  }
+
+  const crmRunId = String(insertedRun.id)
+  const leadCount = await insertLeadActions(crm, crmRunId, feed.lead_instructions)
+
+  const { data: applyResult, error: applyError } = await crm.rpc('apply_commercial_brain_run', {
+    p_run_id: crmRunId,
+  })
+
+  if (applyError) {
+    throw new Error(`No pude aplicar el run de limpieza Equifax al CRM: ${applyError.message}`)
+  }
+
+  return {
+    run_id: runId,
+    crm_run_id: crmRunId,
+    source_system: feed.source_system,
+    attempted_leads: allRows.length,
+    non_target_leads: nonTargetRows.length,
+    lead_instructions: leadCount,
     pushed_at: new Date().toISOString(),
     apply_result: applyResult ?? null,
   }

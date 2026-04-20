@@ -19,9 +19,12 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const rows = Array.isArray(body?.rows) ? body.rows : []
-  const matchMode: BaseBuilderMatchMode = body?.match_mode === 'razon_social'
-    ? 'razon_social'
-    : 'rut'
+  const matchMode: BaseBuilderMatchMode =
+    body?.match_mode === 'razon_social'
+      ? 'razon_social'
+      : body?.match_mode === 'nombre_persona'
+        ? 'nombre_persona'
+        : 'rut'
   const matchColumn = typeof body?.match_column === 'string'
     ? body.match_column
     : typeof body?.rut_column === 'string'

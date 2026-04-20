@@ -1,4 +1,4 @@
-export type BaseBuilderMatchMode = 'rut' | 'razon_social'
+export type BaseBuilderMatchMode = 'rut' | 'nombre_persona' | 'razon_social'
 
 export type BaseBuilderFieldKey =
   | 'nombre_completo'

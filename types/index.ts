@@ -351,6 +351,7 @@ export interface DashboardStats {
   con_domicilio: number
   con_bienes_raices: number
   total_avaluos: number
+  total_propiedades_cargadas: number
   jobs_completados: number
   jobs_fallidos: number
   total_segmentos: number

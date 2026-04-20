@@ -23,6 +23,14 @@ function getSafeSortField(field?: string): string {
   return PERSONA_SORT_FIELDS.has(field) ? field : 'score_patrimonial'
 }
 
+function getSearchTokens(term: string): string[] {
+  return term
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 2)
+    .slice(0, 5)
+}
+
 /**
  * Obtiene el perfil 360 completo de una persona por RUT.
  * Consulta master_personas_view (que transforma personas_master).
@@ -85,9 +93,16 @@ export async function searchPersonas(
       const padded = term.replace(/[.\-\s]/g, '').toUpperCase().padStart(10, '0')
       query = query.eq('rutid', padded)
     } else {
-      query = query.or(
-        `nombre_completo.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
-      )
+      const tokens = getSearchTokens(term)
+      if (tokens.length >= 2 && !term.includes('@')) {
+        for (const token of tokens) {
+          query = query.ilike('nombre_completo', `%${token}%`)
+        }
+      } else {
+        query = query.or(
+          `nombre_completo.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
+        )
+      }
     }
   }
 

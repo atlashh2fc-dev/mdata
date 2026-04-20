@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import { generateEquifaxLeads, previewEquifaxLeadScenarios } from '@/lib/services/equifax-bdd'
 import { getEquifaxRunActionFeed, pushEquifaxRunToCrm } from '@/lib/services/equifax-crm'
+import type { EquifaxLeadGenerationParams } from '@/types/equifax'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, data })
     }
 
-    const params = {
+    const params: EquifaxLeadGenerationParams = {
       volume: Number(body?.volume ?? 1000),
       product_ids: Array.isArray(body?.product_ids) ? body.product_ids : [],
       transient_products: Array.isArray(body?.transient_products) ? body.transient_products : [],
@@ -84,6 +85,9 @@ export async function POST(req: NextRequest) {
       min_phone_count: Number(body?.min_phone_count ?? 1),
       min_email_count: Number(body?.min_email_count ?? 0),
       scenario_key: typeof body?.scenario_key === 'string' ? body.scenario_key : null,
+      universe_source: body?.universe_source === 'scored_universe' ? 'scored_universe' : 'sampled_master',
+      allowed_temperatures: Array.isArray(body?.allowed_temperatures) ? body.allowed_temperatures : undefined,
+      scored_universe_limit: body?.scored_universe_limit == null ? null : Number(body.scored_universe_limit),
     }
 
     const result = action === 'generate'

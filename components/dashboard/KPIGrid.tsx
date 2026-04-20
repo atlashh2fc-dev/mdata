@@ -76,9 +76,9 @@ function buildKPIs(stats: DashboardStats): KPIItem[] {
       bg: 'bg-pink-500/10',
     },
     {
-      label: 'Bienes raíces',
-      value: formatNumber(stats.con_bienes_raices),
-      sub: formatCurrency(stats.total_avaluos),
+      label: 'Propiedades cargadas',
+      value: formatNumber(stats.total_propiedades_cargadas),
+      sub: `${formatNumber(stats.con_bienes_raices)} RUTs · ${formatCurrency(stats.total_avaluos)}`,
       icon: Landmark,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',

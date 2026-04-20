@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import { getPersonaByRut, searchPersonas } from '@/lib/services/personas'
 import type { PersonaSearchParams } from '@/types'
+import { validateRut } from '@/lib/utils/rut'
 
 export async function GET(req: NextRequest) {
   const supabase = await createSupabaseServerClient()
@@ -13,8 +14,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const rut = searchParams.get('rut')
 
-  // Búsqueda por RUT exacto
-  if (rut) {
+  // Búsqueda por RUT exacto; si viene texto en el parámetro rut, cae al buscador general.
+  if (rut && validateRut(rut)) {
     const persona = await getPersonaByRut(rut)
     if (!persona) {
       return NextResponse.json({ error: 'RUT no encontrado' }, { status: 404 })
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
 
   // Búsqueda con filtros
   const params: PersonaSearchParams = {
-    q: searchParams.get('q') ?? undefined,
+    q: searchParams.get('q') ?? rut ?? undefined,
     page: parseInt(searchParams.get('page') ?? '1'),
     page_size: Math.min(parseInt(searchParams.get('page_size') ?? '50'), 200),
     sort_by: searchParams.get('sort_by') ?? 'score_patrimonial',

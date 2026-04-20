@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient, db } from '@/lib/db/supabase'
-import { buildEquifaxProjectionSummary, runEquifaxScoringPipeline } from '@/lib/services/equifax-scoring'
+import {
+  buildEquifaxModelCrosscheckSummary,
+  buildEquifaxProjectionSummary,
+  runEquifaxScoringPipeline,
+} from '@/lib/services/equifax-scoring'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -71,9 +75,12 @@ export async function GET(req: NextRequest) {
     const section = req.nextUrl.searchParams.get('section') ?? 'run'
     if (section === 'latest') {
       const latest = await getLatestPipelineRun()
-      const projections = await buildEquifaxProjectionSummary()
+      const [projections, crosscheck] = await Promise.all([
+        buildEquifaxProjectionSummary(),
+        buildEquifaxModelCrosscheckSummary(),
+      ])
       const activeModels = await getActiveModels()
-      return NextResponse.json({ success: true, data: { latest, projections, active_models: activeModels } })
+      return NextResponse.json({ success: true, data: { latest, projections, crosscheck, active_models: activeModels } })
     }
 
     const mode = (req.nextUrl.searchParams.get('mode') ?? 'safe') as 'safe' | 'force' | 'dry-run'
@@ -103,9 +110,12 @@ export async function POST(req: NextRequest) {
 
     if (action === 'latest') {
       const latest = await getLatestPipelineRun()
-      const projections = await buildEquifaxProjectionSummary()
+      const [projections, crosscheck] = await Promise.all([
+        buildEquifaxProjectionSummary(),
+        buildEquifaxModelCrosscheckSummary(),
+      ])
       const activeModels = await getActiveModels()
-      return NextResponse.json({ success: true, data: { latest, projections, active_models: activeModels } })
+      return NextResponse.json({ success: true, data: { latest, projections, crosscheck, active_models: activeModels } })
     }
 
     const mode = (body?.mode ?? 'safe') as 'safe' | 'force' | 'dry-run'

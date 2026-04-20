@@ -44,6 +44,9 @@ export interface EquifaxLeadGenerationParams {
   min_phone_count?: number
   min_email_count?: number
   scenario_key?: string | null
+  universe_source?: 'sampled_master' | 'scored_universe'
+  allowed_temperatures?: Array<'green' | 'yellow' | 'red'>
+  scored_universe_limit?: number | null
 }
 
 export interface EquifaxLeadResultItem {
@@ -76,6 +79,7 @@ export interface EquifaxLeadGenerationResult {
   run_id: string
   scenario_key: string
   scenario_title: string
+  universe_source: 'sampled_master' | 'scored_universe'
   generated_count: number
   requested_volume: number
   ai_profile: Record<string, unknown>
@@ -120,6 +124,7 @@ export interface EquifaxLeadPreviewResult {
   universe_analyzed: number
   eligible_matches: number
   recommended_scenario_key: string
+  universe_source: 'sampled_master' | 'scored_universe'
   ai_profile: Record<string, unknown>
   scenarios: EquifaxLeadScenario[]
 }
@@ -133,6 +138,7 @@ export interface EquifaxCrmPushResult {
   campaign_instructions: number
   lead_instructions: number
   skipped_active_targets: number
+  skipped_non_target_entities: number
   skipped_recent_pushes: number
   pushed_at: string
   apply_result: Record<string, unknown> | null
@@ -171,6 +177,43 @@ export interface EquifaxProjectionSummary {
   top_10000: EquifaxProjectionBucket
 }
 
+export interface EquifaxModelCrosscheckBucket {
+  temperature: 'all' | 'green' | 'yellow' | 'red'
+  sample_size: number
+  share: number
+  avg_lead_score: number
+  avg_contact_probability: number
+  avg_interest_probability: number
+  avg_purchase_probability: number
+  actual_contact_rate: number
+  actual_interest_rate: number
+  actual_purchase_rate: number
+  actual_contact_and_purchase_rate: number
+  avg_phone_count: number
+  avg_email_count: number
+  avg_coverage_pct: number
+}
+
+export interface EquifaxModelCrosscheckSummary {
+  generated_at: string
+  model_version: string
+  model_type: string
+  sample_size: number
+  thresholds: {
+    green: {
+      min_contact_probability: number
+      min_purchase_probability: number
+      min_lead_score: number
+    }
+    yellow: {
+      min_contact_probability: number
+      min_lead_score: number
+    }
+  }
+  overall: EquifaxModelCrosscheckBucket
+  by_temperature: EquifaxModelCrosscheckBucket[]
+}
+
 export interface EquifaxPipelineRunResult {
   run_id: string
   trigger_source: string
@@ -179,6 +222,7 @@ export interface EquifaxPipelineRunResult {
   refreshed_batches: number
   training: Record<string, unknown> | null
   projections: EquifaxProjectionSummary
+  crosscheck: EquifaxModelCrosscheckSummary | null
   finished_at: string
 }
 
@@ -195,6 +239,7 @@ export interface EquifaxActiveModelSummary {
 export interface EquifaxPipelineLatestResponse {
   latest: Record<string, unknown> | null
   projections: EquifaxProjectionSummary
+  crosscheck: EquifaxModelCrosscheckSummary | null
   active_models: EquifaxActiveModelSummary[]
 }
 

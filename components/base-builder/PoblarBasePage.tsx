@@ -73,6 +73,7 @@ type ParsedUpload = {
   headers: string[]
   rows: Record<string, string>[]
   detectedRutColumn: string | null
+  detectedPersonNameColumn: string | null
   detectedCompanyColumn: string | null
 }
 
@@ -152,7 +153,9 @@ function looksLikeCompanyValue(value: string): boolean {
   const normalized = String(value ?? '').trim()
   if (!normalized) return false
   if (validateRut(normalized)) return false
-  return /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(normalized) && normalized.length >= 5
+  return /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(normalized) &&
+    normalized.length >= 5 &&
+    /\b(SPA|S\.P\.A|LTDA|LIMITADA|S\.A|SA|EIRL|EMPRESA|COMERCIAL|SOCIEDAD|INVERSIONES)\b/i.test(normalized)
 }
 
 function scoreCompanyColumn(header: string, rows: Record<string, string>[]): number {
@@ -199,6 +202,69 @@ function looksLikeSupportedCompanyColumn(header: string, rows: Record<string, st
   return scoreCompanyColumn(header, rows) >= 2
 }
 
+function looksLikePersonNameValue(value: string): boolean {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return false
+  if (validateRut(normalized)) return false
+  if (normalized.includes('@')) return false
+  if (looksLikeCompanyValue(normalized)) return false
+
+  const words = normalized
+    .split(/\s+/)
+    .filter(word => /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(word))
+
+  return words.length >= 2 && normalized.length >= 5
+}
+
+function scorePersonNameColumn(header: string, rows: Record<string, string>[]): number {
+  const normalized = normalizeColumnName(header)
+  const values = rows.map(row => String(row[header] ?? '').trim()).filter(Boolean)
+  if (values.length === 0) return 0
+
+  let score = 0
+  if (
+    normalized === 'nombre' ||
+    normalized === 'nombres' ||
+    normalized === 'nombrecompleto' ||
+    normalized === 'persona' ||
+    normalized === 'cliente' ||
+    normalized === 'titular' ||
+    normalized === 'propietario'
+  ) score += 5
+  else if (
+    normalized.includes('nombre') ||
+    normalized.includes('persona') ||
+    normalized.includes('cliente') ||
+    normalized.includes('titular') ||
+    normalized.includes('propietario')
+  ) score += 3
+
+  const sample = values.slice(0, 50)
+  const personLikeCount = sample.filter(looksLikePersonNameValue).length
+  if (sample.length > 0 && personLikeCount / sample.length >= 0.6) score += 3
+
+  return score
+}
+
+function detectBestPersonNameColumn(headers: string[], rows: Record<string, string>[]): string | null {
+  let bestHeader: string | null = null
+  let bestScore = 0
+
+  for (const header of headers) {
+    const score = scorePersonNameColumn(header, rows)
+    if (score > bestScore) {
+      bestScore = score
+      bestHeader = header
+    }
+  }
+
+  return bestScore >= 3 ? bestHeader : null
+}
+
+function looksLikeSupportedPersonNameColumn(header: string, rows: Record<string, string>[]): boolean {
+  return scorePersonNameColumn(header, rows) >= 2
+}
+
 function findLikelyDvColumn(headers: string[], rutColumnName: string): string | null {
   const rutKey = normalizeColumnName(rutColumnName)
 
@@ -222,7 +288,13 @@ function findLikelyDvColumn(headers: string[], rutColumnName: string): string | 
 function rowsFromMatrix(matrix: string[][]): ParsedUpload {
   const nonEmptyRows = matrix.filter(row => row.some(cell => String(cell ?? '').trim().length > 0))
   if (nonEmptyRows.length < 2) {
-    return { headers: [], rows: [], detectedRutColumn: null, detectedCompanyColumn: null }
+    return {
+      headers: [],
+      rows: [],
+      detectedRutColumn: null,
+      detectedPersonNameColumn: null,
+      detectedCompanyColumn: null,
+    }
   }
 
   const headers = ensureUniqueHeaders(nonEmptyRows[0].map((cell, index) => toSafeHeader(cell, index)))
@@ -238,6 +310,7 @@ function rowsFromMatrix(matrix: string[][]): ParsedUpload {
     headers,
     rows,
     detectedRutColumn: detectBestRutColumn(headers, rows),
+    detectedPersonNameColumn: detectBestPersonNameColumn(headers, rows),
     detectedCompanyColumn: detectBestCompanyColumn(headers, rows),
   }
 }
@@ -252,7 +325,13 @@ async function parseUploadedFile(file: File): Promise<ParsedUpload> {
     const firstSheet = workbook.Sheets[firstSheetName]
 
     if (!firstSheet) {
-      return { headers: [], rows: [], detectedRutColumn: null, detectedCompanyColumn: null }
+      return {
+        headers: [],
+        rows: [],
+        detectedRutColumn: null,
+        detectedPersonNameColumn: null,
+        detectedCompanyColumn: null,
+      }
     }
 
     const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(firstSheet, {
@@ -353,6 +432,7 @@ export function PoblarBasePage() {
     headers: [],
     rows: [],
     detectedRutColumn: null,
+    detectedPersonNameColumn: null,
     detectedCompanyColumn: null,
   })
   const [selectedMatchColumn, setSelectedMatchColumn] = useState<string>('')
@@ -375,15 +455,29 @@ export function PoblarBasePage() {
   const selectedColumnLooksLikeCompany = selectedMatchColumn
     ? looksLikeSupportedCompanyColumn(selectedMatchColumn, parsedUpload.rows)
     : false
+  const selectedColumnLooksLikePersonName = selectedMatchColumn
+    ? looksLikeSupportedPersonNameColumn(selectedMatchColumn, parsedUpload.rows)
+    : false
   const selectedDvColumn = selectedMatchColumn
     ? findLikelyDvColumn(parsedUpload.headers, selectedMatchColumn)
     : null
   const selectedColumnIsValid = selectedMatchMode === 'rut'
     ? selectedColumnLooksLikeRut
-    : selectedColumnLooksLikeCompany
+    : selectedMatchMode === 'nombre_persona'
+      ? selectedColumnLooksLikePersonName
+      : selectedColumnLooksLikeCompany
   const detectedColumnForMode = selectedMatchMode === 'rut'
     ? parsedUpload.detectedRutColumn
-    : parsedUpload.detectedCompanyColumn
+    : selectedMatchMode === 'nombre_persona'
+      ? parsedUpload.detectedPersonNameColumn
+      : parsedUpload.detectedCompanyColumn
+  const webEnrichmentAvailable = selectedMatchMode !== 'nombre_persona'
+
+  function getMatchModeLabel(mode: BaseBuilderMatchMode) {
+    if (mode === 'rut') return 'RUT'
+    if (mode === 'nombre_persona') return 'nombre'
+    return 'razón social'
+  }
 
   function resetAnalysisState() {
     setAnalysis(null)
@@ -408,7 +502,9 @@ export function PoblarBasePage() {
     setSelectedMatchColumn(
       mode === 'rut'
         ? upload.detectedRutColumn ?? ''
-        : upload.detectedCompanyColumn ?? ''
+        : mode === 'nombre_persona'
+          ? upload.detectedPersonNameColumn ?? ''
+          : upload.detectedCompanyColumn ?? ''
     )
     resetAnalysisState()
   }
@@ -424,17 +520,23 @@ export function PoblarBasePage() {
 
     try {
       const parsed = await parseUploadedFile(file)
-      const nextMode: BaseBuilderMatchMode = parsed.detectedRutColumn ? 'rut' : 'razon_social'
+      const nextMode: BaseBuilderMatchMode = parsed.detectedRutColumn
+        ? 'rut'
+        : parsed.detectedPersonNameColumn
+          ? 'nombre_persona'
+          : 'razon_social'
       setUploadedFile(file)
       setParsedUpload(parsed)
       if (!didCustomizeFields) {
-        setSelectedFields(parsed.detectedCompanyColumn ? COMPANY_DEFAULT_FIELDS : PERSON_DEFAULT_FIELDS)
+        setSelectedFields(nextMode === 'razon_social' ? COMPANY_DEFAULT_FIELDS : PERSON_DEFAULT_FIELDS)
       }
       setSelectedMatchMode(nextMode)
       setSelectedMatchColumn(
         nextMode === 'rut'
           ? parsed.detectedRutColumn ?? ''
-          : parsed.detectedCompanyColumn ?? ''
+          : nextMode === 'nombre_persona'
+            ? parsed.detectedPersonNameColumn ?? ''
+            : parsed.detectedCompanyColumn ?? ''
       )
     } catch (err) {
       setUploadedFile(null)
@@ -442,6 +544,7 @@ export function PoblarBasePage() {
         headers: [],
         rows: [],
         detectedRutColumn: null,
+        detectedPersonNameColumn: null,
         detectedCompanyColumn: null,
       })
       setSelectedMatchColumn('')
@@ -459,7 +562,9 @@ export function PoblarBasePage() {
       setError(
         selectedMatchMode === 'rut'
           ? 'La columna seleccionada no parece contener RUTs válidos.'
-          : 'La columna seleccionada no parece contener razones sociales utilizables para cruzar.'
+          : selectedMatchMode === 'nombre_persona'
+            ? 'La columna seleccionada no parece contener nombres de personas utilizables para cruzar.'
+            : 'La columna seleccionada no parece contener razones sociales utilizables para cruzar.'
       )
       return
     }
@@ -484,7 +589,9 @@ export function PoblarBasePage() {
     try {
       const companyColumnForPayload = selectedMatchMode === 'rut'
         ? parsedUpload.detectedCompanyColumn
-        : selectedMatchColumn
+        : selectedMatchMode === 'razon_social'
+          ? selectedMatchColumn
+          : null
 
       const compactRows = parsedUpload.rows.map(row => {
         const compactRow: Record<string, string> = {
@@ -576,7 +683,7 @@ export function PoblarBasePage() {
       let latestAnalysis = await runAnalysisPass()
       let aggregateWeb: BaseBuilderWebEnrichmentResult | undefined
 
-      if (enrichMissingContactsWithWeb && contactFieldSelected) {
+      if (enrichMissingContactsWithWeb && contactFieldSelected && webEnrichmentAvailable) {
         let webPass = 0
 
         while (webPass < MAX_AUTO_WEB_PASSES) {
@@ -683,7 +790,7 @@ export function PoblarBasePage() {
     <>
       <Header
         title="Poblar base"
-        subtitle="Sube tu archivo, cruza por RUT o razón social contra el maestro y exporta la misma base enriquecida"
+        subtitle="Sube tu archivo, cruza por RUT, nombre o razón social contra el maestro y exporta la misma base enriquecida"
       />
 
       <div className="p-6 space-y-5">
@@ -725,7 +832,7 @@ export function PoblarBasePage() {
                   {loadingFile ? 'Leyendo archivo...' : 'Subir base para poblar'}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  CSV o Excel. Puedes cruzar por RUT o por razón social y luego elegir qué traer del maestro.
+                  CSV o Excel. Puedes cruzar por RUT, nombre de persona o razón social y luego elegir qué traer del maestro.
                 </p>
               </div>
             </label>
@@ -733,9 +840,10 @@ export function PoblarBasePage() {
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
                 <p className="text-xs font-medium text-slate-400 mb-3">Cómo quieres cruzar</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { value: 'rut', label: 'Por RUT' },
+                    { value: 'nombre_persona', label: 'Por nombre' },
                     { value: 'razon_social', label: 'Por razón social' },
                   ].map(option => (
                     <button
@@ -756,7 +864,9 @@ export function PoblarBasePage() {
                 <p className="text-xs font-medium text-slate-400 mt-4 mb-2">
                   {selectedMatchMode === 'rut'
                     ? 'Columna RUT detectada'
-                    : 'Columna razón social detectada'}
+                    : selectedMatchMode === 'nombre_persona'
+                      ? 'Columna nombre detectada'
+                      : 'Columna razón social detectada'}
                 </p>
                 <select
                   value={selectedMatchColumn}
@@ -780,8 +890,15 @@ export function PoblarBasePage() {
                     ? `Sugerencia automática: ${detectedColumnForMode}`
                     : selectedMatchMode === 'rut'
                       ? 'Si tu archivo no trae RUT, este modo no va a poder cruzar contra el maestro.'
-                      : 'Si tu archivo no trae una razón social clara, cambia la columna o usa cruce por RUT.'}
+                      : selectedMatchMode === 'nombre_persona'
+                        ? 'Si tu archivo no trae nombres completos, cambia la columna o usa cruce por RUT.'
+                        : 'Si tu archivo no trae una razón social clara, cambia la columna o usa cruce por RUT.'}
                 </p>
+                {selectedMatchMode === 'nombre_persona' && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    El cruce por nombre normaliza tildes y mayúsculas. Si un nombre aparece en más de un RUT, queda como ambiguo.
+                  </p>
+                )}
                 {selectedMatchMode === 'razon_social' && (
                   <p className="text-xs text-slate-500 mt-2">
                     El cruce por razón social normaliza tildes, mayúsculas y sufijos como SpA o Ltda.
@@ -791,7 +908,9 @@ export function PoblarBasePage() {
                   <p className="text-xs text-amber-300 mt-2">
                     {selectedMatchMode === 'rut'
                       ? 'La columna elegida no parece ser RUT.'
-                      : 'La columna elegida no parece ser una razón social utilizable.'}
+                      : selectedMatchMode === 'nombre_persona'
+                        ? 'La columna elegida no parece contener nombres de personas.'
+                        : 'La columna elegida no parece ser una razón social utilizable.'}
                   </p>
                 )}
                 {selectedMatchMode === 'rut' && selectedDvColumn && selectedColumnLooksLikeRut && (
@@ -842,11 +961,12 @@ export function PoblarBasePage() {
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={enrichMissingContactsWithWeb}
+                    checked={enrichMissingContactsWithWeb && webEnrichmentAvailable}
                     onChange={event => {
                       setEnrichMissingContactsWithWeb(event.target.checked)
                       resetAnalysisState()
                     }}
+                    disabled={!webEnrichmentAvailable}
                     className="mt-1"
                   />
                   <div>
@@ -855,8 +975,13 @@ export function PoblarBasePage() {
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
                       Usa búsqueda web + IA para intentar encontrar contactos cuando el maestro no los trae.
-                      El RUT sigue siendo la llave del match; para empresas, la búsqueda usa la razón social detectada en tu archivo y avanza en tandas automáticas.
+                      En RUT y razón social, la búsqueda usa la empresa detectada y avanza en tandas automáticas.
                     </p>
+                    {!webEnrichmentAvailable && (
+                      <p className="text-xs text-amber-300 mt-2">
+                        El cruce por nombre pobla datos desde el maestro; la búsqueda web queda reservada para empresas.
+                      </p>
+                    )}
                     {!contactFieldSelected && (
                       <p className="text-xs text-amber-300 mt-2">
                         Esta opción solo aplica si seleccionas Email o Teléfono celular.
@@ -1034,7 +1159,11 @@ export function PoblarBasePage() {
                     </div>
                     <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
                       <p className="text-[11px] text-slate-500">
-                        {analysis.match_mode === 'rut' ? 'Con RUT válido' : 'Con valor útil'}
+                        {analysis.match_mode === 'rut'
+                          ? 'Con RUT válido'
+                          : analysis.match_mode === 'nombre_persona'
+                            ? 'Con nombre útil'
+                            : 'Con razón social útil'}
                       </p>
                       <p className="text-lg font-semibold text-white mt-1">
                         {formatNumber(analysis.valid_input_count)}
@@ -1056,7 +1185,11 @@ export function PoblarBasePage() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span>
-                        {analysis.match_mode === 'rut' ? 'RUT inválido' : 'Sin razón social útil'}
+                        {analysis.match_mode === 'rut'
+                          ? 'RUT inválido'
+                          : analysis.match_mode === 'nombre_persona'
+                            ? 'Sin nombre útil'
+                            : 'Sin razón social útil'}
                       </span>
                       <span className="text-slate-200">{formatNumber(analysis.invalid_input_count)}</span>
                     </div>
@@ -1216,7 +1349,7 @@ export function PoblarBasePage() {
                   </p>
                 </div>
                 <p className="text-xs text-slate-400">
-                  Cruce por {analysis.match_mode === 'rut' ? 'RUT' : 'razón social'} en: {analysis.match_column ?? '—'}
+                  Cruce por {getMatchModeLabel(analysis.match_mode)} en: {analysis.match_column ?? '—'}
                 </p>
               </div>
 
@@ -1343,7 +1476,7 @@ export function PoblarBasePage() {
           <div className="card p-5">
             <EmptyState
               title="Todavía no hay poblamiento"
-              description="Sube tu base, elige si quieres cruzar por RUT o razón social, selecciona qué campos del maestro agregar y luego exporta la base enriquecida."
+              description="Sube tu base, elige si quieres cruzar por RUT, nombre o razón social, selecciona qué campos del maestro agregar y luego exporta la base enriquecida."
             />
           </div>
         )}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { SearchBar } from '@/components/personas/SearchBar'
@@ -42,6 +42,7 @@ export default function BuscarPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [singleProfile, setSingleProfile] = useState<PersonaView | null>(null)
   const [tableData, setTableData] = useState<PaginatedResponse<PersonaView> | null>(null)
+  const didRunInitialSearch = useRef(false)
 
   const PAGE_SIZE = 50
 
@@ -105,6 +106,14 @@ export default function BuscarPage() {
     search(newPage)
   }
 
+  useEffect(() => {
+    if (didRunInitialSearch.current) return
+    const initialQuery = searchParams.get('rut') ?? searchParams.get('q')
+    if (!initialQuery?.trim()) return
+    didRunInitialSearch.current = true
+    search(1)
+  }, [search, searchParams])
+
   const hasActiveFilters = Object.entries(filters).some(([, v]) => v !== null && v !== '')
 
   return (
@@ -123,7 +132,7 @@ export default function BuscarPage() {
           showFiltersToggle
           onToggleFilters={() => setShowFilters(!showFilters)}
           isLoading={loading}
-          placeholder="Buscar por RUT (12345678-9), nombre o email..."
+          placeholder="Buscar por RUT, nombre completo, email o empresa..."
         />
 
         {/* Advanced Filters Panel */}
@@ -286,7 +295,7 @@ export default function BuscarPage() {
             <div className="text-center">
               <p className="text-sm font-medium text-slate-300">Comienza una búsqueda</p>
               <p className="text-xs text-slate-500 mt-1">
-                Ingresa un RUT, nombre o email. También puedes usar filtros avanzados.
+                Ingresa un RUT, nombre completo, email o empresa. También puedes usar filtros avanzados.
               </p>
             </div>
           </div>
