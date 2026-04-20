@@ -7,12 +7,17 @@ AS $$
   SELECT NULLIF(
     trim(
       regexp_replace(
-        upper(
-          translate(
-            COALESCE(input, ''),
-            'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑáàäâãéèëêíìïîóòöôõúùüûñ',
-            'AAAAAEEEEIIIIOOOOOUUUUNaaaaaeeeeiiiiooooouuuun'
-          )
+        regexp_replace(
+          upper(
+            translate(
+              COALESCE(input, ''),
+              'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑáàäâãéèëêíìïîóòöôõúùüûñ',
+              'AAAAAEEEEIIIIOOOOOUUUUNaaaaaeeeeiiiiooooouuuun'
+            )
+          ),
+          '([A-Z])\1{2,}',
+          '\1\1',
+          'g'
         ),
         '[^A-Z0-9]+',
         ' ',
@@ -23,27 +28,19 @@ AS $$
   );
 $$;
 
-CREATE INDEX IF NOT EXISTS idx_personas_master_person_name_match_key
+CREATE INDEX IF NOT EXISTS idx_personas_master_match_person_name_full
   ON public.personas_master (
     public.normalize_person_name(
-      COALESCE(
-        nombre_completo,
-        NULLIF(TRIM(CONCAT(COALESCE(nombres, ''), ' ', COALESCE(paterno, ''), ' ', COALESCE(materno, ''))), '')
-      )
+      btrim(coalesce(nombres, '') || ' ' || coalesce(paterno, '') || ' ' || coalesce(materno, ''))
     )
-  )
-  WHERE COALESCE(
-    nombre_completo,
-    NULLIF(TRIM(CONCAT(COALESCE(nombres, ''), ' ', COALESCE(paterno, ''), ' ', COALESCE(materno, ''))), '')
-  ) IS NOT NULL;
+  );
 
-CREATE INDEX IF NOT EXISTS idx_personas_master_person_last_first_match_key
+CREATE INDEX IF NOT EXISTS idx_personas_master_match_person_name_last_first
   ON public.personas_master (
     public.normalize_person_name(
-      NULLIF(TRIM(CONCAT(COALESCE(paterno, ''), ' ', COALESCE(materno, ''), ' ', COALESCE(nombres, ''))), '')
+      btrim(coalesce(paterno, '') || ' ' || coalesce(materno, '') || ' ' || coalesce(nombres, ''))
     )
-  )
-  WHERE NULLIF(TRIM(CONCAT(COALESCE(paterno, ''), ' ', COALESCE(materno, ''), ' ', COALESCE(nombres, ''))), '') IS NOT NULL;
+  );
 
 CREATE OR REPLACE FUNCTION public.match_person_names(input_names text[])
 RETURNS TABLE (
@@ -58,44 +55,22 @@ AS $$
     SELECT DISTINCT public.normalize_person_name(value) AS match_key
     FROM unnest(COALESCE(input_names, ARRAY[]::text[])) AS value
     WHERE public.normalize_person_name(value) IS NOT NULL
-  ),
-  full_name_matches AS (
-    SELECT
-      keys.match_key,
-      pm.rutid,
-      COALESCE(
-        pm.nombre_completo,
-        NULLIF(TRIM(CONCAT(COALESCE(pm.nombres, ''), ' ', COALESCE(pm.paterno, ''), ' ', COALESCE(pm.materno, ''))), '')
-      )::varchar(500) AS nombre_completo
-    FROM keys
-    JOIN public.personas_master pm
-      ON public.normalize_person_name(
-        COALESCE(
-          pm.nombre_completo,
-          NULLIF(TRIM(CONCAT(COALESCE(pm.nombres, ''), ' ', COALESCE(pm.paterno, ''), ' ', COALESCE(pm.materno, ''))), '')
-        )
-      ) = keys.match_key
-  ),
-  last_first_matches AS (
-    SELECT
-      keys.match_key,
-      pm.rutid,
-      COALESCE(
-        pm.nombre_completo,
-        NULLIF(TRIM(CONCAT(COALESCE(pm.nombres, ''), ' ', COALESCE(pm.paterno, ''), ' ', COALESCE(pm.materno, ''))), '')
-      )::varchar(500) AS nombre_completo
-    FROM keys
-    JOIN public.personas_master pm
-      ON public.normalize_person_name(
-        NULLIF(TRIM(CONCAT(COALESCE(pm.paterno, ''), ' ', COALESCE(pm.materno, ''), ' ', COALESCE(pm.nombres, ''))), '')
-      ) = keys.match_key
   )
-  SELECT DISTINCT match_key, rutid, nombre_completo
-  FROM full_name_matches
-  UNION
-  SELECT DISTINCT match_key, rutid, nombre_completo
-  FROM last_first_matches;
+  SELECT DISTINCT
+    keys.match_key,
+    pm.rutid,
+    btrim(coalesce(pm.nombres, '') || ' ' || coalesce(pm.paterno, '') || ' ' || coalesce(pm.materno, ''))::varchar(500) AS nombre_completo
+  FROM keys
+  JOIN public.personas_master pm
+    ON public.normalize_person_name(
+      btrim(coalesce(pm.nombres, '') || ' ' || coalesce(pm.paterno, '') || ' ' || coalesce(pm.materno, ''))
+    ) = keys.match_key
+    OR public.normalize_person_name(
+      btrim(coalesce(pm.paterno, '') || ' ' || coalesce(pm.materno, '') || ' ' || coalesce(pm.nombres, ''))
+    ) = keys.match_key;
 $$;
+
+NOTIFY pgrst, 'reload schema';
 
 GRANT EXECUTE ON FUNCTION public.normalize_person_name(text) TO authenticated, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.match_person_names(text[]) TO authenticated, anon, service_role;

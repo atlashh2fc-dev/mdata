@@ -31,6 +31,79 @@ function getSearchTokens(term: string): string[] {
     .slice(0, 5)
 }
 
+function normalizePersonNameTerm(term: string): string {
+  return term
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/([A-Za-z])\1{2,}/g, '$1$1')
+    .replace(/[^a-z0-9]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+}
+
+async function searchPersonasByNameMatch(
+  term: string,
+  from: number,
+  to: number,
+  sortBy: string,
+  sortOrder: 'asc' | 'desc'
+): Promise<PaginatedResponse<PersonaView> | null> {
+  const normalizedTerm = normalizePersonNameTerm(term)
+  const tokens = getSearchTokens(normalizedTerm)
+
+  if (tokens.length < 2) return null
+
+  const { data: matches, error } = await db.rpc('match_person_names', {
+    input_names: [normalizedTerm],
+  })
+
+  if (error) {
+    if (error.code !== 'PGRST202') {
+      console.error('[searchPersonasByNameMatch]', error)
+    }
+    return null
+  }
+
+  const uniqueRutIds = [...new Set(
+    ((matches ?? []) as Array<{ rutid: string | null }>).map(item => item.rutid).filter(Boolean)
+  )] as string[]
+
+  if (uniqueRutIds.length === 0) {
+    return {
+      data: [],
+      total: 0,
+      page: Math.floor(from / Math.max(to - from + 1, 1)) + 1,
+      page_size: Math.max(to - from + 1, 1),
+      total_pages: 0,
+    }
+  }
+
+  const { data, error: fetchError } = await db
+    .from('master_personas_view')
+    .select('*', { count: 'exact' })
+    .in('rutid', uniqueRutIds)
+    .order(sortBy, { ascending: sortOrder === 'asc' })
+    .range(from, to)
+
+  if (fetchError) {
+    console.error('[searchPersonasByNameMatch.fetch]', fetchError)
+    return null
+  }
+
+  const total = uniqueRutIds.length
+  const pageSize = Math.max(to - from + 1, 1)
+  const page = Math.floor(from / pageSize) + 1
+
+  return {
+    data: (data ?? []) as PersonaView[],
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: Math.ceil(total / pageSize),
+  }
+}
+
 /**
  * Obtiene el perfil 360 completo de una persona por RUT.
  * Consulta master_personas_view (que transforma personas_master).
@@ -95,12 +168,26 @@ export async function searchPersonas(
     } else {
       const tokens = getSearchTokens(term)
       if (tokens.length >= 2 && !term.includes('@')) {
+        const directNameMatch = await searchPersonasByNameMatch(
+          term,
+          from,
+          to,
+          safeSortBy,
+          sort_order
+        )
+
+        if (directNameMatch) {
+          return directNameMatch
+        }
+
         for (const token of tokens) {
-          query = query.ilike('nombre_completo', `%${token}%`)
+          query = query.or(
+            `nombre_completo.ilike.%${token}%,nombres.ilike.%${token}%,paterno.ilike.%${token}%,materno.ilike.%${token}%`
+          )
         }
       } else {
         query = query.or(
-          `nombre_completo.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
+          `nombre_completo.ilike.%${term}%,nombres.ilike.%${term}%,paterno.ilike.%${term}%,materno.ilike.%${term}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
         )
       }
     }
