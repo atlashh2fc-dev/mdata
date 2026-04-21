@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic'
 
 const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+type ExportableSource = {
+  id: string
+  name?: string | null
+  slug?: string | null
+  canonical_table?: string | null
+  source_table_name?: string | null
+}
+
 function slugify(value: string) {
   return value
     .trim()
@@ -39,6 +47,42 @@ function buildCsvFileName(source: {
     || 'dataset'
 
   return `${baseName}.csv`
+}
+
+async function getSourceById(id: string): Promise<{
+  source: ExportableSource | null
+  error: unknown
+}> {
+  const overviewQuery = await db
+    .from('dataset_overview')
+    .select('id, name, slug, canonical_table, source_table_name')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (overviewQuery.data) {
+    return { source: overviewQuery.data as ExportableSource, error: null }
+  }
+
+  const fallbackQuery = await db
+    .from('data_sources')
+    .select('id, name, slug, canonical_table, source_table_name')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fallbackQuery.error) {
+    return {
+      source: null,
+      error: {
+        overview: overviewQuery.error,
+        fallback: fallbackQuery.error,
+      },
+    }
+  }
+
+  return {
+    source: (fallbackQuery.data as ExportableSource | null) ?? null,
+    error: overviewQuery.error,
+  }
 }
 
 async function streamFromPostgres(tableName: string): Promise<ReadableStream<Uint8Array> | null> {
@@ -124,13 +168,12 @@ export async function GET(
 
   const { id } = await context.params
 
-  const { data: source, error } = await db
-    .from('dataset_overview')
-    .select('id, name, slug, canonical_table, source_table_name')
-    .eq('id', id)
-    .maybeSingle()
+  const { source, error } = await getSourceById(id)
 
-  if (error || !source) {
+  if (!source) {
+    if (error) {
+      console.error('[fuentes/export][source_lookup]', { id, error })
+    }
     return NextResponse.json({ error: 'Dataset no encontrado' }, { status: 404 })
   }
 
