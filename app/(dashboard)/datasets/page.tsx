@@ -5,7 +5,7 @@ import { Header } from '@/components/layout/Header'
 import { LoadingState, EmptyState } from '@/components/ui/Spinner'
 import type { DataSource } from '@/types'
 import {
-  Plus, Database, FileText, Globe, Table2,
+  Plus, Database, Download, FileText, Globe, Table2,
 } from 'lucide-react'
 import { formatDatetime, formatNumber, formatRelativeTime } from '@/lib/utils/formatters'
 
@@ -26,6 +26,11 @@ function SourceTypeLabel({ type }: { type: string }) {
       {type.toUpperCase()}
     </div>
   )
+}
+
+function getExportHref(fuente: DataSource) {
+  if (!fuente.canonical_table && !fuente.source_table_name) return null
+  return `/api/fuentes/${fuente.id}/export`
 }
 
 export default function DatasetsPage() {
@@ -99,6 +104,7 @@ export default function DatasetsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {fuentes.map(fuente => {
               const Icon = SOURCE_TYPE_ICONS[fuente.source_type] ?? Database
+              const exportHref = getExportHref(fuente)
               return (
                 <div key={fuente.id} className="card-hover p-5 group">
                   <div className="flex items-start justify-between mb-3">
@@ -153,11 +159,23 @@ export default function DatasetsPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#253357]/50">
-                    <SourceTypeLabel type={fuente.source_type} />
-                    <span className="text-[10px] text-slate-600">
-                      {formatRelativeTime(fuente.last_loaded_at ?? fuente.created_at)}
-                    </span>
+                  <div className="mt-3 pt-3 border-t border-[#253357]/50 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <SourceTypeLabel type={fuente.source_type} />
+                      <span className="text-[10px] text-slate-600">
+                        {formatRelativeTime(fuente.last_loaded_at ?? fuente.created_at)}
+                      </span>
+                    </div>
+
+                    {exportHref && (
+                      <a
+                        href={exportHref}
+                        className="btn-secondary w-full justify-center text-xs py-2"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Descargar CSV
+                      </a>
+                    )}
                   </div>
                 </div>
               )
