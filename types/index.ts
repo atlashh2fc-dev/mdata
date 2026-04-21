@@ -864,6 +864,36 @@ export interface PersonaScoreCard {
   updated_at: string
 }
 
+export interface CommercialRutSummary {
+  rutid: string
+  feedback_coverage: boolean
+  should_contact: boolean
+  contactability_score: number
+  purchase_propensity_score: number
+  priority_score: number
+  best_channel: FeedbackChannel | null
+  best_contact_hour: number | null
+  next_best_action: string | null
+  action_priority: string | null
+  best_phone: string | null
+  best_email: string | null
+  total_interactions: number
+  effective_contacts: number
+  interest_events: number
+  callback_events: number
+  sales_events: number
+  latest_outcome: FeedbackOutcome | null
+  latest_outcome_subtype: string | null
+  latest_channel: FeedbackChannel | null
+  latest_campaign_name: string | null
+  latest_agent_name: string | null
+  latest_managed_at: string | null
+  last_contact_at: string | null
+  last_sale_at: string | null
+  last_feedback_at: string | null
+  updated_at: string | null
+}
+
 export interface ContactPoint {
   id: string
   rutid: string

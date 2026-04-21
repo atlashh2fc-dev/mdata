@@ -4,6 +4,7 @@ import { db } from '@/lib/db/supabase'
 import { analyzeWithAI } from '@/lib/services/ai'
 import { cleanRut } from '@/lib/utils/rut'
 import type {
+  CommercialRutSummary,
   CommercialOverview,
   ContactCenterFeedbackInput,
   ContactCenterIngestionResult,
@@ -13,6 +14,19 @@ import type {
 } from '@/types'
 
 const UPSERT_CHUNK_SIZE = 500
+const CRM_SUMMARY_HISTORY_LIMIT = 5000
+
+type CommercialSummaryFeedbackRow = {
+  id: string
+  rutid: string | null
+  matched_rutid: string | null
+  managed_at: string
+  outcome: PersonaFeedbackEvent['outcome']
+  outcome_subtype: string | null
+  channel: PersonaFeedbackEvent['channel']
+  campaign_name: string | null
+  agent_name: string | null
+}
 
 function normalizeRutForDb(value?: string | null): string | null {
   if (!value) return null
@@ -383,6 +397,126 @@ export async function getCommercialOverview(): Promise<CommercialOverview> {
     top_opportunities: (topOpportunities ?? []) as PersonaScoreCard[],
     recent_syncs: recentSyncs ?? [],
   }
+}
+
+export async function getCommercialSummariesByRutids(
+  rutids: string[]
+): Promise<CommercialRutSummary[]> {
+  const normalizedRutids = [...new Set(
+    (rutids ?? [])
+      .map(value => normalizeRutForDb(value))
+      .filter((value): value is string => Boolean(value))
+  )]
+
+  if (!normalizedRutids.length) return []
+
+  const selectClause = `
+    rutid,
+    feedback_coverage,
+    should_contact,
+    contactability_score,
+    purchase_propensity_score,
+    priority_score,
+    best_channel,
+    best_contact_hour,
+    next_best_action,
+    action_priority,
+    best_phone,
+    best_email,
+    total_interactions,
+    effective_contacts,
+    interest_events,
+    callback_events,
+    sales_events,
+    last_feedback_at,
+    last_contact_at,
+    last_sale_at,
+    updated_at
+  `
+
+  const fetchSummaries = async (targetRutids: string[]) => {
+    const { data, error } = await db
+      .from('persona_scores')
+      .select(selectClause)
+      .in('rutid', targetRutids)
+
+    if (error) {
+      console.error('[getCommercialSummariesByRutids]', error)
+      throw new Error('No se pudo leer el resumen CRM de la base actual.')
+    }
+
+    return (data ?? []) as CommercialRutSummary[]
+  }
+
+  let summaries = await fetchSummaries(normalizedRutids)
+  const foundRutids = new Set(summaries.map(item => item.rutid))
+  const missingRutids = normalizedRutids.filter(rutid => !foundRutids.has(rutid))
+
+  if (missingRutids.length) {
+    try {
+      await refreshPersonaScores(missingRutids)
+      const refreshed = await fetchSummaries(missingRutids)
+      const refreshedMap = new Map(refreshed.map(item => [item.rutid, item]))
+      summaries = summaries.concat(
+        missingRutids
+          .map(rutid => refreshedMap.get(rutid))
+          .filter((item): item is CommercialRutSummary => Boolean(item))
+      )
+    } catch (error) {
+      console.error('[getCommercialSummariesByRutids.refresh]', error)
+    }
+  }
+
+  const [matchedHistory, directHistory] = await Promise.all([
+    db
+      .from('contact_center_feedback')
+      .select('id,rutid,matched_rutid,managed_at,outcome,outcome_subtype,channel,campaign_name,agent_name')
+      .in('matched_rutid', normalizedRutids)
+      .order('managed_at', { ascending: false })
+      .limit(CRM_SUMMARY_HISTORY_LIMIT),
+    db
+      .from('contact_center_feedback')
+      .select('id,rutid,matched_rutid,managed_at,outcome,outcome_subtype,channel,campaign_name,agent_name')
+      .in('rutid', normalizedRutids)
+      .order('managed_at', { ascending: false })
+      .limit(CRM_SUMMARY_HISTORY_LIMIT),
+  ])
+
+  const latestFeedbackByRut = new Map<string, CommercialSummaryFeedbackRow>()
+  const seenEventIds = new Set<string>()
+
+  for (const row of [
+    ...((matchedHistory.data ?? []) as CommercialSummaryFeedbackRow[]),
+    ...((directHistory.data ?? []) as CommercialSummaryFeedbackRow[]),
+  ]) {
+    if (seenEventIds.has(row.id)) continue
+    seenEventIds.add(row.id)
+
+    const eventRutid = normalizeRutForDb(row.matched_rutid ?? row.rutid)
+    if (!eventRutid || latestFeedbackByRut.has(eventRutid)) continue
+    latestFeedbackByRut.set(eventRutid, row)
+  }
+
+  const summaryMap = new Map(summaries.map(item => [item.rutid, item]))
+
+  return normalizedRutids
+    .map(rutid => {
+      const summary = summaryMap.get(rutid)
+      if (!summary) return null
+
+      const latestFeedback = latestFeedbackByRut.get(rutid)
+
+      return {
+        ...summary,
+        latest_outcome: latestFeedback?.outcome ?? null,
+        latest_outcome_subtype: latestFeedback?.outcome_subtype ?? null,
+        latest_channel: latestFeedback?.channel ?? null,
+        latest_campaign_name: latestFeedback?.campaign_name ?? null,
+        latest_agent_name: latestFeedback?.agent_name ?? null,
+        latest_managed_at: latestFeedback?.managed_at ?? summary.last_feedback_at ?? null,
+      }
+    })
+    .filter((item): item is CommercialRutSummary => Boolean(item))
 }
 
 async function getPersonaScore(rutid: string): Promise<PersonaScoreCard | null> {

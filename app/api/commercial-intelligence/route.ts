@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/lib/db/supabase'
 import {
   explainPersonaCommercialScore,
   getCommercialOverview,
+  getCommercialSummariesByRutids,
   getPersonaCommercialIntelligence,
   ingestContactCenterFeedback,
   markBestManagement,
@@ -48,6 +49,23 @@ export async function GET(req: NextRequest) {
   if (!rut && section === 'actions') {
     const actions = await getCommercialActionFeed()
     return NextResponse.json({ success: true, data: actions })
+  }
+
+  if (!rut && section === 'summary') {
+    const rutids = [
+      ...searchParams.getAll('rutid'),
+      ...(searchParams.get('rutids') ?? '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean),
+    ]
+
+    if (!rutids.length) {
+      return NextResponse.json({ error: 'rutids es requerido' }, { status: 400 })
+    }
+
+    const summary = await getCommercialSummariesByRutids(rutids)
+    return NextResponse.json({ success: true, data: summary })
   }
 
   if (rut) {
@@ -107,6 +125,19 @@ export async function POST(req: NextRequest) {
   if (action === 'refresh_scores') {
     const refreshed = await refreshPersonaScores(body.rutids)
     return NextResponse.json({ success: true, data: { refreshed } })
+  }
+
+  if (action === 'summary') {
+    const rutids = Array.isArray(body.rutids)
+      ? body.rutids.filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0)
+      : []
+
+    if (!rutids.length) {
+      return NextResponse.json({ error: 'rutids es requerido' }, { status: 400 })
+    }
+
+    const summary = await getCommercialSummariesByRutids(rutids)
+    return NextResponse.json({ success: true, data: summary })
   }
 
   if (action === 'mark_best_management') {

@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import type { PersonaView } from '@/types'
 import { formatNumber, formatCurrency } from '@/lib/utils/formatters'
@@ -9,7 +8,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/Spinner'
 import {
   ArrowUpDown, ArrowUp, ArrowDown,
-  Car, Building2, Home, Mail, Phone, ExternalLink,
+  Car, Building2, Home, Mail, ExternalLink,
 } from 'lucide-react'
 
 interface Column {

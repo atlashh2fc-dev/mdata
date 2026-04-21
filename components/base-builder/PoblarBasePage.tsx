@@ -11,11 +11,13 @@ import { EmptyState, Spinner } from '@/components/ui/Spinner'
 import {
   BASE_BUILDER_FIELDS,
   type BaseBuilderAnalysisResult,
+  type BaseBuilderExportRow,
   type BaseBuilderFieldDefinition,
   type BaseBuilderFieldKey,
   type BaseBuilderMatchMode,
   type BaseBuilderWebEnrichmentResult,
 } from '@/types/base-builder'
+import type { CommercialRutSummary } from '@/types'
 import {
   cn,
   formatCurrency,
@@ -41,6 +43,28 @@ const COMPANY_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
 ]
 
 const MAX_AUTO_WEB_PASSES = 50
+const CRM_EXPORT_COLUMNS = [
+  'CRM - Tiene historial',
+  'CRM - Última gestión',
+  'CRM - Último resultado',
+  'CRM - Subresultado',
+  'CRM - Último canal',
+  'CRM - Último agente',
+  'CRM - Última campaña',
+  'CRM - Último contacto',
+  'CRM - Última venta',
+  'CRM - Total gestiones',
+  'CRM - Contactos efectivos',
+  'CRM - Intereses',
+  'CRM - Callbacks',
+  'CRM - Ventas',
+  'CRM - Próxima acción',
+  'CRM - Prioridad',
+  'CRM - Canal sugerido',
+  'CRM - Mejor hora',
+  'CRM - Mejor teléfono',
+  'CRM - Mejor email',
+] as const
 
 type AnalyzeProgress = {
   pass: number
@@ -361,7 +385,8 @@ function buildFieldLabelMap() {
 function exportRowsToCsv(
   rows: Record<string, string | number | boolean | null>[],
   originalColumns: string[],
-  selectedFields: BaseBuilderFieldKey[]
+  selectedFields: BaseBuilderFieldKey[],
+  extraColumns: string[] = []
 ): string {
   const fieldLabelMap = buildFieldLabelMap()
   const enrichedColumns = selectedFields.map(field => fieldLabelMap.get(field) ?? field)
@@ -387,6 +412,9 @@ function exportRowsToCsv(
     if (includeEmailSource) record['Fuente Email'] = row['Fuente Email']
     if (includePhoneSource) record['Fuente Teléfono'] = row['Fuente Teléfono']
     if (includeWebsite) record['Web - Sitio'] = row['Web - Sitio']
+    for (const column of extraColumns) {
+      record[column] = row[column]
+    }
 
     return record
   })
@@ -408,6 +436,75 @@ function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
   link.download = fileName
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function formatHour(hour: number | null | undefined): string {
+  if (hour === null || hour === undefined || !Number.isFinite(hour)) return ''
+  const normalized = ((Math.round(hour) % 24) + 24) % 24
+  return `${String(normalized).padStart(2, '0')}:00`
+}
+
+async function fetchCrmSummariesForRows(rows: BaseBuilderExportRow[]) {
+  const rutids = [...new Set(
+    rows
+      .map(row => row.rutid)
+      .filter((rutid): rutid is string => Boolean(rutid))
+  )]
+
+  if (!rutids.length) {
+    return new Map<string, CommercialRutSummary>()
+  }
+
+  const res = await fetch('/api/commercial-intelligence', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'summary',
+      rutids,
+    }),
+  })
+
+  const json = await res.json()
+
+  if (!res.ok || !json.success) {
+    throw new Error(json.error ?? 'No se pudo actualizar la exportación contra el CRM.')
+  }
+
+  const items = (json.data ?? []) as CommercialRutSummary[]
+  return new Map(items.map(item => [item.rutid, item]))
+}
+
+function attachCrmSummaryToRows(
+  rows: BaseBuilderExportRow[],
+  crmSummaryMap: Map<string, CommercialRutSummary>
+): BaseBuilderExportRow[] {
+  return rows.map(row => {
+    const summary = row.rutid ? crmSummaryMap.get(row.rutid) : undefined
+
+    return {
+      ...row,
+      'CRM - Tiene historial': summary?.feedback_coverage ? 'Sí' : 'No',
+      'CRM - Última gestión': summary?.latest_managed_at ?? summary?.last_feedback_at ?? null,
+      'CRM - Último resultado': summary?.latest_outcome ?? null,
+      'CRM - Subresultado': summary?.latest_outcome_subtype ?? null,
+      'CRM - Último canal': summary?.latest_channel ?? null,
+      'CRM - Último agente': summary?.latest_agent_name ?? null,
+      'CRM - Última campaña': summary?.latest_campaign_name ?? null,
+      'CRM - Último contacto': summary?.last_contact_at ?? null,
+      'CRM - Última venta': summary?.last_sale_at ?? null,
+      'CRM - Total gestiones': summary?.total_interactions ?? null,
+      'CRM - Contactos efectivos': summary?.effective_contacts ?? null,
+      'CRM - Intereses': summary?.interest_events ?? null,
+      'CRM - Callbacks': summary?.callback_events ?? null,
+      'CRM - Ventas': summary?.sales_events ?? null,
+      'CRM - Próxima acción': summary?.next_best_action ?? null,
+      'CRM - Prioridad': summary?.action_priority ?? null,
+      'CRM - Canal sugerido': summary?.best_channel ?? null,
+      'CRM - Mejor hora': formatHour(summary?.best_contact_hour),
+      'CRM - Mejor teléfono': summary?.best_phone ?? null,
+      'CRM - Mejor email': summary?.best_email ?? null,
+    }
+  })
 }
 
 function getExportBaseName(fileName?: string | null): string {
@@ -441,6 +538,7 @@ export function PoblarBasePage() {
   const [analyzeStatus, setAnalyzeStatus] = useState<string>('Cruzando...')
   const [analyzeProgress, setAnalyzeProgress] = useState<AnalyzeProgress | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [exportStatus, setExportStatus] = useState<string>('Exportando...')
   const [exportDone, setExportDone] = useState(false)
   const [analysis, setAnalysis] = useState<BaseBuilderAnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -763,26 +861,44 @@ export function PoblarBasePage() {
   async function handleExport() {
     if (!analysis) return
 
+    const shouldUpdateAgainstCrm = window.confirm(
+      '¿Quieres actualizar esta descarga contra el CRM antes de exportarla?'
+    )
+
     setExporting(true)
+    setExportStatus(shouldUpdateAgainstCrm ? 'Actualizando contra CRM...' : 'Exportando...')
     setExportDone(false)
+    setError(null)
 
     try {
       const baseName = `${getExportBaseName(uploadedFile?.name)}-poblada`
+      const rowsToExport = shouldUpdateAgainstCrm
+        ? attachCrmSummaryToRows(analysis.rows, await fetchCrmSummariesForRows(analysis.rows))
+        : analysis.rows
+      const extraColumns = shouldUpdateAgainstCrm ? [...CRM_EXPORT_COLUMNS] : []
 
       if (exportFormat === 'csv') {
-        const csv = exportRowsToCsv(analysis.rows, analysis.original_columns, analysis.selected_fields)
+        const csv = exportRowsToCsv(
+          rowsToExport,
+          analysis.original_columns,
+          analysis.selected_fields,
+          extraColumns
+        )
         downloadFile(csv, `${baseName}.csv`, 'text/csv;charset=utf-8;')
       } else {
         downloadFile(
-          JSON.stringify(analysis.rows, null, 2),
+          JSON.stringify(rowsToExport, null, 2),
           `${baseName}.json`,
           'application/json'
         )
       }
 
       setExportDone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo exportar la base.')
     } finally {
       setExporting(false)
+      setExportStatus('Exportando...')
     }
   }
 
@@ -1323,7 +1439,7 @@ export function PoblarBasePage() {
                 {exporting ? (
                   <>
                     <Spinner size="sm" />
-                    Exportando...
+                    {exportStatus}
                   </>
                 ) : (
                   <>

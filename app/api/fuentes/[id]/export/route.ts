@@ -29,6 +29,32 @@ type ExportPlan = {
   columns: ExportColumn[] | null
 }
 
+const CRM_EXPORT_COLUMNS = [
+  'rutid',
+  'razon_social_empresa',
+  'loaded_at',
+  'CRM - Tiene historial',
+  'CRM - Última gestión',
+  'CRM - Último resultado',
+  'CRM - Subresultado',
+  'CRM - Último canal',
+  'CRM - Último agente',
+  'CRM - Última campaña',
+  'CRM - Último contacto',
+  'CRM - Última venta',
+  'CRM - Total gestiones',
+  'CRM - Contactos efectivos',
+  'CRM - Intereses',
+  'CRM - Callbacks',
+  'CRM - Ventas',
+  'CRM - Próxima acción',
+  'CRM - Prioridad',
+  'CRM - Canal sugerido',
+  'CRM - Mejor hora',
+  'CRM - Mejor teléfono',
+  'CRM - Mejor email',
+] as const
+
 const DATASET_EXPORT_FALLBACKS: Record<string, ExportPlan> = {
   pernat_resumen: {
     tableName: 'personas_master',
@@ -159,6 +185,10 @@ function buildCsvFileName(source: ExportableSource) {
   return `${baseName}.csv`
 }
 
+function supportsCrmExport(source: ExportableSource) {
+  return source.slug === 'empresa_resumen' || source.canonical_table === 'empresa_resumen'
+}
+
 function getPostgresConnectionString() {
   const connectionString = process.env.POSTGRES_URL_NON_POOLING
     ?? process.env.POSTGRES_URL
@@ -245,13 +275,135 @@ async function fetchColumnNames(client: PoolClient, plan: ExportPlan) {
   return result.rows.map((row: { column_name: string }) => row.column_name)
 }
 
+async function fetchCompanyBatchWithCrm(
+  client: PoolClient,
+  batchSize: number,
+  cursorValue: unknown
+) {
+  const cursorClause = cursorValue !== null && cursorValue !== undefined
+    ? 'AND pm.rutid > $1'
+    : ''
+  const params = cursorValue !== null && cursorValue !== undefined
+    ? [cursorValue, batchSize]
+    : [batchSize]
+  const limitParam = cursorValue !== null && cursorValue !== undefined ? '$2' : '$1'
+
+  const result = await client.query(
+    `
+      WITH latest_feedback AS (
+        SELECT DISTINCT ON (target_rutid)
+          target_rutid,
+          managed_at,
+          outcome,
+          outcome_subtype,
+          channel,
+          agent_name,
+          campaign_name
+        FROM (
+          SELECT
+            COALESCE(matched_rutid, rutid) AS target_rutid,
+            managed_at,
+            outcome,
+            outcome_subtype,
+            channel,
+            agent_name,
+            campaign_name
+          FROM public.contact_center_feedback
+          WHERE COALESCE(matched_rutid, rutid) IS NOT NULL
+        ) base_feedback
+        ORDER BY target_rutid, managed_at DESC
+      )
+      SELECT
+        pm.rutid,
+        pm.razon_social_empresa,
+        pm.loaded_at,
+        CASE WHEN COALESCE(ps.feedback_coverage, FALSE) THEN 'Sí' ELSE 'No' END AS "CRM - Tiene historial",
+        COALESCE(lf.managed_at, ps.last_feedback_at) AS "CRM - Última gestión",
+        lf.outcome AS "CRM - Último resultado",
+        lf.outcome_subtype AS "CRM - Subresultado",
+        lf.channel AS "CRM - Último canal",
+        lf.agent_name AS "CRM - Último agente",
+        lf.campaign_name AS "CRM - Última campaña",
+        ps.last_contact_at AS "CRM - Último contacto",
+        ps.last_sale_at AS "CRM - Última venta",
+        ps.total_interactions AS "CRM - Total gestiones",
+        ps.effective_contacts AS "CRM - Contactos efectivos",
+        ps.interest_events AS "CRM - Intereses",
+        ps.callback_events AS "CRM - Callbacks",
+        ps.sales_events AS "CRM - Ventas",
+        ps.next_best_action AS "CRM - Próxima acción",
+        ps.action_priority AS "CRM - Prioridad",
+        ps.best_channel AS "CRM - Canal sugerido",
+        CASE
+          WHEN ps.best_contact_hour IS NULL THEN NULL
+          ELSE LPAD(ps.best_contact_hour::text, 2, '0') || ':00'
+        END AS "CRM - Mejor hora",
+        ps.best_phone AS "CRM - Mejor teléfono",
+        ps.best_email AS "CRM - Mejor email"
+      FROM public.personas_master pm
+      LEFT JOIN public.persona_scores ps
+        ON ps.rutid = pm.rutid
+      LEFT JOIN latest_feedback lf
+        ON lf.target_rutid = pm.rutid
+      WHERE pm.razon_social_empresa IS NOT NULL
+      ${cursorClause}
+      ORDER BY pm.rutid ASC
+      LIMIT ${limitParam}
+    `,
+    params
+  )
+
+  return result.rows as Record<string, unknown>[]
+}
+
+async function fetchCompanyBatch(
+  client: PoolClient,
+  batchSize: number,
+  cursorValue: unknown
+) {
+  const cursorClause = cursorValue !== null && cursorValue !== undefined
+    ? 'AND pm.rutid > $1'
+    : ''
+  const params = cursorValue !== null && cursorValue !== undefined
+    ? [cursorValue, batchSize]
+    : [batchSize]
+  const limitParam = cursorValue !== null && cursorValue !== undefined ? '$2' : '$1'
+
+  const result = await client.query(
+    `
+      SELECT
+        pm.rutid,
+        pm.razon_social_empresa,
+        pm.loaded_at
+      FROM public.personas_master pm
+      WHERE pm.razon_social_empresa IS NOT NULL
+      ${cursorClause}
+      ORDER BY pm.rutid ASC
+      LIMIT ${limitParam}
+    `,
+    params
+  )
+
+  return result.rows as Record<string, unknown>[]
+}
+
 async function fetchBatch(
   client: PoolClient,
   plan: ExportPlan,
   batchSize: number,
   cursorValue: unknown,
-  offset: number
+  offset: number,
+  source: ExportableSource,
+  includeCrm: boolean
 ) {
+  if (includeCrm && supportsCrmExport(source)) {
+    return fetchCompanyBatchWithCrm(client, batchSize, cursorValue)
+  }
+
+  if (supportsCrmExport(source)) {
+    return fetchCompanyBatch(client, batchSize, cursorValue)
+  }
+
   const selectClause = plan.columns
     ? plan.columns
       .map(column => {
@@ -329,7 +481,9 @@ function createCsvStream(source: ExportableSource, plan: ExportPlan) {
             plan,
             DEFAULT_BATCH_SIZE,
             cursorValue,
-            offset
+            offset,
+            source,
+            false
           )
 
           if (rows.length === 0) {
@@ -384,8 +538,71 @@ function createCsvStream(source: ExportableSource, plan: ExportPlan) {
   })
 }
 
+function createCsvStreamWithCrm(source: ExportableSource, plan: ExportPlan) {
+  const encoder = new TextEncoder()
+  const pool = createPool()
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      if (!pool) {
+        controller.error(new Error('No hay una conexion Postgres disponible para exportar.'))
+        return
+      }
+
+      let client: PoolClient | null = null
+      let cursorValue: unknown = null
+
+      try {
+        client = await pool.connect()
+
+        controller.enqueue(
+          encoder.encode(`${CRM_EXPORT_COLUMNS.map(csvEscape).join(',')}\n`)
+        )
+
+        while (true) {
+          const rows = await fetchBatch(
+            client,
+            plan,
+            DEFAULT_BATCH_SIZE,
+            cursorValue,
+            0,
+            source,
+            true
+          )
+
+          if (rows.length === 0) break
+
+          const csvChunk = rows
+            .map(row => CRM_EXPORT_COLUMNS.map(column => csvEscape(row[column])).join(','))
+            .join('\n')
+
+          controller.enqueue(encoder.encode(`${csvChunk}\n`))
+
+          if (rows.length < DEFAULT_BATCH_SIZE) break
+
+          cursorValue = rows.at(-1)?.rutid
+          if (cursorValue === null || cursorValue === undefined) break
+        }
+
+        controller.close()
+      } catch (error) {
+        console.error('[fuentes/export][stream_crm]', {
+          sourceId: source.id,
+          tableName: plan.tableName,
+          orderColumn: plan.orderColumn,
+          error,
+        })
+        controller.error(error)
+      } finally {
+        client?.release()
+        await pool.end()
+      }
+    },
+  })
+}
+
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createSupabaseServerClient()
@@ -395,6 +612,7 @@ export async function GET(
   }
 
   const { id } = await context.params
+  const includeCrm = req.nextUrl.searchParams.get('include_crm') === '1'
   const { source, error } = await getSourceById(id)
 
   if (!source) {
@@ -408,6 +626,13 @@ export async function GET(
   if (!plan) {
     return NextResponse.json(
       { error: 'Este dataset no tiene una configuracion exportable.' },
+      { status: 400 }
+    )
+  }
+
+  if (includeCrm && !supportsCrmExport(source)) {
+    return NextResponse.json(
+      { error: 'La actualización contra CRM solo está disponible para el dataset de empresas.' },
       { status: 400 }
     )
   }
@@ -452,10 +677,13 @@ export async function GET(
     await pool.end()
   }
 
-  return new NextResponse(createCsvStream(source, plan), {
+  return new NextResponse(includeCrm ? createCsvStreamWithCrm(source, plan) : createCsvStream(source, plan), {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${buildCsvFileName(source)}"`,
+      'Content-Disposition': `attachment; filename="${includeCrm ? buildCsvFileName({
+        ...source,
+        slug: `${source.slug ?? 'dataset'}-crm`,
+      }) : buildCsvFileName(source)}"`,
       'Cache-Control': 'no-store',
     },
   })

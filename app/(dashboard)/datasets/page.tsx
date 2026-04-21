@@ -33,6 +33,10 @@ function getExportHref(fuente: DataSource) {
   return `/api/fuentes/${fuente.id}/export`
 }
 
+function supportsCrmExport(fuente: DataSource) {
+  return fuente.slug === 'empresa_resumen' || fuente.canonical_table === 'empresa_resumen'
+}
+
 export default function DatasetsPage() {
   const [fuentes, setFuentes] = useState<DataSource[]>([])
   const [loading, setLoading] = useState(true)
@@ -105,6 +109,9 @@ export default function DatasetsPage() {
             {fuentes.map(fuente => {
               const Icon = SOURCE_TYPE_ICONS[fuente.source_type] ?? Database
               const exportHref = getExportHref(fuente)
+              const crmExportHref = supportsCrmExport(fuente)
+                ? `${exportHref}?include_crm=1`
+                : null
               return (
                 <div key={fuente.id} className="card-hover p-5 group">
                   <div className="flex items-start justify-between mb-3">
@@ -168,13 +175,29 @@ export default function DatasetsPage() {
                     </div>
 
                     {exportHref && (
-                      <a
-                        href={exportHref}
-                        className="btn-secondary w-full justify-center text-xs py-2"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Descargar CSV
-                      </a>
+                      <div className="space-y-2">
+                        <a
+                          href={exportHref}
+                          className="btn-secondary w-full justify-center text-xs py-2"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Descargar CSV
+                        </a>
+
+                        {crmExportHref && (
+                          <a
+                            href={crmExportHref}
+                            onClick={event => {
+                              const accepted = window.confirm('¿Quieres actualizar la descarga de empresas contra el CRM?')
+                              if (!accepted) event.preventDefault()
+                            }}
+                            className="btn-primary w-full justify-center text-xs py-2"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Descargar CSV + CRM
+                          </a>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
