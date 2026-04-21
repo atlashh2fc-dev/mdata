@@ -19,10 +19,16 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/exportar') ||
     pathname.startsWith('/logs')
 
+  const shouldCheckAuth = isProtectedRoute
+
   if (!supabaseUrl || !supabaseAnonKey) {
     return isProtectedRoute
       ? NextResponse.redirect(new URL('/login', request.url))
       : NextResponse.next({ request })
+  }
+
+  if (!shouldCheckAuth) {
+    return NextResponse.next({ request })
   }
 
   let supabaseResponse = NextResponse.next({ request })
@@ -60,14 +66,6 @@ export async function middleware(request: NextRequest) {
       const redirectUrl = new URL('/login', request.url)
       const redirectResponse = NextResponse.redirect(redirectUrl)
       // Copy over any session cookies Supabase may have set
-      supabaseResponse.cookies.getAll().forEach((cookie) => {
-        redirectResponse.cookies.set(cookie.name, cookie.value)
-      })
-      return redirectResponse
-    }
-
-    if (pathname === '/login' && user) {
-      const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url))
       supabaseResponse.cookies.getAll().forEach((cookie) => {
         redirectResponse.cookies.set(cookie.name, cookie.value)
       })

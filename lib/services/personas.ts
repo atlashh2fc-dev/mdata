@@ -42,6 +42,22 @@ function normalizePersonNameTerm(term: string): string {
     .toUpperCase()
 }
 
+function buildEmptyPaginatedResponse<T>(
+  from: number,
+  to: number
+): PaginatedResponse<T> {
+  const pageSize = Math.max(to - from + 1, 1)
+  const page = Math.floor(from / pageSize) + 1
+
+  return {
+    data: [],
+    total: 0,
+    page,
+    page_size: pageSize,
+    total_pages: 0,
+  }
+}
+
 async function searchPersonasByNameMatch(
   term: string,
   from: number,
@@ -70,7 +86,7 @@ async function searchPersonasByNameMatch(
   )] as string[]
 
   if (uniqueRutIds.length === 0) {
-    return null
+    return buildEmptyPaginatedResponse(from, to)
   }
 
   const { data, error: fetchError } = await db
@@ -171,7 +187,7 @@ export async function searchPersonas(
           sort_order
         )
 
-        if (directNameMatch) {
+        if (directNameMatch !== null) {
           return directNameMatch
         }
 

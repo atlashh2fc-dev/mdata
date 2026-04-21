@@ -1,0 +1,2 @@
+-- Placeholder para alinear el historial local con una migración registrada
+-- remotamente fuera de este repositorio. No aplica cambios de schema.
