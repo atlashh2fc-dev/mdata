@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { hasSupabasePublicEnv, supabaseBrowser } from '@/lib/db/client'
+import { hasSupabasePublicEnv } from '@/lib/db/client'
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {
@@ -24,24 +24,32 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const { error: authError } = await supabaseBrowser.auth.signInWithPassword({
-      email: email.trim(),
-      password,
+    const authResponse = await fetch('/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: email.trim(),
+        password,
+      }),
     })
 
-    if (authError) {
-      // Log the real error for debugging
-      console.error('[login] Auth error:', authError.message, authError.status)
+    if (!authResponse.ok) {
+      const payload = await authResponse.json().catch(() => null)
+      const authStatus = Number(payload?.status ?? authResponse.status)
+      const authMessage = String(payload?.error ?? 'No se pudo iniciar sesión.')
+
+      console.error('[login] Auth error:', authMessage, authStatus)
       setError(
-        authError.status === 400
+        authStatus === 400
           ? 'Credenciales inválidas. Verifica tu email y contraseña.'
-          : `Error de autenticación: ${authError.message}`
+          : `Error de autenticación: ${authMessage}`
       )
       setLoading(false)
       return
     }
 
-    // refresh() first so the middleware sees the session cookie, then navigate
     setLoading(false)
     router.refresh()
     router.push('/dashboard')
