@@ -20,6 +20,8 @@ import type {
 const INCEPTION_API_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
 const INCEPTION_MODEL = 'mercury-2'
 const FETCH_CHUNK_SIZE = 1000
+const RUT_LOOKUP_CHUNK_SIZE = 250
+const MAX_GENERATION_VOLUME = 50000
 const MAX_CANDIDATES = 60000
 const MIN_SCORED_UNIVERSE_SAMPLE = 8000
 const INSERT_CHUNK_SIZE = 500
@@ -86,6 +88,21 @@ type PersonaScoreRow = {
   best_email: string | null
   known_phone_count: number | null
   known_email_count: number | null
+}
+
+type EquifaxFeatureSnapshot = {
+  company_name: string | null
+  region: string | null
+  comuna: string | null
+  is_existing_customer: boolean
+  known_phone_count: number
+  known_email_count: number
+  best_phone: string | null
+  best_email: string | null
+  score_patrimonial: number
+  cobertura_pct: number
+  n_autos: number
+  n_bienes_raices: number
 }
 
 type CustomerSummaryRow = {
@@ -733,6 +750,33 @@ function normalizeAllowedTemperatures(
   return allowed.length > 0 ? uniqueStrings(allowed) as Array<'green' | 'yellow' | 'red'> : ['green', 'yellow', 'red']
 }
 
+function extractEquifaxFeatureSnapshot(
+  equifaxLeadScore?: EquifaxLeadScoreSnapshot
+): EquifaxFeatureSnapshot | null {
+  const raw = equifaxLeadScore?.score_breakdown?.feature_snapshot
+  if (!raw || typeof raw !== 'object') return null
+
+  const snapshot = raw as Record<string, unknown>
+  const featurePayload = typeof snapshot.feature_payload === 'object' && snapshot.feature_payload
+    ? snapshot.feature_payload as Record<string, unknown>
+    : {}
+
+  return {
+    company_name: toNullableString(snapshot.company_name),
+    region: toNullableString(snapshot.region),
+    comuna: toNullableString(snapshot.comuna),
+    is_existing_customer: snapshot.is_existing_customer === true,
+    known_phone_count: Math.max(0, Number(snapshot.known_phone_count ?? 0)),
+    known_email_count: Math.max(0, Number(snapshot.known_email_count ?? 0)),
+    best_phone: toNullableString(featurePayload.best_phone),
+    best_email: toNullableString(featurePayload.best_email),
+    score_patrimonial: Math.max(0, Number(featurePayload.score_patrimonial ?? 0)),
+    cobertura_pct: Math.max(0, Number(featurePayload.cobertura_pct ?? 0)),
+    n_autos: Math.max(0, Number(featurePayload.n_autos ?? 0)),
+    n_bienes_raices: Math.max(0, Number(featurePayload.n_bienes_raices ?? 0)),
+  }
+}
+
 async function buildCampaignProfileWithAI(
   products: ReturnType<typeof normalizeProductRecord>[],
   topServices: EquifaxCatalogSummary['top_services'],
@@ -868,7 +912,7 @@ async function fetchCandidateCompaniesByRutids(rutids: string[], regions: string
   const map = new Map<string, CandidateCompany>()
   if (rutids.length === 0) return map
 
-  for (let start = 0; start < rutids.length; start += FETCH_CHUNK_SIZE) {
+  for (let start = 0; start < rutids.length; start += RUT_LOOKUP_CHUNK_SIZE) {
     let query = db
       .from('master_personas_view')
       .select(`
@@ -886,7 +930,7 @@ async function fetchCandidateCompaniesByRutids(rutids: string[], regions: string
         n_autos,
         n_bienes_raices
       `)
-      .in('rutid', rutids.slice(start, start + FETCH_CHUNK_SIZE))
+      .in('rutid', rutids.slice(start, start + RUT_LOOKUP_CHUNK_SIZE))
 
     if (regions.length > 0) {
       query = query.in('region_canonica', regions)
@@ -1085,8 +1129,8 @@ async function fetchPersonaScoresMap(rutids: string[]) {
   const map = new Map<string, PersonaScoreRow>()
   if (rutids.length === 0) return map
 
-  for (let start = 0; start < rutids.length; start += FETCH_CHUNK_SIZE) {
-    const chunk = rutids.slice(start, start + FETCH_CHUNK_SIZE)
+  for (let start = 0; start < rutids.length; start += RUT_LOOKUP_CHUNK_SIZE) {
+    const chunk = rutids.slice(start, start + RUT_LOOKUP_CHUNK_SIZE)
     const { data, error } = await db
       .from('persona_scores')
       .select(`
@@ -1118,8 +1162,8 @@ async function fetchCustomerSummaryMap(rutids: string[]) {
   const map = new Map<string, CustomerSummaryRow>()
   if (rutids.length === 0) return map
 
-  for (let start = 0; start < rutids.length; start += FETCH_CHUNK_SIZE) {
-    const chunk = rutids.slice(start, start + FETCH_CHUNK_SIZE)
+  for (let start = 0; start < rutids.length; start += RUT_LOOKUP_CHUNK_SIZE) {
+    const chunk = rutids.slice(start, start + RUT_LOOKUP_CHUNK_SIZE)
     const { data, error } = await db
       .from('equifax_sales_company_summary')
       .select('*')
@@ -1172,19 +1216,25 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
     minEmailCount,
   } = params
 
-  const companyName = candidate.razon_social_empresa?.trim()
+  const featureSnapshot = extractEquifaxFeatureSnapshot(equifaxLeadScore)
+  const companyName = candidate.razon_social_empresa?.trim() || featureSnapshot?.company_name?.trim()
   if (!companyName) return null
-  if (detectEquifaxNonTargetCompany(companyName)) return null
+  if (
+    detectEquifaxNonTargetCompany(companyName, {
+      rutid: candidate.rutid,
+      region: candidate.region_canonica ?? featureSnapshot?.region ?? null,
+    })
+  ) return null
 
-  const isExistingCustomer = Boolean(customerSummary)
+  const isExistingCustomer = featureSnapshot?.is_existing_customer ?? Boolean(customerSummary)
   if (!includeExistingCustomers && isExistingCustomer) return null
 
   const phoneCount = Math.max(
-    Number(scoreRow?.known_phone_count ?? 0),
+    Number(scoreRow?.known_phone_count ?? featureSnapshot?.known_phone_count ?? 0),
     candidate.fono_cel ? 1 : 0
   )
   const emailCount = Math.max(
-    Number(scoreRow?.known_email_count ?? 0),
+    Number(scoreRow?.known_email_count ?? featureSnapshot?.known_email_count ?? 0),
     candidate.email ? 1 : 0
   )
 
@@ -1270,8 +1320,8 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
   return {
     rutid: candidate.rutid,
     company_name: companyName,
-    region: candidate.region_canonica,
-    comuna: candidate.comuna_canonica,
+    region: candidate.region_canonica ?? featureSnapshot?.region ?? null,
+    comuna: candidate.comuna_canonica ?? featureSnapshot?.comuna ?? null,
     best_phone: scoreRow?.best_phone ?? candidate.fono_cel ?? null,
     best_email: scoreRow?.best_email ?? candidate.email ?? null,
     phone_count: phoneCount,
@@ -1626,7 +1676,7 @@ export async function saveEquifaxProducts(
 async function prepareEquifaxCandidates(
   params: EquifaxLeadGenerationParams
 ): Promise<PreparedEquifaxCandidates> {
-  const volume = clamp(Math.round(params.volume || 1000), 1, 10000)
+  const volume = clamp(Math.round(params.volume || 1000), 1, MAX_GENERATION_VOLUME)
   const isGreenOnlyScenario = params.scenario_key === 'solo_verdes'
   const universeSource =
     params.universe_source === 'scored_universe' || isGreenOnlyScenario
@@ -1643,7 +1693,7 @@ async function prepareEquifaxCandidates(
     MAX_CANDIDATES,
     Math.max(
       volume,
-      Math.round(params.scored_universe_limit ?? Math.max(volume * 12, MIN_SCORED_UNIVERSE_SAMPLE))
+      Math.round(params.scored_universe_limit ?? Math.max(Math.ceil(volume * 1.6), MIN_SCORED_UNIVERSE_SAMPLE))
     )
   )
 
@@ -1693,24 +1743,29 @@ async function prepareEquifaxCandidates(
 
   if (universeSource === 'scored_universe') {
     const scoredUniverseRows = await fetchScoredUniverseRows(scoredUniverseLimit, allowedTemperatures)
-    const candidateRutids = scoredUniverseRows.map(row => row.rutid)
-    const [candidateMap, scoresMap, customerMap] = await Promise.all([
-      fetchCandidateCompaniesByRutids(candidateRutids, regions),
-      fetchPersonaScoresMap(candidateRutids),
-      fetchCustomerSummaryMap(candidateRutids),
-    ])
-
     universeAnalyzed = scoredUniverseRows.length
 
     for (const equifaxLeadScore of scoredUniverseRows) {
-      const candidate = candidateMap.get(equifaxLeadScore.rutid)
-      if (!candidate) continue
+      const featureSnapshot = extractEquifaxFeatureSnapshot(equifaxLeadScore)
+      const candidate = {
+        rutid: equifaxLeadScore.rutid,
+        razon_social_empresa: featureSnapshot?.company_name ?? null,
+        region_canonica: featureSnapshot?.region ?? null,
+        comuna_canonica: featureSnapshot?.comuna ?? null,
+        email: featureSnapshot?.best_email ?? null,
+        fono_cel: featureSnapshot?.best_phone ?? null,
+        score_patrimonial: featureSnapshot?.score_patrimonial ?? null,
+        cobertura_pct: featureSnapshot?.cobertura_pct ?? null,
+        tiene_empresa: true,
+        tiene_autos: (featureSnapshot?.n_autos ?? 0) > 0,
+        tiene_bienes_raices: (featureSnapshot?.n_bienes_raices ?? 0) > 0,
+        n_autos: featureSnapshot?.n_autos ?? null,
+        n_bienes_raices: featureSnapshot?.n_bienes_raices ?? null,
+      }
 
       const rankedCandidate = buildScoredLeadCandidate({
         candidate,
         aiProfile,
-        scoreRow: scoresMap.get(candidate.rutid),
-        customerSummary: customerMap.get(candidate.rutid),
         equifaxLeadScore,
         includeExistingCustomers,
         minPhoneCount,

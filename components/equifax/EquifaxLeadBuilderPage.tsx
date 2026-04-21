@@ -274,6 +274,8 @@ export function EquifaxLeadBuilderPage() {
     include_existing_customers: includeExistingCustomers,
     min_phone_count: minPhoneCount,
     min_email_count: minEmailCount,
+    universe_source: 'scored_universe' as const,
+    scored_universe_limit: Math.min(60000, Math.max(Math.ceil(volume * 1.6), 12000)),
   }), [
     includeExistingCustomers,
     minEmailCount,
@@ -1019,7 +1021,7 @@ export function EquifaxLeadBuilderPage() {
               <input
                 type="number"
                 min={1}
-                max={10000}
+                max={50000}
                 value={volume}
                 onChange={event => setVolume(Number(event.target.value))}
                 className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"

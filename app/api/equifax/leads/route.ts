@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       min_phone_count: Number(body?.min_phone_count ?? 1),
       min_email_count: Number(body?.min_email_count ?? 0),
       scenario_key: typeof body?.scenario_key === 'string' ? body.scenario_key : null,
-      universe_source: body?.universe_source === 'scored_universe' ? 'scored_universe' : 'sampled_master',
+      universe_source: body?.universe_source === 'sampled_master' ? 'sampled_master' : 'scored_universe',
       allowed_temperatures: Array.isArray(body?.allowed_temperatures) ? body.allowed_temperatures : undefined,
       scored_universe_limit: body?.scored_universe_limit == null ? null : Number(body.scored_universe_limit),
     }
