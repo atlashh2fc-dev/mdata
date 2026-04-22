@@ -10,6 +10,10 @@ const FEATURE_VERSION = 'v1'
 const HEURISTIC_MODEL_VERSION = 'heuristic-v1'
 const MODEL_KEY = 'equifax-lead'
 const SCORE_STALE_HOURS = 24
+const PYME_LEGAL_SIGNAL_PATTERN = /\b(SPA|S P A|LTDA|LIMITADA|EIRL|E I R L)\b/
+const LARGE_COMPANY_LEGAL_PATTERN = /\b(SA|S A|SOCIEDAD ANONIMA|CONCESIONARIA)\b/
+const NON_TARGET_COMPANY_PATTERN = /\b(MUNICIPALIDAD|GOBIERNO|MINISTERIO|SERVICIO DE SALUD|HOSPITAL|UNIVERSIDAD|COLEGIO|ESCUELA|LICEO|BANCO|BANCARIA|FINANCIERA|SEGUROS|HOLDING|CORPORACION|FUNDACION|IGLESIA|PARROQUIA|DIOCESIS|RELIGIOSA|SINDICATO|ASOCIACION GREMIAL|COOPERATIVA|CAJA DE COMPENSACION)\b/
+const PERSON_NAME_START_PATTERN = /^(JUAN|JOSE|MARIA|LUIS|CARLOS|PEDRO|SERGIO|MIGUEL|JORGE|CLAUDIO|RODRIGO|PATRICIO|FRANCISCO|FERNANDO|ANDRES|DANIEL|RAUL|RICARDO|VICTOR|GLADYS|MARCELA|PAOLA|ANA|ROSA|ELENA|HUGO|OSCAR|ALEJANDRO|MAURICIO|CRISTIAN|SEBASTIAN)\b/
 
 type MasterRow = {
   rutid: string
@@ -48,6 +52,8 @@ type FeedbackRecord = {
   id: string
   rutid: string | null
   matched_rutid: string | null
+  contact_phone: string | null
+  contact_email: string | null
   campaign_name: string | null
   channel: string | null
   outcome: string | null
@@ -73,6 +79,8 @@ type AggregatedFeedback = {
   openedEvents: number
   clickedEvents: number
   bestManagementEvents: number
+  bestEmail: string | null
+  bestPhone: string | null
   lastFeedbackAt: string | null
   lastContactAt: string | null
   lastInterestAt: string | null
@@ -318,6 +326,76 @@ function looksLikeEquifaxCampaign(value?: string | null) {
   )
 }
 
+function buildPymeFitScore(companyName?: string | null) {
+  const normalized = normalizeKeyword(companyName ?? '').toUpperCase()
+  if (!normalized) return 0
+  if (NON_TARGET_COMPANY_PATTERN.test(normalized) || PERSON_NAME_START_PATTERN.test(normalized)) return 0
+
+  let score = 18
+  const hasStrictPymeLegalSignal = PYME_LEGAL_SIGNAL_PATTERN.test(normalized)
+  if (!hasStrictPymeLegalSignal && LARGE_COMPANY_LEGAL_PATTERN.test(normalized)) return 0
+
+  if (hasStrictPymeLegalSignal) score += 42
+  if (/\b(COMERCIAL|SERVICIOS|TRANSPORTES|CONSTRUCTORA|INGENIERIA|AGRICOLA|INDUSTRIAL|DISTRIBUIDORA|IMPORTADORA|EXPORTADORA|ASESORIAS|CONSULTORA|RENT A CAR|LOGISTICA|TECNOLOGIA)\b/.test(normalized)) {
+    score += 18
+  }
+  if (/\b(CHILE|SPA|LTDA|LIMITADA|EIRL|SOCIEDAD)\b/.test(normalized)) score += 8
+  if (normalized.split(/\s+/).length >= 3) score += 8
+
+  return round(clamp(score, 0, 100), 2)
+}
+
+function buildEmailEngagementScore(params: {
+  openedEvents: number
+  clickedEvents: number
+  totalInteractions: number
+  daysSinceLastFeedback?: number | null
+}) {
+  const hasEmailEngagement = params.openedEvents > 0 || params.clickedEvents > 0
+  if (!hasEmailEngagement) return 0
+
+  const openRate = safeRate(params.openedEvents, params.totalInteractions)
+  const clickRate = safeRate(params.clickedEvents, params.totalInteractions)
+  const recencyBoost = params.daysSinceLastFeedback && params.daysSinceLastFeedback > 0
+    ? clamp(14 - params.daysSinceLastFeedback * 0.35, 0, 14)
+    : 10
+
+  return round(clamp(
+    openRate * 100 * 0.24 +
+    clickRate * 100 * 0.45 +
+    Math.min(params.openedEvents, 5) * 3.5 +
+    Math.min(params.clickedEvents, 3) * 12 +
+    (params.clickedEvents > 0 ? 10 : 0) +
+    recencyBoost,
+    0,
+    100
+  ), 2)
+}
+
+function buildPymeIntentScore(params: {
+  pymeFitScore: number
+  emailEngagementScore: number
+  knownPhoneCount: number
+  knownEmailCount: number
+  coverage: number
+}) {
+  const contactDataScore = clamp(
+    params.knownPhoneCount * 14 +
+    params.knownEmailCount * 14 +
+    params.coverage * 0.16,
+    0,
+    100
+  )
+
+  return round(clamp(
+    params.emailEngagementScore * 0.58 +
+    params.pymeFitScore * 0.24 +
+    contactDataScore * 0.18,
+    0,
+    100
+  ), 2)
+}
+
 function isScoreFresh(scoredAt?: string | null) {
   const parsed = parseDate(scoredAt)
   if (!parsed) return false
@@ -399,6 +477,10 @@ function buildReasonTags(feature: EquifaxLeadFeatureSnapshot, score: HeuristicSc
   if (feature.contact_rate >= 0.35) tags.push('contacta-bien')
   if (feature.interest_rate >= 0.12) tags.push('muestra-interes')
   if (feature.sale_rate >= 0.05) tags.push('historial-conversion')
+  if (toNumber(feature.feature_payload.email_engagement_score) >= 32) tags.push('intencion-email')
+  if (feature.clicked_events > 0) tags.push('click-email')
+  else if (feature.opened_events >= 2) tags.push('aperturas-email')
+  if (toNumber(feature.feature_payload.pyme_fit_score) >= 55) tags.push('fit-pyme')
   if (feature.no_contact_rate >= 0.55) tags.push('dificil-contacto')
   if (score.lead_temperature === 'green') tags.push('semaforo-verde')
   if (score.lead_temperature === 'yellow') tags.push('semaforo-amarillo')
@@ -574,11 +656,11 @@ async function fetchFeedbackRecords(rutids: string[]) {
     const [directRows, matchedRows] = await Promise.all([
       db
         .from('contact_center_feedback')
-        .select('id,rutid,matched_rutid,campaign_name,channel,outcome,managed_at,sold_at,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
+        .select('id,rutid,matched_rutid,contact_phone,contact_email,campaign_name,channel,outcome,managed_at,sold_at,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
         .in('rutid', subset),
       db
         .from('contact_center_feedback')
-        .select('id,rutid,matched_rutid,campaign_name,channel,outcome,managed_at,sold_at,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
+        .select('id,rutid,matched_rutid,contact_phone,contact_email,campaign_name,channel,outcome,managed_at,sold_at,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
         .in('matched_rutid', subset),
     ])
 
@@ -618,6 +700,8 @@ function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
       openedEvents: 0,
       clickedEvents: 0,
       bestManagementEvents: 0,
+      bestEmail: null,
+      bestPhone: null,
       lastFeedbackAt: null,
       lastContactAt: null,
       lastInterestAt: null,
@@ -664,6 +748,12 @@ function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
     if (record.mail_opened || record.outcome === 'opened') current.openedEvents += 1
     if (record.clicked || record.outcome === 'clicked') current.clickedEvents += 1
     if (record.is_best_management) current.bestManagementEvents += 1
+    if (record.contact_email && (record.mail_opened || record.clicked || record.channel === 'email')) {
+      current.bestEmail = record.contact_email
+    }
+    if (record.contact_phone && (record.effective_contact || record.sale || record.callback_requested)) {
+      current.bestPhone = record.contact_phone
+    }
 
     current.lastFeedbackAt = !current.lastFeedbackAt || (record.managed_at ?? '') > current.lastFeedbackAt
       ? record.managed_at
@@ -683,10 +773,11 @@ function buildFeatureRow(params: {
   feedback?: AggregatedFeedback
 }) {
   const { rutid, master, persona, customer, feedback } = params
-  const knownPhoneCount = Math.max(toNumber(persona?.known_phone_count), master?.fono_cel ? 1 : 0)
-  const knownEmailCount = Math.max(toNumber(persona?.known_email_count), master?.email ? 1 : 0)
-  const bestPhone = persona?.best_phone ?? master?.fono_cel ?? null
-  const bestEmail = persona?.best_email ?? master?.email ?? null
+  const feedbackHasEmail = Boolean(feedback?.bestEmail || (feedback?.openedEvents ?? 0) > 0 || (feedback?.clickedEvents ?? 0) > 0)
+  const knownPhoneCount = Math.max(toNumber(persona?.known_phone_count), master?.fono_cel ? 1 : 0, feedback?.bestPhone ? 1 : 0)
+  const knownEmailCount = Math.max(toNumber(persona?.known_email_count), master?.email ? 1 : 0, feedbackHasEmail ? 1 : 0)
+  const bestPhone = persona?.best_phone ?? feedback?.bestPhone ?? master?.fono_cel ?? null
+  const bestEmail = persona?.best_email ?? feedback?.bestEmail ?? master?.email ?? null
   const totalInteractions = feedback?.totalInteractions ?? 0
   const equifaxInteractions = feedback?.equifaxInteractions ?? 0
   const contactBase = equifaxInteractions > 0 ? equifaxInteractions : totalInteractions
@@ -708,6 +799,21 @@ function buildFeatureRow(params: {
   const emailOpenRate = safeRate(feedback?.openedEvents ?? 0, totalInteractions)
   const emailClickRate = safeRate(feedback?.clickedEvents ?? 0, totalInteractions)
   const equifaxContactShare = safeRate(equifaxInteractions, totalInteractions)
+  const pymeFitScore = buildPymeFitScore(master?.razon_social_empresa)
+  const daysSinceLastFeedback = diffDays(feedback?.lastFeedbackAt)
+  const emailEngagementScore = buildEmailEngagementScore({
+    openedEvents: feedback?.openedEvents ?? 0,
+    clickedEvents: feedback?.clickedEvents ?? 0,
+    totalInteractions,
+    daysSinceLastFeedback,
+  })
+  const pymeIntentScore = buildPymeIntentScore({
+    pymeFitScore,
+    emailEngagementScore,
+    knownPhoneCount,
+    knownEmailCount,
+    coverage: toNumber(master?.cobertura_pct),
+  })
 
   const featurePayload: Record<string, unknown> = {
     score_patrimonial: toNumber(master?.score_patrimonial),
@@ -717,8 +823,11 @@ function buildFeatureRow(params: {
     n_bienes_raices: toNumber(master?.n_bienes_raices),
     email_open_rate: round4(emailOpenRate),
     email_click_rate: round4(emailClickRate),
+    email_engagement_score: emailEngagementScore,
+    pyme_fit_score: pymeFitScore,
+    pyme_intent_score: pymeIntentScore,
     equifax_contact_share: round4(equifaxContactShare),
-    days_since_last_feedback: diffDays(feedback?.lastFeedbackAt),
+    days_since_last_feedback: daysSinceLastFeedback,
     days_since_last_contact: diffDays(feedback?.lastContactAt),
     days_since_last_interest: diffDays(feedback?.lastInterestAt),
     days_since_last_sale_feedback: diffDays(feedback?.lastSaleFeedbackAt),
@@ -873,6 +982,9 @@ async function upsertFeatureRows(rows: EquifaxLeadFeatureSnapshot[]) {
 function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScore {
   const patrimonial = toNumber(feature.feature_payload.score_patrimonial)
   const coverage = toNumber(feature.feature_payload.cobertura_pct)
+  const emailEngagementScore = toNumber(feature.feature_payload.email_engagement_score)
+  const pymeFitScore = toNumber(feature.feature_payload.pyme_fit_score)
+  const pymeIntentScore = toNumber(feature.feature_payload.pyme_intent_score)
   const daysSinceLastFeedback = toNumber(feature.feature_payload.days_since_last_feedback)
   const recencyBoost = daysSinceLastFeedback > 0 ? clamp(20 - daysSinceLastFeedback * 0.25, 0, 20) : 0
   const dataQualityScore = clamp(
@@ -883,10 +995,11 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
     100
   )
 
-  const contactProbability = clamp(
+  const baseContactProbability = clamp(
     dataQualityScore * 0.35 +
     feature.contact_rate * 100 * 0.38 +
     toNumber(feature.feature_payload.email_open_rate) * 100 * 0.08 +
+    emailEngagementScore * 0.1 +
     feature.callback_rate * 100 * 0.1 +
     recencyBoost -
     feature.no_contact_rate * 100 * 0.2,
@@ -894,10 +1007,11 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
     100
   )
 
-  const interestProbability = clamp(
+  const baseInterestProbability = clamp(
     feature.interest_rate * 100 * 0.42 +
     feature.callback_rate * 100 * 0.22 +
     toNumber(feature.feature_payload.email_click_rate) * 100 * 0.12 +
+    emailEngagementScore * 0.18 +
     feature.contact_rate * 100 * 0.12 +
     feature.best_management_events * 2.5 +
     (feature.is_existing_customer ? 8 : 0),
@@ -905,17 +1019,62 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
     100
   )
 
-  const purchaseProbability = clamp(
+  const basePurchaseProbability = clamp(
     feature.sale_rate * 100 * 0.46 +
     feature.interest_rate * 100 * 0.18 +
     feature.callback_rate * 100 * 0.1 +
     patrimonial * 0.22 +
     coverage * 0.08 +
+    emailEngagementScore * 0.12 +
+    pymeFitScore * 0.04 +
     Math.min(feature.equifax_sales_count, 6) * 2.5 +
     (feature.is_existing_customer ? 10 : 0),
     0,
     100
   )
+
+  const canUsePymeIntentFloor =
+    pymeFitScore >= 55 &&
+    emailEngagementScore >= 32 &&
+    feature.known_email_count > 0 &&
+    (feature.clicked_events > 0 || feature.opened_events >= 2)
+
+  const contactIntentFloor = canUsePymeIntentFloor
+    ? clamp(
+        (feature.clicked_events > 0 ? 68 : 60) +
+        emailEngagementScore * 0.12 +
+        Math.min(feature.known_phone_count, 2) * 3 +
+        Math.min(feature.opened_events, 4) * 1.5,
+        0,
+        feature.clicked_events > 0 ? 90 : 78
+      )
+    : 0
+  const interestIntentFloor = canUsePymeIntentFloor
+    ? clamp(
+        (feature.clicked_events > 0 ? 44 : 24) +
+        emailEngagementScore * (feature.clicked_events > 0 ? 0.28 : 0.18) +
+        pymeFitScore * 0.08 +
+        Math.min(feature.clicked_events, 3) * 4,
+        0,
+        feature.clicked_events > 0 ? 86 : 58
+      )
+    : 0
+  const purchaseIntentFloor = canUsePymeIntentFloor
+    ? clamp(
+        (feature.clicked_events > 0 ? 36 : 24) +
+        emailEngagementScore * (feature.clicked_events > 0 ? 0.22 : 0.14) +
+        pymeFitScore * 0.08 +
+        pymeIntentScore * 0.08 +
+        coverage * 0.03 +
+        Math.min(feature.clicked_events, 3) * 3,
+        0,
+        feature.clicked_events > 0 ? 78 : 52
+      )
+    : 0
+
+  const contactProbability = clamp(Math.max(baseContactProbability, contactIntentFloor), 0, 100)
+  const interestProbability = clamp(Math.max(baseInterestProbability, interestIntentFloor), 0, 100)
+  const purchaseProbability = clamp(Math.max(basePurchaseProbability, purchaseIntentFloor), 0, 100)
 
   const leadScore = clamp(
     contactProbability * 0.45 +
@@ -937,6 +1096,13 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
       heuristic: {
         data_quality_score: round(dataQualityScore, 2),
         recency_boost: round(recencyBoost, 2),
+        email_engagement_score: round(emailEngagementScore, 2),
+        pyme_fit_score: round(pymeFitScore, 2),
+        pyme_intent_score: round(pymeIntentScore, 2),
+        intent_floors_applied: canUsePymeIntentFloor,
+        contact_intent_floor: round(contactIntentFloor, 2),
+        interest_intent_floor: round(interestIntentFloor, 2),
+        purchase_intent_floor: round(purchaseIntentFloor, 2),
         contact_rate: feature.contact_rate,
         interest_rate: feature.interest_rate,
         sale_rate: feature.sale_rate,
@@ -1193,16 +1359,30 @@ function combineScores(
   const logisticContact = contactModel ? predictWithLogisticModel(contactModel, trainingRow) : null
   const logisticInterest = interestModel ? predictWithLogisticModel(interestModel, trainingRow) : null
   const logisticPurchase = purchaseModel ? predictWithLogisticModel(purchaseModel, trainingRow) : null
+  const heuristicBreakdown = (heuristic.score_breakdown.heuristic ?? {}) as Record<string, unknown>
+  const appliesPymeIntentFloor = heuristicBreakdown.intent_floors_applied === true
+  const contactIntentFloor = toNumber(heuristicBreakdown.contact_intent_floor)
+  const interestIntentFloor = toNumber(heuristicBreakdown.interest_intent_floor)
+  const purchaseIntentFloor = toNumber(heuristicBreakdown.purchase_intent_floor)
 
-  const contactProbability = logisticContact === null
+  const blendedContactProbability = logisticContact === null
     ? heuristic.contact_probability
     : round(logisticContact * 0.65 + heuristic.contact_probability * 0.35, 2)
-  const interestProbability = logisticInterest === null
+  const blendedInterestProbability = logisticInterest === null
     ? heuristic.interest_probability
     : round(logisticInterest * 0.65 + heuristic.interest_probability * 0.35, 2)
-  const purchaseProbability = logisticPurchase === null
+  const blendedPurchaseProbability = logisticPurchase === null
     ? heuristic.purchase_probability
     : round(logisticPurchase * 0.65 + heuristic.purchase_probability * 0.35, 2)
+  const contactProbability = appliesPymeIntentFloor
+    ? round(Math.max(blendedContactProbability, contactIntentFloor), 2)
+    : blendedContactProbability
+  const interestProbability = appliesPymeIntentFloor
+    ? round(Math.max(blendedInterestProbability, interestIntentFloor), 2)
+    : blendedInterestProbability
+  const purchaseProbability = appliesPymeIntentFloor
+    ? round(Math.max(blendedPurchaseProbability, purchaseIntentFloor), 2)
+    : blendedPurchaseProbability
 
   const leadScore = round(
     clamp(contactProbability * 0.45 + interestProbability * 0.25 + purchaseProbability * 0.3, 0, 100),
@@ -1215,6 +1395,7 @@ function combineScores(
     logisticContact !== null ? 'modelo-logit-contacto' : null,
     logisticInterest !== null ? 'modelo-logit-interes' : null,
     logisticPurchase !== null ? 'modelo-logit-compra' : null,
+    appliesPymeIntentFloor ? 'piso-intencion-pyme' : null,
   ]).slice(0, 10)
 
   return {
@@ -1237,6 +1418,12 @@ function combineScores(
         contact_probability: logisticContact === null ? null : round(logisticContact, 2),
         interest_probability: logisticInterest === null ? null : round(logisticInterest, 2),
         purchase_probability: logisticPurchase === null ? null : round(logisticPurchase, 2),
+      },
+      hybrid_adjustment: {
+        pyme_intent_floor_applied: appliesPymeIntentFloor,
+        blended_contact_probability: blendedContactProbability,
+        blended_interest_probability: blendedInterestProbability,
+        blended_purchase_probability: blendedPurchaseProbability,
       },
     },
   }
@@ -1412,6 +1599,9 @@ const TRAINING_FEATURES = [
   'no_contact_rate',
   'email_open_rate',
   'email_click_rate',
+  'email_engagement_score',
+  'pyme_fit_score',
+  'pyme_intent_score',
   'equifax_contact_share',
   'feedback_total_interactions',
   'feedback_equifax_interactions',

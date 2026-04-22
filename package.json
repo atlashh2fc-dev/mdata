@@ -43,6 +43,7 @@
     "ops:backfill:company-contacts": "node --env-file=.env.local scripts/master-sync/backfill-company-contacts.mjs",
     "ops:sync:crm-feedback": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-feedback-sync/sync-registro-intel.mjs",
     "ops:apply:crm-contract": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-contract/apply-registro-intel-contract.mjs",
+    "ops:atlas:backfill-company-matches": "node --env-file=${ENV_FILE:-.env.production} scripts/commercial-intelligence/backfill-atlas-company-matches.mjs",
     "ops:push:crm-actions": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/push-registro-intel.mjs",
     "ops:sync:crm-loop": "npm run ops:sync:crm-feedback && npm run ops:push:crm-actions"
   },

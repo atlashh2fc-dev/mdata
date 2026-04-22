@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { db } from '@/lib/db/supabase'
+import { normalizeCompanyName } from '@/lib/utils/company-match'
 import { cleanRut } from '@/lib/utils/rut'
 import type { ContactCenterFeedbackInput } from '@/types'
 
@@ -63,6 +65,12 @@ type AtlasBridgePayloadParseResult =
       error: string
     }
 
+type CompanyNameMatchRow = {
+  match_key: string | null
+  rutid: string | null
+  razon_social_empresa: string | null
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -112,6 +120,67 @@ function extractLeadRutid(payload: AtlasLeadBridgePayload): string | null {
   }
 
   return null
+}
+
+function readMetadataString(metadata: Record<string, unknown> | null | undefined, key: string): string | null {
+  if (!metadata) return null
+  return readString(metadata[key])
+}
+
+export async function resolveAtlasBridgeCompanyMatch(
+  record: ContactCenterFeedbackInput
+): Promise<ContactCenterFeedbackInput> {
+  const metadata = isRecord(record.metadata) ? record.metadata : {}
+  const companyName =
+    readMetadataString(metadata, 'company_name') ??
+    readString((record.raw_payload?.lead as Record<string, unknown> | undefined)?.companyName)
+
+  if (!companyName) return record
+
+  const matchKey = normalizeCompanyName(companyName)
+  if (!matchKey) return record
+
+  const { data, error } = await db.rpc('match_company_names', {
+    input_names: [companyName],
+  })
+
+  if (error) {
+    console.warn('[resolveAtlasBridgeCompanyMatch]', error.message)
+    return record
+  }
+
+  const matches = ((data ?? []) as CompanyNameMatchRow[])
+    .filter(row => row.rutid && row.match_key === matchKey)
+  const uniqueMatches = new Map(matches.map(row => [row.rutid as string, row]))
+
+  if (uniqueMatches.size !== 1) {
+    return {
+      ...record,
+      metadata: {
+        ...metadata,
+        company_name: companyName,
+        atlas_company_match_key: matchKey,
+        atlas_company_match_status: uniqueMatches.size === 0 ? 'not_found' : 'ambiguous',
+      },
+    }
+  }
+
+  const [matchedRutid, match] = [...uniqueMatches.entries()][0]
+
+  return {
+    ...record,
+    matched_rutid: matchedRutid,
+    match_method: 'atlas_company_name_exact',
+    metadata: {
+      ...metadata,
+      company_name: companyName,
+      atlas_original_rutid: record.rutid ?? null,
+      atlas_original_matched_rutid: record.matched_rutid ?? null,
+      atlas_company_match_key: matchKey,
+      atlas_company_match_status: 'matched',
+      atlas_company_match_name: match.razon_social_empresa ?? null,
+    },
+  }
 }
 
 function compareSignatures(expected: string, candidate: string): boolean {

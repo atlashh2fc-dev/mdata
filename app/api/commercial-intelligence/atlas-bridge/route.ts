@@ -3,6 +3,7 @@ import { ingestContactCenterFeedback } from '@/lib/services/commercial-intellige
 import {
   authorizeAtlasLeadBridgeRequest,
   parseAtlasLeadBridgePayload,
+  resolveAtlasBridgeCompanyMatch,
 } from '@/lib/services/atlas-lead-bridge'
 
 export const runtime = 'nodejs'
@@ -41,7 +42,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await ingestContactCenterFeedback([parsed.record], {
+    const record = await resolveAtlasBridgeCompanyMatch(parsed.record)
+    const result = await ingestContactCenterFeedback([record], {
       sourceName: 'atlas_lead_engine_bridge',
       refreshScores: false,
       requestedFrom: parsed.eventAt,
@@ -52,6 +54,7 @@ export async function POST(req: NextRequest) {
         authorization_mode: authorization.mode,
         event_type: parsed.eventType,
         campaign_type: parsed.campaignType,
+        company_match_method: record.match_method,
       },
     })
 
