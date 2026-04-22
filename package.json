@@ -32,6 +32,8 @@
     "ops:equifax:import:sales": "node --env-file=.env.local scripts/equifax/import-sales-xlsx.mjs",
     "ops:equifax:refresh:scores": "npx --yes tsx scripts/equifax/refresh-lead-scores.ts",
     "ops:equifax:refresh:universe": "npx --yes tsx scripts/equifax/refresh-score-universe.ts",
+    "ops:equifax:refresh:master-pyme": "npx --yes tsx scripts/equifax/refresh-master-pyme-universe.ts",
+    "ops:equifax:refresh:rutids-file": "npx --yes tsx scripts/equifax/refresh-rutids-from-file.ts",
     "ops:equifax:train:logit": "npx --yes tsx scripts/equifax/train-logistic-model.ts",
     "ops:equifax:bootstrap:model": "npx --yes tsx scripts/equifax/bootstrap-logistic-model.ts",
     "ops:equifax:pipeline": "npx --yes tsx scripts/equifax/run-scoring-pipeline.ts",
