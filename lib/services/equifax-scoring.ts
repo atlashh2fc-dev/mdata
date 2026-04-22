@@ -6,8 +6,8 @@ import type {
 
 const FETCH_CHUNK_SIZE = 1000
 const UPSERT_CHUNK_SIZE = 500
-const FEATURE_VERSION = 'v1'
-const HEURISTIC_MODEL_VERSION = 'heuristic-v1'
+const FEATURE_VERSION = 'v3'
+const HEURISTIC_MODEL_VERSION = 'heuristic-v3'
 const MODEL_KEY = 'equifax-lead'
 const SCORE_STALE_HOURS = 24
 const PYME_LEGAL_SIGNAL_PATTERN = /\b(SPA|S P A|LTDA|LIMITADA|EIRL|E I R L)\b/
@@ -57,8 +57,13 @@ type FeedbackRecord = {
   campaign_name: string | null
   channel: string | null
   outcome: string | null
+  outcome_subtype: string | null
+  outcome_reason: string | null
   managed_at: string | null
   sold_at: string | null
+  duration_seconds: number | null
+  talk_seconds: number | null
+  value_amount: number | null
   effective_contact: boolean | null
   interested: boolean | null
   callback_requested: boolean | null
@@ -79,11 +84,30 @@ type AggregatedFeedback = {
   openedEvents: number
   clickedEvents: number
   bestManagementEvents: number
+  rejectedEvents: number
+  negativeIntentEvents: number
+  mediumCallEvents: number
+  longCallEvents: number
+  totalDurationSeconds: number
+  durationSampleCount: number
+  totalTalkSeconds: number
+  talkSampleCount: number
+  totalValueAmount: number
+  maxValueAmount: number
+  effectiveContacts30d: number
+  interestEvents30d: number
+  callbackEvents30d: number
+  openedEvents30d: number
+  clickedEvents30d: number
+  bestManagement30d: number
+  salesEvents90d: number
+  negativeEvents90d: number
   bestEmail: string | null
   bestPhone: string | null
   lastFeedbackAt: string | null
   lastContactAt: string | null
   lastInterestAt: string | null
+  lastCallbackAt: string | null
   lastSaleFeedbackAt: string | null
   equifaxEffectiveContacts: number
   equifaxInterestEvents: number
@@ -375,6 +399,7 @@ function buildEmailEngagementScore(params: {
 function buildPymeIntentScore(params: {
   pymeFitScore: number
   emailEngagementScore: number
+  crmSequenceScore: number
   knownPhoneCount: number
   knownEmailCount: number
   coverage: number
@@ -388,9 +413,98 @@ function buildPymeIntentScore(params: {
   )
 
   return round(clamp(
-    params.emailEngagementScore * 0.58 +
-    params.pymeFitScore * 0.24 +
-    contactDataScore * 0.18,
+    params.emailEngagementScore * 0.34 +
+    params.crmSequenceScore * 0.3 +
+    params.pymeFitScore * 0.22 +
+    contactDataScore * 0.14,
+    0,
+    100
+  ), 2)
+}
+
+function includesNegativePhrase(value?: string | null) {
+  const normalized = normalizeKeyword(value ?? '')
+  if (!normalized) return false
+
+  return (
+    normalized.includes('not interested') ||
+    normalized.includes('no interesado') ||
+    normalized.includes('no interes') ||
+    normalized.includes('sin interes') ||
+    normalized.includes('no le interesa') ||
+    normalized.includes('no requiere') ||
+    normalized.includes('no necesita') ||
+    normalized.includes('rechaza') ||
+    normalized.includes('rechazado') ||
+    normalized.includes('declina') ||
+    normalized.includes('no llamar') ||
+    normalized.includes('fuera de perfil') ||
+    normalized.includes('fuera de foco')
+  )
+}
+
+function isRejectedFeedback(record: FeedbackRecord) {
+  return (
+    normalizeKeyword(record.outcome ?? '') === 'rejected' ||
+    includesNegativePhrase(record.outcome) ||
+    includesNegativePhrase(record.outcome_subtype) ||
+    includesNegativePhrase(record.outcome_reason)
+  )
+}
+
+function isMediumCall(record: FeedbackRecord) {
+  return toNumber(record.duration_seconds) >= 45 || toNumber(record.talk_seconds) >= 20
+}
+
+function isLongCall(record: FeedbackRecord) {
+  return toNumber(record.duration_seconds) >= 120 || toNumber(record.talk_seconds) >= 60
+}
+
+function buildCrmSequenceScore(params: {
+  effectiveContacts30d: number
+  interestEvents30d: number
+  callbackEvents30d: number
+  openedEvents30d: number
+  clickedEvents30d: number
+  bestManagement30d: number
+  salesEvents90d: number
+  negativeEvents90d: number
+  rejectedEvents: number
+  avgDurationSeconds: number
+  avgTalkSeconds: number
+  longCallEvents: number
+  totalValueAmount: number
+  daysSinceLastInterest: number | null
+  daysSinceLastCallback: number | null
+}) {
+  const interestRecencyBoost = params.daysSinceLastInterest && params.daysSinceLastInterest > 0
+    ? clamp(16 - params.daysSinceLastInterest * 0.4, 0, 16)
+    : params.interestEvents30d > 0
+      ? 12
+      : 0
+  const callbackRecencyBoost = params.daysSinceLastCallback && params.daysSinceLastCallback > 0
+    ? clamp(18 - params.daysSinceLastCallback * 0.45, 0, 18)
+    : params.callbackEvents30d > 0
+      ? 14
+      : 0
+  const valueSignal = Math.min(params.totalValueAmount, 500000) / 500000 * 18
+
+  return round(clamp(
+    params.effectiveContacts30d * 8 +
+    params.interestEvents30d * 16 +
+    params.callbackEvents30d * 18 +
+    params.clickedEvents30d * 10 +
+    params.openedEvents30d * 2 +
+    params.bestManagement30d * 8 +
+    params.salesEvents90d * 14 +
+    params.longCallEvents * 6 +
+    params.avgDurationSeconds * 0.06 +
+    params.avgTalkSeconds * 0.12 +
+    valueSignal +
+    interestRecencyBoost +
+    callbackRecencyBoost -
+    params.negativeEvents90d * 10 -
+    params.rejectedEvents * 12,
     0,
     100
   ), 2)
@@ -478,6 +592,10 @@ function buildReasonTags(feature: EquifaxLeadFeatureSnapshot, score: HeuristicSc
   if (feature.interest_rate >= 0.12) tags.push('muestra-interes')
   if (feature.sale_rate >= 0.05) tags.push('historial-conversion')
   if (toNumber(feature.feature_payload.email_engagement_score) >= 32) tags.push('intencion-email')
+  if (toNumber(feature.feature_payload.crm_sequence_score) >= 35) tags.push('secuencia-crm')
+  if (toNumber(feature.feature_payload.callback_events_30d) > 0) tags.push('callback-reciente')
+  if (toNumber(feature.feature_payload.avg_talk_seconds) >= 45) tags.push('conversacion-larga')
+  if (toNumber(feature.feature_payload.negative_intent_events) > 0) tags.push('senal-negativa')
   if (feature.clicked_events > 0) tags.push('click-email')
   else if (feature.opened_events >= 2) tags.push('aperturas-email')
   if (toNumber(feature.feature_payload.pyme_fit_score) >= 55) tags.push('fit-pyme')
@@ -532,17 +650,57 @@ function derivePurchaseLabel(params: {
   interestEvents: number
   callbackEvents: number
   clickedEvents: number
+  openedEvents: number
   bestManagementEvents: number
   effectiveContacts: number
+  effectiveContacts30d: number
+  interestEvents30d: number
+  callbackEvents30d: number
+  openedEvents30d: number
+  clickedEvents30d: number
+  bestManagement30d: number
+  salesEvents90d: number
+  rejectedEvents: number
+  negativeIntentEvents: number
+  mediumCallEvents: number
+  longCallEvents: number
+  avgDurationSeconds: number
+  avgTalkSeconds: number
+  totalValueAmount: number
   equifaxSalesCount: number
   isExistingCustomer: boolean
 }) {
-  if (params.salesEvents > 0) return true
+  const strongConversation =
+    params.longCallEvents > 0 ||
+    params.avgDurationSeconds >= 120 ||
+    params.avgTalkSeconds >= 60
+  const recentMomentum =
+    params.interestEvents30d > 0 ||
+    params.callbackEvents30d > 0 ||
+    params.clickedEvents30d > 0 ||
+    (params.effectiveContacts30d >= 2 && (params.mediumCallEvents > 0 || strongConversation))
+  const hardNegative =
+    (params.rejectedEvents >= 2 || params.negativeIntentEvents >= 3) &&
+    params.interestEvents30d <= 0 &&
+    params.callbackEvents30d <= 0 &&
+    params.clickedEvents30d <= 0 &&
+    params.salesEvents90d <= 0
+
+  if (params.salesEvents > 0 || params.salesEvents90d > 0 || params.totalValueAmount > 0) return true
+  if (hardNegative) return false
   if (params.interestEvents > 0 && params.callbackEvents > 0) return true
   if (params.interestEvents > 0 && params.bestManagementEvents > 0) return true
   if (params.callbackEvents > 0 && params.effectiveContacts >= 2) return true
-  if (params.clickedEvents > 0 && params.interestEvents > 0) return true
-  if (params.isExistingCustomer && params.equifaxSalesCount >= 2 && params.interestEvents > 0) return true
+  if (params.clickedEvents > 0 && params.openedEvents > 0 && params.effectiveContacts > 0 && params.negativeIntentEvents <= 0) return true
+  if (params.clickedEvents > 0 && (params.interestEvents > 0 || (params.effectiveContacts30d >= 2 && params.bestManagementEvents > 0))) return true
+  if (params.interestEvents30d > 0 && params.effectiveContacts30d >= 2) return true
+  if (params.callbackEvents30d > 0 && (params.effectiveContacts30d > 0 || params.mediumCallEvents > 0)) return true
+  if (params.clickedEvents30d > 0 && (params.callbackEvents30d > 0 || params.interestEvents30d > 0 || params.effectiveContacts30d > 0)) return true
+  if (params.bestManagement30d > 0 && (params.callbackEvents30d > 0 || params.clickedEvents30d > 0 || strongConversation)) return true
+  if (params.openedEvents30d >= 2 && params.effectiveContacts30d >= 2 && strongConversation && params.negativeIntentEvents <= 0) return true
+  if (recentMomentum && strongConversation && params.bestManagementEvents > 0) return true
+  if (params.isExistingCustomer && params.equifaxSalesCount >= 2 && (params.interestEvents > 0 || params.callbackEvents30d > 0)) return true
+  if (params.negativeIntentEvents > 0 && !recentMomentum) return false
   return false
 }
 
@@ -656,11 +814,11 @@ async function fetchFeedbackRecords(rutids: string[]) {
     const [directRows, matchedRows] = await Promise.all([
       db
         .from('contact_center_feedback')
-        .select('id,rutid,matched_rutid,contact_phone,contact_email,campaign_name,channel,outcome,managed_at,sold_at,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
+        .select('id,rutid,matched_rutid,contact_phone,contact_email,campaign_name,channel,outcome,outcome_subtype,outcome_reason,managed_at,sold_at,duration_seconds,talk_seconds,value_amount,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
         .in('rutid', subset),
       db
         .from('contact_center_feedback')
-        .select('id,rutid,matched_rutid,contact_phone,contact_email,campaign_name,channel,outcome,managed_at,sold_at,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
+        .select('id,rutid,matched_rutid,contact_phone,contact_email,campaign_name,channel,outcome,outcome_subtype,outcome_reason,managed_at,sold_at,duration_seconds,talk_seconds,value_amount,effective_contact,interested,callback_requested,sale,mail_opened,clicked,is_best_management')
         .in('matched_rutid', subset),
     ])
 
@@ -684,6 +842,8 @@ async function fetchFeedbackRecords(rutids: string[]) {
 
 function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
   const map = new Map<string, AggregatedFeedback>()
+  const now = Date.now()
+  const dayMs = 1000 * 60 * 60 * 24
 
   for (const record of records) {
     const rutid = String(record.matched_rutid ?? record.rutid ?? '').trim()
@@ -700,11 +860,30 @@ function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
       openedEvents: 0,
       clickedEvents: 0,
       bestManagementEvents: 0,
+      rejectedEvents: 0,
+      negativeIntentEvents: 0,
+      mediumCallEvents: 0,
+      longCallEvents: 0,
+      totalDurationSeconds: 0,
+      durationSampleCount: 0,
+      totalTalkSeconds: 0,
+      talkSampleCount: 0,
+      totalValueAmount: 0,
+      maxValueAmount: 0,
+      effectiveContacts30d: 0,
+      interestEvents30d: 0,
+      callbackEvents30d: 0,
+      openedEvents30d: 0,
+      clickedEvents30d: 0,
+      bestManagement30d: 0,
+      salesEvents90d: 0,
+      negativeEvents90d: 0,
       bestEmail: null,
       bestPhone: null,
       lastFeedbackAt: null,
       lastContactAt: null,
       lastInterestAt: null,
+      lastCallbackAt: null,
       lastSaleFeedbackAt: null,
       equifaxEffectiveContacts: 0,
       equifaxInterestEvents: 0,
@@ -714,10 +893,18 @@ function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
     }
 
     const isEquifax = looksLikeEquifaxCampaign(record.campaign_name)
+    const managedAt = parseDate(record.managed_at)
+    const daysAgo = managedAt ? Math.max(0, (now - managedAt.getTime()) / dayMs) : null
+    const isLast30d = daysAgo !== null && daysAgo <= 30
+    const isLast90d = daysAgo !== null && daysAgo <= 90
+    const isRejected = isRejectedFeedback(record)
+    const mediumCall = isMediumCall(record)
+    const longCall = isLongCall(record)
     current.totalInteractions += 1
     if (isEquifax) current.equifaxInteractions += 1
     if (record.effective_contact) {
       current.effectiveContacts += 1
+      if (isLast30d) current.effectiveContacts30d += 1
       current.lastContactAt = !current.lastContactAt || (record.managed_at ?? '') > current.lastContactAt
         ? record.managed_at
         : current.lastContactAt
@@ -729,6 +916,7 @@ function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
     }
     if (record.interested || record.outcome === 'interested') {
       current.interestEvents += 1
+      if (isLast30d) current.interestEvents30d += 1
       current.lastInterestAt = !current.lastInterestAt || (record.managed_at ?? '') > current.lastInterestAt
         ? record.managed_at
         : current.lastInterestAt
@@ -736,18 +924,49 @@ function aggregateFeedbackByRutid(records: FeedbackRecord[]) {
     }
     if (record.callback_requested || record.outcome === 'callback') {
       current.callbackEvents += 1
+      if (isLast30d) current.callbackEvents30d += 1
+      current.lastCallbackAt = !current.lastCallbackAt || (record.managed_at ?? '') > current.lastCallbackAt
+        ? record.managed_at
+        : current.lastCallbackAt
       if (isEquifax) current.equifaxCallbackEvents += 1
     }
     if (record.sale || record.outcome === 'sale') {
       current.salesEvents += 1
+      if (isLast90d) current.salesEvents90d += 1
       current.lastSaleFeedbackAt = !current.lastSaleFeedbackAt || (record.sold_at ?? record.managed_at ?? '') > current.lastSaleFeedbackAt
         ? (record.sold_at ?? record.managed_at)
         : current.lastSaleFeedbackAt
       if (isEquifax) current.equifaxSalesEvents += 1
     }
-    if (record.mail_opened || record.outcome === 'opened') current.openedEvents += 1
-    if (record.clicked || record.outcome === 'clicked') current.clickedEvents += 1
-    if (record.is_best_management) current.bestManagementEvents += 1
+    if (record.mail_opened || record.outcome === 'opened') {
+      current.openedEvents += 1
+      if (isLast30d) current.openedEvents30d += 1
+    }
+    if (record.clicked || record.outcome === 'clicked') {
+      current.clickedEvents += 1
+      if (isLast30d) current.clickedEvents30d += 1
+    }
+    if (record.is_best_management) {
+      current.bestManagementEvents += 1
+      if (isLast30d) current.bestManagement30d += 1
+    }
+    if (isRejected) current.rejectedEvents += 1
+    if (isRejected || normalizeKeyword(record.outcome ?? '') === 'rejected') current.negativeIntentEvents += 1
+    if (isLast90d && (isRejected || normalizeKeyword(record.outcome ?? '') === 'rejected')) current.negativeEvents90d += 1
+    if (mediumCall) current.mediumCallEvents += 1
+    if (longCall) current.longCallEvents += 1
+    if (toNumber(record.duration_seconds) > 0) {
+      current.totalDurationSeconds += toNumber(record.duration_seconds)
+      current.durationSampleCount += 1
+    }
+    if (toNumber(record.talk_seconds) > 0) {
+      current.totalTalkSeconds += toNumber(record.talk_seconds)
+      current.talkSampleCount += 1
+    }
+    if (toNumber(record.value_amount) > 0) {
+      current.totalValueAmount += toNumber(record.value_amount)
+      current.maxValueAmount = Math.max(current.maxValueAmount, toNumber(record.value_amount))
+    }
     if (record.contact_email && (record.mail_opened || record.clicked || record.channel === 'email')) {
       current.bestEmail = record.contact_email
     }
@@ -796,24 +1015,57 @@ function buildFeatureRow(params: {
   const noContactEvents = equifaxInteractions > 0
     ? (feedback?.equifaxNoContactEvents ?? 0)
     : (feedback?.noContactEvents ?? 0)
+  const avgDurationSeconds = round(
+    safeRate(feedback?.totalDurationSeconds ?? 0, Math.max(feedback?.durationSampleCount ?? 0, 1)),
+    2
+  )
+  const avgTalkSeconds = round(
+    safeRate(feedback?.totalTalkSeconds ?? 0, Math.max(feedback?.talkSampleCount ?? 0, 1)),
+    2
+  )
   const emailOpenRate = safeRate(feedback?.openedEvents ?? 0, totalInteractions)
   const emailClickRate = safeRate(feedback?.clickedEvents ?? 0, totalInteractions)
   const equifaxContactShare = safeRate(equifaxInteractions, totalInteractions)
   const pymeFitScore = buildPymeFitScore(master?.razon_social_empresa)
   const daysSinceLastFeedback = diffDays(feedback?.lastFeedbackAt)
+  const daysSinceLastInterest = diffDays(feedback?.lastInterestAt)
+  const daysSinceLastCallback = diffDays(feedback?.lastCallbackAt)
   const emailEngagementScore = buildEmailEngagementScore({
     openedEvents: feedback?.openedEvents ?? 0,
     clickedEvents: feedback?.clickedEvents ?? 0,
     totalInteractions,
     daysSinceLastFeedback,
   })
+  const crmSequenceScore = buildCrmSequenceScore({
+    effectiveContacts30d: feedback?.effectiveContacts30d ?? 0,
+    interestEvents30d: feedback?.interestEvents30d ?? 0,
+    callbackEvents30d: feedback?.callbackEvents30d ?? 0,
+    openedEvents30d: feedback?.openedEvents30d ?? 0,
+    clickedEvents30d: feedback?.clickedEvents30d ?? 0,
+    bestManagement30d: feedback?.bestManagement30d ?? 0,
+    salesEvents90d: feedback?.salesEvents90d ?? 0,
+    negativeEvents90d: feedback?.negativeEvents90d ?? 0,
+    rejectedEvents: feedback?.rejectedEvents ?? 0,
+    avgDurationSeconds,
+    avgTalkSeconds,
+    longCallEvents: feedback?.longCallEvents ?? 0,
+    totalValueAmount: feedback?.totalValueAmount ?? 0,
+    daysSinceLastInterest,
+    daysSinceLastCallback,
+  })
   const pymeIntentScore = buildPymeIntentScore({
     pymeFitScore,
     emailEngagementScore,
+    crmSequenceScore,
     knownPhoneCount,
     knownEmailCount,
     coverage: toNumber(master?.cobertura_pct),
   })
+  const bestManagementRate = round4(safeRate(feedback?.bestManagementEvents ?? 0, Math.max(totalInteractions, 1)))
+  const mediumCallRate = round4(safeRate(feedback?.mediumCallEvents ?? 0, Math.max(totalInteractions, 1)))
+  const longCallRate = round4(safeRate(feedback?.longCallEvents ?? 0, Math.max(totalInteractions, 1)))
+  const negativeIntentRate = round4(safeRate(feedback?.negativeIntentEvents ?? 0, Math.max(totalInteractions, 1)))
+  const rejectedRate = round4(safeRate(feedback?.rejectedEvents ?? 0, Math.max(totalInteractions, 1)))
 
   const featurePayload: Record<string, unknown> = {
     score_patrimonial: toNumber(master?.score_patrimonial),
@@ -826,11 +1078,34 @@ function buildFeatureRow(params: {
     email_engagement_score: emailEngagementScore,
     pyme_fit_score: pymeFitScore,
     pyme_intent_score: pymeIntentScore,
+    crm_sequence_score: crmSequenceScore,
     equifax_contact_share: round4(equifaxContactShare),
     days_since_last_feedback: daysSinceLastFeedback,
     days_since_last_contact: diffDays(feedback?.lastContactAt),
-    days_since_last_interest: diffDays(feedback?.lastInterestAt),
+    days_since_last_interest: daysSinceLastInterest,
+    days_since_last_callback: daysSinceLastCallback,
     days_since_last_sale_feedback: diffDays(feedback?.lastSaleFeedbackAt),
+    avg_duration_seconds: avgDurationSeconds,
+    avg_talk_seconds: avgTalkSeconds,
+    medium_call_rate: mediumCallRate,
+    long_call_rate: longCallRate,
+    best_management_rate: bestManagementRate,
+    negative_intent_rate: negativeIntentRate,
+    rejected_rate: rejectedRate,
+    effective_contacts_30d: feedback?.effectiveContacts30d ?? 0,
+    interest_events_30d: feedback?.interestEvents30d ?? 0,
+    callback_events_30d: feedback?.callbackEvents30d ?? 0,
+    opened_events_30d: feedback?.openedEvents30d ?? 0,
+    clicked_events_30d: feedback?.clickedEvents30d ?? 0,
+    best_management_30d: feedback?.bestManagement30d ?? 0,
+    sales_events_90d: feedback?.salesEvents90d ?? 0,
+    negative_events_90d: feedback?.negativeEvents90d ?? 0,
+    rejected_events: feedback?.rejectedEvents ?? 0,
+    negative_intent_events: feedback?.negativeIntentEvents ?? 0,
+    medium_call_events: feedback?.mediumCallEvents ?? 0,
+    long_call_events: feedback?.longCallEvents ?? 0,
+    total_value_amount: round(feedback?.totalValueAmount ?? 0, 2),
+    max_value_amount: round(feedback?.maxValueAmount ?? 0, 2),
     best_phone: bestPhone,
     best_email: bestEmail,
   }
@@ -859,8 +1134,23 @@ function buildFeatureRow(params: {
     interestEvents,
     callbackEvents,
     clickedEvents: feedback?.clickedEvents ?? 0,
+    openedEvents: feedback?.openedEvents ?? 0,
     bestManagementEvents: feedback?.bestManagementEvents ?? 0,
     effectiveContacts,
+    effectiveContacts30d: feedback?.effectiveContacts30d ?? 0,
+    interestEvents30d: feedback?.interestEvents30d ?? 0,
+    callbackEvents30d: feedback?.callbackEvents30d ?? 0,
+    openedEvents30d: feedback?.openedEvents30d ?? 0,
+    clickedEvents30d: feedback?.clickedEvents30d ?? 0,
+    bestManagement30d: feedback?.bestManagement30d ?? 0,
+    salesEvents90d: feedback?.salesEvents90d ?? 0,
+    rejectedEvents: feedback?.rejectedEvents ?? 0,
+    negativeIntentEvents: feedback?.negativeIntentEvents ?? 0,
+    mediumCallEvents: feedback?.mediumCallEvents ?? 0,
+    longCallEvents: feedback?.longCallEvents ?? 0,
+    avgDurationSeconds,
+    avgTalkSeconds,
+    totalValueAmount: feedback?.totalValueAmount ?? 0,
     equifaxSalesCount: toNumber(customer?.sales_count),
     isExistingCustomer: Boolean(customer),
   })
@@ -985,8 +1275,40 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
   const emailEngagementScore = toNumber(feature.feature_payload.email_engagement_score)
   const pymeFitScore = toNumber(feature.feature_payload.pyme_fit_score)
   const pymeIntentScore = toNumber(feature.feature_payload.pyme_intent_score)
+  const crmSequenceScore = toNumber(feature.feature_payload.crm_sequence_score)
+  const avgDurationSeconds = toNumber(feature.feature_payload.avg_duration_seconds)
+  const avgTalkSeconds = toNumber(feature.feature_payload.avg_talk_seconds)
+  const bestManagementRate = toNumber(feature.feature_payload.best_management_rate)
+  const mediumCallRate = toNumber(feature.feature_payload.medium_call_rate)
+  const longCallRate = toNumber(feature.feature_payload.long_call_rate)
+  const negativeIntentRate = toNumber(feature.feature_payload.negative_intent_rate)
+  const rejectedRate = toNumber(feature.feature_payload.rejected_rate)
+  const interestEvents30d = toNumber(feature.feature_payload.interest_events_30d)
+  const callbackEvents30d = toNumber(feature.feature_payload.callback_events_30d)
+  const openedEvents30d = toNumber(feature.feature_payload.opened_events_30d)
+  const clickedEvents30d = toNumber(feature.feature_payload.clicked_events_30d)
+  const bestManagement30d = toNumber(feature.feature_payload.best_management_30d)
+  const salesEvents90d = toNumber(feature.feature_payload.sales_events_90d)
+  const negativeEvents90d = toNumber(feature.feature_payload.negative_events_90d)
+  const daysSinceLastCallback = toNumber(feature.feature_payload.days_since_last_callback)
   const daysSinceLastFeedback = toNumber(feature.feature_payload.days_since_last_feedback)
   const recencyBoost = daysSinceLastFeedback > 0 ? clamp(20 - daysSinceLastFeedback * 0.25, 0, 20) : 0
+  const callbackRecencyBoost = daysSinceLastCallback > 0 ? clamp(16 - daysSinceLastCallback * 0.35, 0, 16) : callbackEvents30d > 0 ? 10 : 0
+  const conversationScore = clamp(
+    avgDurationSeconds * 0.12 +
+    avgTalkSeconds * 0.18 +
+    mediumCallRate * 100 * 0.18 +
+    longCallRate * 100 * 0.28,
+    0,
+    100
+  )
+  const negativeScore = clamp(
+    negativeIntentRate * 100 * 0.7 +
+    rejectedRate * 100 * 0.7 +
+    negativeEvents90d * 3,
+    0,
+    100
+  )
   const dataQualityScore = clamp(
     feature.known_phone_count * 18 +
     feature.known_email_count * 14 +
@@ -1001,8 +1323,11 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
     toNumber(feature.feature_payload.email_open_rate) * 100 * 0.08 +
     emailEngagementScore * 0.1 +
     feature.callback_rate * 100 * 0.1 +
+    crmSequenceScore * 0.1 +
+    callbackRecencyBoost * 0.4 +
     recencyBoost -
-    feature.no_contact_rate * 100 * 0.2,
+    feature.no_contact_rate * 100 * 0.2 -
+    negativeScore * 0.12,
     0,
     100
   )
@@ -1012,63 +1337,96 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
     feature.callback_rate * 100 * 0.22 +
     toNumber(feature.feature_payload.email_click_rate) * 100 * 0.12 +
     emailEngagementScore * 0.18 +
+    crmSequenceScore * 0.18 +
+    callbackRecencyBoost * 0.4 +
+    conversationScore * 0.12 +
     feature.contact_rate * 100 * 0.12 +
     feature.best_management_events * 2.5 +
+    bestManagementRate * 100 * 0.08 +
     (feature.is_existing_customer ? 8 : 0),
     0,
     100
   )
 
   const basePurchaseProbability = clamp(
-    feature.sale_rate * 100 * 0.46 +
-    feature.interest_rate * 100 * 0.18 +
-    feature.callback_rate * 100 * 0.1 +
-    patrimonial * 0.22 +
-    coverage * 0.08 +
-    emailEngagementScore * 0.12 +
-    pymeFitScore * 0.04 +
+    feature.sale_rate * 100 * 0.24 +
+    feature.interest_rate * 100 * 0.12 +
+    feature.callback_rate * 100 * 0.12 +
+    crmSequenceScore * 0.22 +
+    pymeIntentScore * 0.14 +
+    conversationScore * 0.12 +
+    emailEngagementScore * 0.08 +
+    patrimonial * 0.1 +
+    coverage * 0.04 +
+    bestManagementRate * 100 * 0.08 +
+    Math.min(interestEvents30d, 4) * 3.5 +
+    Math.min(callbackEvents30d, 4) * 4.5 +
+    Math.min(clickedEvents30d, 3) * 4 +
+    Math.min(openedEvents30d, 5) * 1.5 +
+    Math.min(bestManagement30d, 4) * 3 +
+    Math.min(salesEvents90d, 3) * 8 +
+    callbackRecencyBoost * 0.45 +
     Math.min(feature.equifax_sales_count, 6) * 2.5 +
-    (feature.is_existing_customer ? 10 : 0),
+    (feature.is_existing_customer ? 8 : 0) -
+    negativeScore * 0.22,
     0,
     100
   )
 
   const canUsePymeIntentFloor =
     pymeFitScore >= 55 &&
-    emailEngagementScore >= 32 &&
-    feature.known_email_count > 0 &&
-    (feature.clicked_events > 0 || feature.opened_events >= 2)
+    (
+      (
+        emailEngagementScore >= 32 &&
+        feature.known_email_count > 0 &&
+        (feature.clicked_events > 0 || feature.opened_events >= 2)
+      ) ||
+      (
+        crmSequenceScore >= 32 &&
+        feature.known_phone_count > 0 &&
+        (interestEvents30d > 0 || callbackEvents30d > 0 || conversationScore >= 32)
+      )
+    ) &&
+    negativeScore < 35
 
   const contactIntentFloor = canUsePymeIntentFloor
     ? clamp(
-        (feature.clicked_events > 0 ? 68 : 60) +
-        emailEngagementScore * 0.12 +
+        (feature.clicked_events > 0 || callbackEvents30d > 0 ? 68 : 60) +
+        Math.max(emailEngagementScore * 0.1, crmSequenceScore * 0.12) +
         Math.min(feature.known_phone_count, 2) * 3 +
-        Math.min(feature.opened_events, 4) * 1.5,
+        Math.min(feature.opened_events + openedEvents30d, 4) * 1.5 -
+        negativeScore * 0.08,
         0,
-        feature.clicked_events > 0 ? 90 : 78
+        feature.clicked_events > 0 || callbackEvents30d > 0 ? 90 : 78
       )
     : 0
   const interestIntentFloor = canUsePymeIntentFloor
     ? clamp(
-        (feature.clicked_events > 0 ? 44 : 24) +
-        emailEngagementScore * (feature.clicked_events > 0 ? 0.28 : 0.18) +
+        (feature.clicked_events > 0 || callbackEvents30d > 0 ? 48 : 28) +
+        emailEngagementScore * (feature.clicked_events > 0 ? 0.18 : 0.1) +
+        crmSequenceScore * 0.22 +
         pymeFitScore * 0.08 +
-        Math.min(feature.clicked_events, 3) * 4,
+        conversationScore * 0.1 +
+        Math.min(feature.clicked_events + clickedEvents30d, 3) * 4 -
+        negativeScore * 0.12,
         0,
-        feature.clicked_events > 0 ? 86 : 58
+        feature.clicked_events > 0 || callbackEvents30d > 0 ? 86 : 64
       )
     : 0
   const purchaseIntentFloor = canUsePymeIntentFloor
     ? clamp(
-        (feature.clicked_events > 0 ? 36 : 24) +
-        emailEngagementScore * (feature.clicked_events > 0 ? 0.22 : 0.14) +
+        (feature.clicked_events > 0 || callbackEvents30d > 0 ? 34 : 26) +
+        emailEngagementScore * (feature.clicked_events > 0 ? 0.12 : 0.06) +
+        crmSequenceScore * 0.24 +
         pymeFitScore * 0.08 +
-        pymeIntentScore * 0.08 +
+        pymeIntentScore * 0.12 +
+        conversationScore * 0.08 +
         coverage * 0.03 +
-        Math.min(feature.clicked_events, 3) * 3,
+        Math.min(feature.clicked_events + clickedEvents30d, 3) * 3 +
+        Math.min(callbackEvents30d, 3) * 4 -
+        negativeScore * 0.16,
         0,
-        feature.clicked_events > 0 ? 78 : 52
+        feature.clicked_events > 0 || callbackEvents30d > 0 ? 82 : 58
       )
     : 0
 
@@ -1096,9 +1454,13 @@ function buildHeuristicScore(feature: EquifaxLeadFeatureSnapshot): HeuristicScor
       heuristic: {
         data_quality_score: round(dataQualityScore, 2),
         recency_boost: round(recencyBoost, 2),
+        callback_recency_boost: round(callbackRecencyBoost, 2),
         email_engagement_score: round(emailEngagementScore, 2),
         pyme_fit_score: round(pymeFitScore, 2),
         pyme_intent_score: round(pymeIntentScore, 2),
+        crm_sequence_score: round(crmSequenceScore, 2),
+        conversation_score: round(conversationScore, 2),
+        negative_score: round(negativeScore, 2),
         intent_floors_applied: canUsePymeIntentFloor,
         contact_intent_floor: round(contactIntentFloor, 2),
         interest_intent_floor: round(interestIntentFloor, 2),
@@ -1602,6 +1964,7 @@ const TRAINING_FEATURES = [
   'email_engagement_score',
   'pyme_fit_score',
   'pyme_intent_score',
+  'crm_sequence_score',
   'equifax_contact_share',
   'feedback_total_interactions',
   'feedback_equifax_interactions',
@@ -1609,6 +1972,25 @@ const TRAINING_FEATURES = [
   'interest_events',
   'callback_events',
   'sales_events',
+  'effective_contacts_30d',
+  'interest_events_30d',
+  'callback_events_30d',
+  'opened_events_30d',
+  'clicked_events_30d',
+  'best_management_30d',
+  'sales_events_90d',
+  'negative_events_90d',
+  'avg_duration_seconds',
+  'avg_talk_seconds',
+  'medium_call_rate',
+  'long_call_rate',
+  'best_management_rate',
+  'negative_intent_rate',
+  'rejected_rate',
+  'rejected_events',
+  'negative_intent_events',
+  'total_value_amount',
+  'max_value_amount',
   'score_patrimonial',
   'cobertura_pct',
   'equifax_sales_count',
@@ -1617,6 +1999,7 @@ const TRAINING_FEATURES = [
   'days_since_last_feedback',
   'days_since_last_contact',
   'days_since_last_interest',
+  'days_since_last_callback',
   'days_since_last_sale_feedback',
 ] as const
 
