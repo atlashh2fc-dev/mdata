@@ -75,6 +75,9 @@ type AnalyzeProgress = {
   limited: boolean
 }
 
+type ExportFormat = 'xlsx' | 'csv' | 'json'
+type ExportCell = string | number | boolean | null
+
 function emptyProviderMetrics(): NonNullable<BaseBuilderWebEnrichmentResult['providers']> {
   return {
     brave: 0,
@@ -518,44 +521,121 @@ function buildFieldLabelMap() {
   return new Map(BASE_BUILDER_FIELDS.map(field => [field.key, `Maestro - ${field.label}`]))
 }
 
-function exportRowsToCsv(
-  rows: Record<string, string | number | boolean | null>[],
+function originalColumnsLookLikeData(columns: string[]): boolean {
+  const nonEmpty = columns.filter(column => String(column ?? '').trim().length > 0)
+  if (nonEmpty.length === 0) return false
+  if (nonEmpty.some(column => validateRut(column))) return true
+
+  return nonEmpty.filter(looksLikeDataCell).length >= Math.min(2, nonEmpty.length)
+}
+
+function buildExportTable(
+  rows: Record<string, ExportCell>[],
   originalColumns: string[],
   selectedFields: BaseBuilderFieldKey[],
   extraColumns: string[] = []
-): string {
+): { columns: string[]; data: ExportCell[][]; records: Record<string, ExportCell>[] } {
   const fieldLabelMap = buildFieldLabelMap()
   const enrichedColumns = selectedFields.map(field => fieldLabelMap.get(field) ?? field)
   const includeEmailSource = rows.some(row => isPresentForExport(row['Fuente Email']))
   const includePhoneSource = rows.some(row => isPresentForExport(row['Fuente Teléfono']))
   const includeWebsite = rows.some(row => isPresentForExport(row['Web - Sitio']))
+  const legacyDataHeaders = originalColumnsLookLikeData(originalColumns)
+  const originalOutputColumns = legacyDataHeaders
+    ? ensureUniqueHeaders(originalColumns.map((_, index) => (
+        inferColumnHeader([
+          originalColumns[index] ?? '',
+          ...rows.map(row => String(row[originalColumns[index]] ?? '')),
+        ], index)
+      )))
+    : originalColumns
+  const rawColumns = [
+    ...originalOutputColumns,
+    'RUT Formateado',
+    'RUT Maestro',
+    'Estado Match',
+    ...enrichedColumns,
+    ...(includeEmailSource ? ['Fuente Email'] : []),
+    ...(includePhoneSource ? ['Fuente Teléfono'] : []),
+    ...(includeWebsite ? ['Web - Sitio'] : []),
+    ...extraColumns,
+  ]
+  const columns = ensureUniqueHeaders(rawColumns)
 
-  const exportRows = rows.map(row => {
-    const record: Record<string, string | number | boolean | null> = {}
+  const toRowValues = (row: Record<string, ExportCell>) => [
+    ...originalColumns.map(column => row[column] ?? null),
+    row.rut_formateado ?? null,
+    row.rutid ?? null,
+    row.match_status ?? null,
+    ...enrichedColumns.map(column => row[column] ?? null),
+    ...(includeEmailSource ? [row['Fuente Email'] ?? null] : []),
+    ...(includePhoneSource ? [row['Fuente Teléfono'] ?? null] : []),
+    ...(includeWebsite ? [row['Web - Sitio'] ?? null] : []),
+    ...extraColumns.map(column => row[column] ?? null),
+  ]
 
-    for (const column of originalColumns) {
-      record[column] = row[column]
-    }
+  const data = rows.map(toRowValues)
 
-    record['RUT Formateado'] = row.rut_formateado
-    record['RUT Maestro'] = row.rutid
-    record['Estado Match'] = row.match_status
+  if (legacyDataHeaders) {
+    data.unshift([
+      ...originalColumns,
+      null,
+      null,
+      null,
+      ...enrichedColumns.map(() => null),
+      ...(includeEmailSource ? [null] : []),
+      ...(includePhoneSource ? [null] : []),
+      ...(includeWebsite ? [null] : []),
+      ...extraColumns.map(() => null),
+    ])
+  }
 
-    for (const column of enrichedColumns) {
-      record[column] = row[column]
-    }
-
-    if (includeEmailSource) record['Fuente Email'] = row['Fuente Email']
-    if (includePhoneSource) record['Fuente Teléfono'] = row['Fuente Teléfono']
-    if (includeWebsite) record['Web - Sitio'] = row['Web - Sitio']
-    for (const column of extraColumns) {
-      record[column] = row[column]
-    }
-
+  const records = data.map(values => {
+    const record: Record<string, ExportCell> = {}
+    columns.forEach((column, index) => {
+      record[column] = values[index] ?? null
+    })
     return record
   })
 
-  return Papa.unparse(exportRows)
+  return { columns, data, records }
+}
+
+function exportTableToCsv(table: ReturnType<typeof buildExportTable>): string {
+  return Papa.unparse({
+    fields: table.columns,
+    data: table.data,
+  })
+}
+
+function estimateColumnWidth(values: ExportCell[], header: string): number {
+  const maxLength = [header, ...values.slice(0, 300).map(value => String(value ?? ''))]
+    .reduce((max, value) => Math.max(max, value.length), 0)
+
+  return Math.min(48, Math.max(10, maxLength + 2))
+}
+
+function exportTableToXlsx(table: ReturnType<typeof buildExportTable>, sheetName = 'Base poblada'): ArrayBuffer {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    table.columns,
+    ...table.data,
+  ])
+  worksheet['!cols'] = table.columns.map((column, index) => ({
+    wch: estimateColumnWidth(table.data.map(row => row[index] ?? null), column),
+  }))
+  worksheet['!autofilter'] = {
+    ref: XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: Math.max(0, table.data.length), c: Math.max(0, table.columns.length - 1) },
+    }),
+  }
+
+  const workbook = XLSX.utils.book_new()
+  workbook.Workbook = {
+    Views: [{ RTL: false }],
+  }
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31))
+  return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer
 }
 
 function isPresentForExport(value: string | number | boolean | null | undefined): boolean {
@@ -685,7 +765,7 @@ function getCoverageTone(pct: number): string {
 }
 
 export function PoblarBasePage() {
-  const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv')
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx')
   const [selectedMatchMode, setSelectedMatchMode] = useState<BaseBuilderMatchMode>('rut')
   const [enrichMissingContactsWithWeb, setEnrichMissingContactsWithWeb] = useState(false)
   const [selectedFields, setSelectedFields] = useState<BaseBuilderFieldKey[]>(PERSON_DEFAULT_FIELDS)
@@ -1055,17 +1135,26 @@ export function PoblarBasePage() {
         }
       }
 
-      if (exportFormat === 'csv') {
-        const csv = exportRowsToCsv(
-          rowsToExport,
-          analysis.original_columns,
-          analysis.selected_fields,
-          extraColumns
+      const exportTable = buildExportTable(
+        rowsToExport,
+        analysis.original_columns,
+        analysis.selected_fields,
+        extraColumns
+      )
+
+      if (exportFormat === 'xlsx') {
+        const workbook = exportTableToXlsx(exportTable)
+        downloadFile(
+          workbook,
+          `${baseName}.xlsx`,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
+      } else if (exportFormat === 'csv') {
+        const csv = exportTableToCsv(exportTable)
         downloadFile(csv, `${baseName}.csv`, 'text/csv;charset=utf-8;')
       } else {
         downloadFile(
-          JSON.stringify(rowsToExport, null, 2),
+          JSON.stringify(exportTable.records, null, 2),
           `${baseName}.json`,
           'application/json'
         )
@@ -1349,14 +1438,15 @@ export function PoblarBasePage() {
                 </label>
                 <div className="space-y-2">
                   {[
-                    { value: 'csv', label: 'CSV', icon: FileText, desc: 'Compatible con Excel' },
+                    { value: 'xlsx', label: 'Excel', icon: Table2, desc: 'Con encabezados, filtros y anchos' },
+                    { value: 'csv', label: 'CSV', icon: FileText, desc: 'Plano para cargas masivas' },
                     { value: 'json', label: 'JSON', icon: Table2, desc: 'Para integraciones' },
                   ].map(option => {
                     const Icon = option.icon
                     return (
                       <button
                         key={option.value}
-                        onClick={() => setExportFormat(option.value as 'csv' | 'json')}
+                        onClick={() => setExportFormat(option.value as ExportFormat)}
                         className={cn(
                           'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
                           exportFormat === option.value
