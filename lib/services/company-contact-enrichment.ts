@@ -9,8 +9,17 @@ const INCEPTION_MODEL = 'mercury-2'
 const SEARCH_RESULTS_PER_COMPANY = 5
 const FETCH_RESULTS_PER_COMPANY = 3
 const MAX_FETCH_CHARS = 12000
-const MAX_COMPANIES_PER_REQUEST = 15
-const ENRICH_CONCURRENCY = 2
+
+function readPositiveIntEnv(name: string, fallback: number, max: number): number {
+  const raw = process.env[name]
+  const parsed = raw ? Number.parseInt(raw, 10) : fallback
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback
+  return Math.min(parsed, max)
+}
+
+const MAX_COMPANIES_PER_REQUEST = readPositiveIntEnv('COMPANY_CONTACT_ENRICH_BATCH_SIZE', 75, 200)
+const ENRICH_CONCURRENCY = readPositiveIntEnv('COMPANY_CONTACT_ENRICH_CONCURRENCY', 5, 12)
+const PAGE_FETCH_CONCURRENCY = readPositiveIntEnv('COMPANY_CONTACT_PAGE_FETCH_CONCURRENCY', 2, 6)
 
 type CacheRow = {
   match_key: string
@@ -571,21 +580,31 @@ async function enrichOneCompany(
     let emails = uniq(topResults.flatMap(item => extractEmails(`${item.title} ${item.description}`)))
     let phones = uniq(topResults.flatMap(item => extractPhones(`${item.title} ${item.description}`)))
 
-    for (const url of sourceUrls) {
-      const html = await fetchPageHtml(url)
+    const sourcePages = await mapWithConcurrency(sourceUrls, PAGE_FETCH_CONCURRENCY, async url => ({
+      url,
+      html: await fetchPageHtml(url),
+    }))
+    const contactUrls: string[] = []
+
+    for (const { url, html } of sourcePages) {
       if (!html) continue
 
       emails = uniq([...emails, ...extractEmailsFromHtml(html)])
       phones = uniq([...phones, ...extractPhonesFromHtml(html)])
+      contactUrls.push(...buildContactPageCandidates(url, html))
+    }
 
-      const contactUrls = buildContactPageCandidates(url, html)
-      for (const contactUrl of contactUrls) {
-        const contactHtml = await fetchPageHtml(contactUrl)
-        if (!contactHtml) continue
+    const contactPages = await mapWithConcurrency(
+      uniq(contactUrls).slice(0, FETCH_RESULTS_PER_COMPANY * sourceUrls.length),
+      PAGE_FETCH_CONCURRENCY,
+      fetchPageHtml
+    )
 
-        emails = uniq([...emails, ...extractEmailsFromHtml(contactHtml)])
-        phones = uniq([...phones, ...extractPhonesFromHtml(contactHtml)])
-      }
+    for (const contactHtml of contactPages) {
+      if (!contactHtml) continue
+
+      emails = uniq([...emails, ...extractEmailsFromHtml(contactHtml)])
+      phones = uniq([...phones, ...extractPhonesFromHtml(contactHtml)])
     }
 
     const aiPick = await chooseBestWithAI(companyName, {

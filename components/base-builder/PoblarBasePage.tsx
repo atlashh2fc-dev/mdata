@@ -1029,13 +1029,23 @@ export function PoblarBasePage() {
 
       if (enrichMissingContactsWithWeb && contactFieldSelected && webEnrichmentAvailable) {
         let webPass = 0
+        let maxWebPasses = MAX_AUTO_WEB_PASSES
+        let initialWebCache = 0
 
-        while (webPass < MAX_AUTO_WEB_PASSES) {
+        while (webPass < maxWebPasses) {
           webPass += 1
           setAnalyzeStatus(webPass === 1 ? 'Enriqueciendo web...' : `Enriqueciendo web (pasada ${webPass})...`)
 
           const webPassResult = await runWebEnrichmentPass()
           if (!webPassResult?.enabled) break
+          if (webPass === 1) initialWebCache = webPassResult.from_cache
+
+          if (webPassResult.attempted > 0) {
+            const estimatedPasses = Math.ceil(
+              Math.max(0, webPassResult.candidates - webPassResult.from_cache) / webPassResult.attempted
+            ) + 2
+            maxWebPasses = Math.max(maxWebPasses, Math.min(estimatedPasses, 200))
+          }
 
           aggregateWeb = aggregateWeb
             ? {
@@ -1065,18 +1075,21 @@ export function PoblarBasePage() {
             totalCandidates: aggregateWeb.candidates,
             processed: Math.min(
               aggregateWeb.candidates,
-              aggregateWeb.attempted + aggregateWeb.from_cache
+              aggregateWeb.attempted + initialWebCache
             ),
             attempted: webPassResult.attempted,
             fromCache: aggregateWeb.from_cache,
             limited: webPassResult.limited,
           })
 
-          latestAnalysis = await runAnalysisPass()
-
           if (!webPassResult.limited || webPassResult.attempted === 0) {
             break
           }
+        }
+
+        if (aggregateWeb) {
+          setAnalyzeStatus('Consolidando resultados...')
+          latestAnalysis = await runAnalysisPass()
         }
       }
 
