@@ -11,6 +11,7 @@ import type { EquifaxCrmPushFilters } from '@/types/equifax'
 
 const FETCH_CHUNK_SIZE = 1000
 const INSERT_CHUNK_SIZE = 1000
+const CRM_FILTER_CHUNK_SIZE = 250
 
 type EquifaxRunRow = {
   id: string
@@ -116,6 +117,14 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value)))]
 }
 
+function chunk<T>(items: T[], size: number) {
+  const result: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size))
+  }
+  return result
+}
+
 function normalizeRutid(value?: string | null) {
   if (!value) return null
 
@@ -217,24 +226,27 @@ async function fetchCrmActiveTargets(
 
   if (!normalizedRutids.length) return new Map<string, CrmActiveTargetRow>()
 
-  const { data, error } = await crm
-    .from('commercial_brain_active_targets_v1')
-    .select('rutid,campaign_name,current_priority_score,updated_at')
-    .in('rutid', normalizedRutids)
-    .order('current_priority_score', { ascending: false })
-    .order('updated_at', { ascending: false })
-
-  if (error) {
-    throw new Error(`No pude leer los leads activos del CRM: ${error.message}`)
-  }
-
   const map = new Map<string, CrmActiveTargetRow>()
-  for (const row of (data ?? []) as CrmActiveTargetRow[]) {
-    const normalized = normalizeRutid(row.rutid)
-    if (normalized && !map.has(normalized)) {
-      map.set(normalized, row)
+  for (const subset of chunk(normalizedRutids, CRM_FILTER_CHUNK_SIZE)) {
+    const { data, error } = await crm
+      .from('commercial_brain_active_targets_v1')
+      .select('rutid,campaign_name,current_priority_score,updated_at')
+      .in('rutid', subset)
+      .order('current_priority_score', { ascending: false })
+      .order('updated_at', { ascending: false })
+
+    if (error) {
+      throw new Error(`No pude leer los leads activos del CRM: ${error.message}`)
+    }
+
+    for (const row of (data ?? []) as CrmActiveTargetRow[]) {
+      const normalized = normalizeRutid(row.rutid)
+      if (normalized && !map.has(normalized)) {
+        map.set(normalized, row)
+      }
     }
   }
+
   return map
 }
 
@@ -251,24 +263,27 @@ async function fetchRecentCrmPushes(
 
   if (!normalizedRutids.length || lookbackDays <= 0) return new Map<string, CrmRecentPushRow>()
 
-  const { data, error } = await crm
-    .from('commercial_brain_lead_actions')
-    .select('rutid,created_at')
-    .in('rutid', normalizedRutids)
-    .gte('created_at', subtractDays(lookbackDays))
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    throw new Error(`No pude leer pushes recientes del CRM: ${error.message}`)
-  }
-
   const map = new Map<string, CrmRecentPushRow>()
-  for (const row of (data ?? []) as CrmRecentPushRow[]) {
-    const normalized = normalizeRutid(row.rutid)
-    if (normalized && !map.has(normalized)) {
-      map.set(normalized, row)
+  for (const subset of chunk(normalizedRutids, CRM_FILTER_CHUNK_SIZE)) {
+    const { data, error } = await crm
+      .from('commercial_brain_lead_actions')
+      .select('rutid,created_at')
+      .in('rutid', subset)
+      .gte('created_at', subtractDays(lookbackDays))
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      throw new Error(`No pude leer pushes recientes del CRM: ${error.message}`)
+    }
+
+    for (const row of (data ?? []) as CrmRecentPushRow[]) {
+      const normalized = normalizeRutid(row.rutid)
+      if (normalized && !map.has(normalized)) {
+        map.set(normalized, row)
+      }
     }
   }
+
   return map
 }
 
