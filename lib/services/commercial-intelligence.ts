@@ -15,6 +15,7 @@ import type {
 
 const UPSERT_CHUNK_SIZE = 500
 const CRM_SUMMARY_HISTORY_LIMIT = 5000
+const CRM_SUMMARY_QUERY_BATCH_SIZE = 500
 
 type CommercialSummaryFeedbackRow = {
   id: string
@@ -33,6 +34,16 @@ function normalizeRutForDb(value?: string | null): string | null {
   const cleaned = cleanRut(value)
   if (cleaned.length < 2) return null
   return cleaned.padStart(10, '0')
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = []
+
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+
+  return chunks
 }
 
 function normalizeEmail(value?: string | null): string | null {
@@ -435,17 +446,23 @@ export async function getCommercialSummariesByRutids(
   `
 
   const fetchSummaries = async (targetRutids: string[]) => {
-    const { data, error } = await db
-      .from('persona_scores')
-      .select(selectClause)
-      .in('rutid', targetRutids)
+    const rows: CommercialRutSummary[] = []
 
-    if (error) {
-      console.error('[getCommercialSummariesByRutids]', error)
-      throw new Error('No se pudo leer el resumen CRM de la base actual.')
+    for (const batch of chunkArray(targetRutids, CRM_SUMMARY_QUERY_BATCH_SIZE)) {
+      const { data, error } = await db
+        .from('persona_scores')
+        .select(selectClause)
+        .in('rutid', batch)
+
+      if (error) {
+        console.error('[getCommercialSummariesByRutids]', error)
+        throw new Error('No se pudo leer el resumen CRM de la base actual.')
+      }
+
+      rows.push(...((data ?? []) as CommercialRutSummary[]))
     }
 
-    return (data ?? []) as CommercialRutSummary[]
+    return rows
   }
 
   let summaries = await fetchSummaries(normalizedRutids)
@@ -454,7 +471,9 @@ export async function getCommercialSummariesByRutids(
 
   if (missingRutids.length) {
     try {
-      await refreshPersonaScores(missingRutids)
+      for (const batch of chunkArray(missingRutids, CRM_SUMMARY_QUERY_BATCH_SIZE)) {
+        await refreshPersonaScores(batch)
+      }
       const refreshed = await fetchSummaries(missingRutids)
       const refreshedMap = new Map(refreshed.map(item => [item.rutid, item]))
       summaries = summaries.concat(
@@ -467,27 +486,43 @@ export async function getCommercialSummariesByRutids(
     }
   }
 
+  const fetchFeedbackHistory = async (
+    column: 'matched_rutid' | 'rutid'
+  ): Promise<CommercialSummaryFeedbackRow[]> => {
+    const rows: CommercialSummaryFeedbackRow[] = []
+
+    for (const batch of chunkArray(normalizedRutids, CRM_SUMMARY_QUERY_BATCH_SIZE)) {
+      const { data, error } = await db
+        .from('contact_center_feedback')
+        .select('id,rutid,matched_rutid,managed_at,outcome,outcome_subtype,channel,campaign_name,agent_name')
+        .in(column, batch)
+        .order('managed_at', { ascending: false })
+        .limit(CRM_SUMMARY_HISTORY_LIMIT)
+
+      if (error) {
+        console.error(`[getCommercialSummariesByRutids.${column}]`, error)
+        continue
+      }
+
+      rows.push(...((data ?? []) as CommercialSummaryFeedbackRow[]))
+    }
+
+    return rows.sort((a, b) => (
+      new Date(b.managed_at).getTime() - new Date(a.managed_at).getTime()
+    ))
+  }
+
   const [matchedHistory, directHistory] = await Promise.all([
-    db
-      .from('contact_center_feedback')
-      .select('id,rutid,matched_rutid,managed_at,outcome,outcome_subtype,channel,campaign_name,agent_name')
-      .in('matched_rutid', normalizedRutids)
-      .order('managed_at', { ascending: false })
-      .limit(CRM_SUMMARY_HISTORY_LIMIT),
-    db
-      .from('contact_center_feedback')
-      .select('id,rutid,matched_rutid,managed_at,outcome,outcome_subtype,channel,campaign_name,agent_name')
-      .in('rutid', normalizedRutids)
-      .order('managed_at', { ascending: false })
-      .limit(CRM_SUMMARY_HISTORY_LIMIT),
+    fetchFeedbackHistory('matched_rutid'),
+    fetchFeedbackHistory('rutid'),
   ])
 
   const latestFeedbackByRut = new Map<string, CommercialSummaryFeedbackRow>()
   const seenEventIds = new Set<string>()
 
   for (const row of [
-    ...((matchedHistory.data ?? []) as CommercialSummaryFeedbackRow[]),
-    ...((directHistory.data ?? []) as CommercialSummaryFeedbackRow[]),
+    ...matchedHistory,
+    ...directHistory,
   ]) {
     if (seenEventIds.has(row.id)) continue
     seenEventIds.add(row.id)

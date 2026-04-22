@@ -64,8 +64,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'rutids es requerido' }, { status: 400 })
     }
 
-    const summary = await getCommercialSummariesByRutids(rutids)
-    return NextResponse.json({ success: true, data: summary })
+    try {
+      const summary = await getCommercialSummariesByRutids(rutids)
+      return NextResponse.json({ success: true, data: summary })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo obtener el resumen CRM.'
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
   }
 
   if (rut) {
@@ -136,8 +141,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'rutids es requerido' }, { status: 400 })
     }
 
-    const summary = await getCommercialSummariesByRutids(rutids)
-    return NextResponse.json({ success: true, data: summary })
+    try {
+      const summary = await getCommercialSummariesByRutids(rutids)
+      return NextResponse.json({ success: true, data: summary })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo obtener el resumen CRM.'
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
   }
 
   if (action === 'mark_best_management') {

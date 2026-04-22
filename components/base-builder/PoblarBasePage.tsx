@@ -444,6 +444,36 @@ function formatHour(hour: number | null | undefined): string {
   return `${String(normalized).padStart(2, '0')}:00`
 }
 
+type CrmSummaryApiResponse = {
+  success?: boolean
+  data?: CommercialRutSummary[]
+  error?: string
+  message?: string
+}
+
+async function readCrmSummaryResponse(res: Response): Promise<CrmSummaryApiResponse> {
+  const raw = await res.text()
+  const body = raw.trim()
+
+  if (!body) {
+    return {
+      success: false,
+      error: `El CRM devolvió una respuesta vacía (HTTP ${res.status}).`,
+    }
+  }
+
+  try {
+    return JSON.parse(body) as CrmSummaryApiResponse
+  } catch {
+    return {
+      success: false,
+      error: res.ok
+        ? 'El CRM devolvió una respuesta inválida.'
+        : body.slice(0, 300) || `No se pudo actualizar la exportación contra el CRM (HTTP ${res.status}).`,
+    }
+  }
+}
+
 async function fetchCrmSummariesForRows(rows: BaseBuilderExportRow[]) {
   const rutids = [...new Set(
     rows
@@ -464,13 +494,13 @@ async function fetchCrmSummariesForRows(rows: BaseBuilderExportRow[]) {
     }),
   })
 
-  const json = await res.json()
+  const json = await readCrmSummaryResponse(res)
 
   if (!res.ok || !json.success) {
-    throw new Error(json.error ?? 'No se pudo actualizar la exportación contra el CRM.')
+    throw new Error(json.error ?? json.message ?? 'No se pudo actualizar la exportación contra el CRM.')
   }
 
-  const items = (json.data ?? []) as CommercialRutSummary[]
+  const items = Array.isArray(json.data) ? json.data : []
   return new Map(items.map(item => [item.rutid, item]))
 }
 
@@ -872,10 +902,22 @@ export function PoblarBasePage() {
 
     try {
       const baseName = `${getExportBaseName(uploadedFile?.name)}-poblada`
-      const rowsToExport = shouldUpdateAgainstCrm
-        ? attachCrmSummaryToRows(analysis.rows, await fetchCrmSummariesForRows(analysis.rows))
-        : analysis.rows
-      const extraColumns = shouldUpdateAgainstCrm ? [...CRM_EXPORT_COLUMNS] : []
+      let rowsToExport = analysis.rows
+      let extraColumns: string[] = []
+      let crmExportWarning: string | null = null
+
+      if (shouldUpdateAgainstCrm) {
+        try {
+          rowsToExport = attachCrmSummaryToRows(
+            analysis.rows,
+            await fetchCrmSummariesForRows(analysis.rows)
+          )
+          extraColumns = [...CRM_EXPORT_COLUMNS]
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'error desconocido'
+          crmExportWarning = `No se pudo actualizar contra el CRM (${message}). Descargué la base poblada sin columnas CRM.`
+        }
+      }
 
       if (exportFormat === 'csv') {
         const csv = exportRowsToCsv(
@@ -893,6 +935,9 @@ export function PoblarBasePage() {
         )
       }
 
+      if (crmExportWarning) {
+        setError(crmExportWarning)
+      }
       setExportDone(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo exportar la base.')
