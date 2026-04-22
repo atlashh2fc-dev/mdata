@@ -117,12 +117,140 @@ function ensureUniqueHeaders(headers: string[]): string[] {
   })
 }
 
+function inferColumnHeader(values: string[], index: number): string {
+  const sample = values
+    .map(value => String(value ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 100)
+
+  if (sample.length > 0) {
+    const rutLike = sample.filter(value => validateRut(value)).length / sample.length
+    if (rutLike >= 0.6) return 'RUT'
+
+    const emailLike = sample.filter(value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)).length / sample.length
+    if (emailLike >= 0.6) return 'Email'
+
+    const codeLike = sample.filter(value => /^\d+(?:-\d+)+$/.test(value)).length / sample.length
+    if (codeLike >= 0.6) return 'Código'
+
+    const addressLike = sample.filter(value => (
+      /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(value) &&
+      /\d/.test(value) &&
+      value.length >= 8
+    )).length / sample.length
+    if (addressLike >= 0.5) return 'Dirección'
+
+    const activityLike = sample.filter(looksLikeActivityValue).length / sample.length
+    if (activityLike >= 0.5) return 'Giro'
+
+    const companyOrPersonLike = sample.filter(value => (
+      looksLikeCompanyValue(value) || looksLikePersonNameValue(value)
+    )).length / sample.length
+    if (companyOrPersonLike >= 0.5) return 'Nombre / razón social'
+
+    const textLike = sample.filter(value => (
+      /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(value) &&
+      !/\d/.test(value) &&
+      value.length >= 5
+    )).length / sample.length
+    if (textLike >= 0.6) return 'Giro'
+  }
+
+  return `Columna ${index + 1}`
+}
+
 function normalizeColumnName(name: string): string {
   return name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/gi, '')
     .toLowerCase()
+}
+
+function looksLikeHeaderCell(value: string): boolean {
+  const normalized = normalizeColumnName(value)
+  if (!normalized) return false
+  if (validateRut(value)) return false
+
+  return [
+    'rut',
+    'run',
+    'dv',
+    'nombre',
+    'razon',
+    'empresa',
+    'direccion',
+    'domicilio',
+    'giro',
+    'rubro',
+    'actividad',
+    'comuna',
+    'region',
+    'email',
+    'correo',
+    'telefono',
+    'fono',
+    'celular',
+    'codigo',
+    'id',
+  ].some(token => normalized === token || normalized.includes(token))
+}
+
+function looksLikeDataCell(value: string): boolean {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return false
+  if (validateRut(trimmed)) return true
+  if (/^\d+(?:-\d+)+$/.test(trimmed)) return true
+  if (looksLikeCompanyValue(trimmed) || looksLikePersonNameValue(trimmed)) return true
+
+  return /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(trimmed) &&
+    /\d/.test(trimmed) &&
+    trimmed.length >= 8
+}
+
+function matrixHasHeaderRow(rows: string[][]): boolean {
+  const firstRow = rows[0] ?? []
+  const secondRow = rows[1] ?? []
+  const firstNonEmpty = firstRow.filter(cell => String(cell ?? '').trim().length > 0)
+  if (firstNonEmpty.length === 0) return false
+
+  const headerSignals = firstNonEmpty.filter(looksLikeHeaderCell).length
+  const firstDataSignals = firstNonEmpty.filter(looksLikeDataCell).length
+  const secondDataSignals = secondRow.filter(looksLikeDataCell).length
+
+  if (firstNonEmpty.some(cell => validateRut(cell))) return false
+  if (headerSignals >= 2 && firstDataSignals <= 1) return true
+  if (headerSignals >= Math.ceil(firstNonEmpty.length * 0.5)) return true
+  if (firstDataSignals >= 2 && secondDataSignals >= 2) return false
+
+  return true
+}
+
+function looksLikeActivityValue(value: string): boolean {
+  const normalized = normalizeColumnName(value)
+  if (!normalized) return false
+  if (validateRut(value)) return false
+  if (looksLikeCompanyValue(value)) return false
+
+  return [
+    'imprenta',
+    'importacion',
+    'exportacion',
+    'fabrica',
+    'fca',
+    'planta',
+    'reciclaje',
+    'relleno',
+    'sanitario',
+    'packing',
+    'paking',
+    'taller',
+    'barraca',
+    'distribucion',
+    'pintura',
+    'funebre',
+    'agricola',
+  ].some(token => normalized.includes(token))
 }
 
 function looksLikeRutDigits(values: string[]): boolean {
@@ -321,8 +449,16 @@ function rowsFromMatrix(matrix: string[][]): ParsedUpload {
     }
   }
 
-  const headers = ensureUniqueHeaders(nonEmptyRows[0].map((cell, index) => toSafeHeader(cell, index)))
-  const rows = nonEmptyRows.slice(1).map(row => {
+  const hasHeaderRow = matrixHasHeaderRow(nonEmptyRows)
+  const dataRows = hasHeaderRow ? nonEmptyRows.slice(1) : nonEmptyRows
+  const maxColumnCount = Math.max(...nonEmptyRows.map(row => row.length))
+  const headerSource = hasHeaderRow
+    ? nonEmptyRows[0].map((cell, index) => toSafeHeader(cell, index))
+    : Array.from({ length: maxColumnCount }, (_, index) => (
+        inferColumnHeader(nonEmptyRows.map(row => row[index] ?? ''), index)
+      ))
+  const headers = ensureUniqueHeaders(headerSource)
+  const rows = dataRows.map(row => {
     const record: Record<string, string> = {}
     headers.forEach((header, index) => {
       record[header] = String(row[index] ?? '').trim()
