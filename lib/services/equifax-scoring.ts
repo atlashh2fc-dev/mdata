@@ -208,6 +208,25 @@ type ProjectionSummary = {
   top_10000: ProjectionBucket
 }
 
+type PipelineTriggerMode = 'safe' | 'force' | 'dry-run'
+type PipelineStatus = 'running' | 'success' | 'failed'
+
+type StoredPipelineRun = {
+  id: string
+  trigger_source: string
+  trigger_mode: PipelineTriggerMode
+  status: PipelineStatus
+  refreshed_rutids: number
+  refreshed_batches: number
+  models_trained: number
+  started_at: string
+  finished_at: string | null
+  error_message: string | null
+  notes: string | null
+  training_payload: Record<string, unknown> | null
+  projection_payload: Record<string, unknown> | null
+}
+
 type CrosscheckTemperature = 'all' | 'green' | 'yellow' | 'red'
 
 type CrosscheckBucket = {
@@ -250,13 +269,18 @@ type CrosscheckSummary = {
 type EquifaxPipelineRunResult = {
   run_id: string
   trigger_source: string
-  trigger_mode: 'safe' | 'force' | 'dry-run'
+  trigger_mode: PipelineTriggerMode
+  status: PipelineStatus
   refreshed_rutids: number
   refreshed_batches: number
   training: TrainModelResult | null
-  projections: ProjectionSummary
+  projections: ProjectionSummary | null
   crosscheck: CrosscheckSummary | null
-  finished_at: string
+  started_at?: string
+  finished_at: string | null
+  queued?: boolean
+  already_running?: boolean
+  message?: string
 }
 
 type RefreshUniverseOptions = {
@@ -2003,6 +2027,8 @@ const TRAINING_FEATURES = [
   'days_since_last_sale_feedback',
 ] as const
 
+const PIPELINE_STALE_MINUTES = 15
+
 function sigmoid(value: number) {
   if (value >= 0) {
     const z = Math.exp(-value)
@@ -2146,9 +2172,57 @@ async function fetchTrainingRows() {
   return rows
 }
 
-async function createPipelineRun(params: {
+function toStoredPipelineRun(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ''),
+    trigger_source: String(row.trigger_source ?? 'manual'),
+    trigger_mode: (row.trigger_mode ?? 'safe') as PipelineTriggerMode,
+    status: (row.status ?? 'running') as PipelineStatus,
+    refreshed_rutids: toNumber(row.refreshed_rutids),
+    refreshed_batches: toNumber(row.refreshed_batches),
+    models_trained: toNumber(row.models_trained),
+    started_at: String(row.started_at ?? new Date().toISOString()),
+    finished_at: row.finished_at ? String(row.finished_at) : null,
+    error_message: row.error_message ? String(row.error_message) : null,
+    notes: row.notes ? String(row.notes) : null,
+    training_payload: row.training_payload && typeof row.training_payload === 'object'
+      ? row.training_payload as Record<string, unknown>
+      : null,
+    projection_payload: row.projection_payload && typeof row.projection_payload === 'object'
+      ? row.projection_payload as Record<string, unknown>
+      : null,
+  } satisfies StoredPipelineRun
+}
+
+function toPipelineRunResult(
+  run: StoredPipelineRun,
+  options?: {
+    queued?: boolean
+    alreadyRunning?: boolean
+    message?: string
+  }
+) {
+  return {
+    run_id: run.id,
+    trigger_source: run.trigger_source,
+    trigger_mode: run.trigger_mode,
+    status: run.status,
+    refreshed_rutids: run.refreshed_rutids,
+    refreshed_batches: run.refreshed_batches,
+    training: null,
+    projections: null,
+    crosscheck: null,
+    started_at: run.started_at,
+    finished_at: run.finished_at,
+    queued: options?.queued,
+    already_running: options?.alreadyRunning,
+    message: options?.message,
+  } satisfies EquifaxPipelineRunResult
+}
+
+export async function createEquifaxScoringPipelineRun(params: {
   triggerSource: string
-  triggerMode: 'safe' | 'force' | 'dry-run'
+  triggerMode: PipelineTriggerMode
 }) {
   const { data, error } = await db
     .from('equifax_scoring_pipeline_runs')
@@ -2158,15 +2232,50 @@ async function createPipelineRun(params: {
       status: 'running',
       started_at: new Date().toISOString(),
     })
-    .select('id')
+    .select('id,trigger_source,trigger_mode,status,refreshed_rutids,refreshed_batches,models_trained,started_at,finished_at,error_message,notes,training_payload,projection_payload')
     .single()
 
-  if (error || !data?.id) {
-    console.error('[createPipelineRun]', error)
+  if (error || !data) {
+    console.error('[createEquifaxScoringPipelineRun]', error)
     throw new Error('No se pudo crear la corrida del pipeline Equifax.')
   }
 
-  return String(data.id)
+  return toPipelineRunResult(toStoredPipelineRun(data))
+}
+
+export async function markStaleEquifaxPipelineRunsAsFailed() {
+  const cutoff = new Date(Date.now() - PIPELINE_STALE_MINUTES * 60 * 1000).toISOString()
+  const { error } = await db
+    .from('equifax_scoring_pipeline_runs')
+    .update({
+      status: 'failed',
+      error_message: 'Corrida interrumpida por timeout o cierre del proceso.',
+      finished_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('status', 'running')
+    .lt('started_at', cutoff)
+
+  if (error) {
+    console.error('[markStaleEquifaxPipelineRunsAsFailed]', error)
+  }
+}
+
+export async function findLatestRunningEquifaxPipelineRun() {
+  const { data, error } = await db
+    .from('equifax_scoring_pipeline_runs')
+    .select('id,trigger_source,trigger_mode,status,refreshed_rutids,refreshed_batches,models_trained,started_at,finished_at,error_message,notes,training_payload,projection_payload')
+    .eq('status', 'running')
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[findLatestRunningEquifaxPipelineRun]', error)
+    throw new Error('No se pudo leer la corrida activa del pipeline Equifax.')
+  }
+
+  return data ? toPipelineRunResult(toStoredPipelineRun(data)) : null
 }
 
 async function updatePipelineRun(runId: string, payload: Record<string, unknown>) {
@@ -2578,14 +2687,15 @@ export async function trainEquifaxLogisticModels(options?: {
 
 export async function runEquifaxScoringPipeline(options?: {
   triggerSource?: string
-  activationMode?: 'safe' | 'force' | 'dry-run'
+  activationMode?: PipelineTriggerMode
+  existingRunId?: string
 }) {
   const triggerSource = options?.triggerSource ?? 'manual'
   const activationMode = options?.activationMode ?? 'safe'
-  const runId = await createPipelineRun({
+  const runId = options?.existingRunId ?? (await createEquifaxScoringPipelineRun({
     triggerSource,
     triggerMode: activationMode,
-  })
+  })).run_id
 
   try {
     const rutids = await collectEquifaxFeedbackRutids()
@@ -2615,6 +2725,14 @@ export async function runEquifaxScoringPipeline(options?: {
     const projections = await buildEquifaxProjectionSummary()
     const crosscheck = await buildEquifaxModelCrosscheckSummary()
     const finishedAt = new Date().toISOString()
+    const trainingPayload = training
+      ? {
+          ...training,
+          crosscheck_summary: crosscheck,
+        }
+      : {
+          crosscheck_summary: crosscheck,
+        }
 
     await updatePipelineRun(runId, {
       status: 'success',
@@ -2623,7 +2741,7 @@ export async function runEquifaxScoringPipeline(options?: {
       models_trained: training?.targets.length ?? 0,
       activated_targets: training?.activated_targets ?? [],
       model_version: training?.version ?? null,
-      training_payload: training,
+      training_payload: trainingPayload,
       projection_payload: projections,
       notes: training?.activated_targets.length
         ? `Se activaron ${training.activated_targets.join(', ')}`
@@ -2635,6 +2753,7 @@ export async function runEquifaxScoringPipeline(options?: {
       run_id: runId,
       trigger_source: triggerSource,
       trigger_mode: activationMode,
+      status: 'success',
       refreshed_rutids: rutids.length,
       refreshed_batches: refreshedBatches,
       training,

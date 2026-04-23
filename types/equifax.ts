@@ -218,12 +218,17 @@ export interface EquifaxPipelineRunResult {
   run_id: string
   trigger_source: string
   trigger_mode: 'safe' | 'force' | 'dry-run'
+  status: 'running' | 'success' | 'failed'
   refreshed_rutids: number
   refreshed_batches: number
   training: Record<string, unknown> | null
-  projections: EquifaxProjectionSummary
+  projections: EquifaxProjectionSummary | null
   crosscheck: EquifaxModelCrosscheckSummary | null
-  finished_at: string
+  started_at?: string
+  finished_at: string | null
+  queued?: boolean
+  already_running?: boolean
+  message?: string
 }
 
 export interface EquifaxActiveModelSummary {

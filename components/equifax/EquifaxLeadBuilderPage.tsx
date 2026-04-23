@@ -293,12 +293,24 @@ export function EquifaxLeadBuilderPage() {
 
   const isPreviewStale = Boolean(preview && previewRequestKey && previewRequestKey !== currentRequestKey)
   const latestPipelineRun = pipelineOverview?.latest as Record<string, unknown> | null
+  const latestPipelineStatus = String(latestPipelineRun?.status ?? '')
+  const pipelineIsActive = latestPipelineStatus === 'running'
   const latestTraining = latestPipelineRun?.training_payload as Record<string, unknown> | null
   const latestTargets = Array.isArray(latestTraining?.targets)
     ? latestTraining.targets as Array<Record<string, unknown>>
     : []
   const crosscheckOverall = pipelineOverview?.crosscheck?.overall ?? null
   const crosscheckByTemperature = pipelineOverview?.crosscheck?.by_temperature ?? []
+
+  useEffect(() => {
+    if (latestPipelineStatus !== 'running') return
+
+    const intervalId = window.setInterval(() => {
+      void loadPipelineOverview()
+    }, 5000)
+
+    return () => window.clearInterval(intervalId)
+  }, [latestPipelineStatus])
 
   async function handleSalesImport(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -584,6 +596,7 @@ export function EquifaxLeadBuilderPage() {
               <select
                 value={pipelineMode}
                 onChange={event => setPipelineMode(event.target.value as 'safe' | 'dry-run' | 'force')}
+                disabled={runningPipeline || pipelineIsActive}
                 className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-500"
               >
                 <option value="safe">Modo safe</option>
@@ -592,18 +605,27 @@ export function EquifaxLeadBuilderPage() {
               </select>
               <button
                 onClick={handleRunPipeline}
-                disabled={runningPipeline}
+                disabled={runningPipeline || pipelineIsActive}
                 className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {runningPipeline ? <Spinner size="sm" /> : <RefreshCcw className="h-4 w-4" />}
-                Ejecutar pipeline
+                {runningPipeline || pipelineIsActive ? <Spinner size="sm" /> : <RefreshCcw className="h-4 w-4" />}
+                {pipelineIsActive ? 'Pipeline corriendo' : 'Ejecutar pipeline'}
               </button>
             </div>
           </div>
 
           {pipelineRunResult && (
-            <div className="mt-4 rounded-2xl border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
-              Pipeline ejecutado. Run {pipelineRunResult.run_id} · modo {getPipelineModeLabel(pipelineRunResult.trigger_mode)} · {formatNumber(pipelineRunResult.refreshed_rutids)} RUTs refrescados.
+            <div className={cn(
+              'mt-4 rounded-2xl border px-4 py-3 text-sm',
+              pipelineRunResult.status === 'failed'
+                ? 'border-rose-500/25 bg-rose-500/10 text-rose-100'
+                : pipelineRunResult.status === 'running'
+                  ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
+                  : 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100'
+            )}>
+              {pipelineRunResult.status === 'running'
+                ? `${pipelineRunResult.message ?? (pipelineRunResult.already_running ? 'Ya había una corrida en progreso.' : 'Pipeline iniciado en segundo plano.')} Run ${pipelineRunResult.run_id} · modo ${getPipelineModeLabel(pipelineRunResult.trigger_mode)}.`
+                : `Pipeline ejecutado. Run ${pipelineRunResult.run_id} · modo ${getPipelineModeLabel(pipelineRunResult.trigger_mode)} · ${formatNumber(pipelineRunResult.refreshed_rutids)} RUTs refrescados.`}
             </div>
           )}
 
