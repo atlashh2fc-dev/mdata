@@ -60,16 +60,81 @@ export default function CerebroDeNegociosPage() {
     setLoading(false)
   }
 
-  // Helper para renderizar markdown súper simple: negritas y viñetas
+  const renderInlineMarkdown = (text: string) => {
+    const parts: React.ReactNode[] = []
+    const tokenRegex = /(\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]+)\)|(https?:\/\/[^\s<]+|\/api\/[^\s<]+)|\*\*([^*]+)\*\*)/g
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+
+    while ((match = tokenRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index))
+      }
+
+      const markdownHref = match[3]
+      const plainHref = match[4]
+      const strongText = match[5]
+
+      if (markdownHref) {
+        const isExternal = markdownHref.startsWith('http')
+        parts.push(
+          <a
+            key={`${match.index}-link`}
+            href={markdownHref}
+            target={isExternal ? '_blank' : undefined}
+            rel={isExternal ? 'noreferrer' : undefined}
+            className="text-cyan-300 underline decoration-cyan-400/50 underline-offset-2 hover:text-cyan-200"
+          >
+            {match[2]}
+          </a>
+        )
+      } else if (plainHref) {
+        const isExternal = plainHref.startsWith('http')
+        parts.push(
+          <a
+            key={`${match.index}-url`}
+            href={plainHref}
+            target={isExternal ? '_blank' : undefined}
+            rel={isExternal ? 'noreferrer' : undefined}
+            className="text-cyan-300 underline decoration-cyan-400/50 underline-offset-2 hover:text-cyan-200"
+          >
+            {plainHref}
+          </a>
+        )
+      } else if (strongText) {
+        parts.push(<strong key={`${match.index}-strong`}>{strongText}</strong>)
+      }
+
+      lastIndex = tokenRegex.lastIndex
+    }
+
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex))
+    }
+
+    return parts
+  }
+
+  // Helper para renderizar markdown simple: links, negritas y viñetas.
   const renderMarkdown = (text: string) => {
     return text.split('\n').map((line, i) => {
-      // Strong: **texto**
-      const formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      
-      if (formatted.startsWith('- ')) {
-        return <li key={i} className="ml-4 list-disc marker:text-cyan-500 mb-1" dangerouslySetInnerHTML={{ __html: formatted.substring(2) }} />
+      if (!line.trim()) {
+        return <br key={i} />
       }
-      return <p key={i} className="mb-2 last:mb-0" dangerouslySetInnerHTML={{ __html: formatted }} />
+
+      if (line.startsWith('- ')) {
+        return (
+          <li key={i} className="ml-4 list-disc marker:text-cyan-500 mb-1">
+            {renderInlineMarkdown(line.substring(2))}
+          </li>
+        )
+      }
+
+      return (
+        <p key={i} className="mb-2 last:mb-0">
+          {renderInlineMarkdown(line)}
+        </p>
+      )
     })
   }
 

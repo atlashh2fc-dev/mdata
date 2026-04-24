@@ -40,15 +40,12 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-export async function POST(req: NextRequest) {
+async function exportSegmento(segmentId: string | undefined) {
   const supabase = await createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   }
-
-  const body = await req.json()
-  const segmentId = body.segment_id as string | undefined
 
   if (!segmentId) {
     return NextResponse.json({ error: 'segment_id es requerido' }, { status: 400 })
@@ -94,4 +91,13 @@ export async function POST(req: NextRequest) {
       'Cache-Control': 'no-store',
     },
   })
+}
+
+export async function GET(req: NextRequest) {
+  return exportSegmento(req.nextUrl.searchParams.get('segment_id') ?? undefined)
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json()
+  return exportSegmento(body.segment_id as string | undefined)
 }

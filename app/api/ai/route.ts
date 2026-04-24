@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
+import { createSegmento } from '@/lib/services/segmentos'
+import { FILTER_FIELDS, type FilterCondition, type FilterOperator, type SegmentFilter } from '@/types'
 import { search, SafeSearchType } from 'duck-duck-scrape'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -15,6 +17,22 @@ const CRM_SYNC_MAX_BUFFER = 1024 * 1024 * 4
 const DEFAULT_CRM_FRESH_MINUTES = 180
 const DEFAULT_SAMPLE_LIMIT = 20
 const MAX_SAMPLE_LIMIT = 100
+const ALLOWED_SEGMENT_FIELDS = new Set(FILTER_FIELDS.map(field => field.key as string))
+const ALLOWED_SEGMENT_OPERATORS = new Set<FilterOperator>([
+  'eq',
+  'neq',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'between',
+  'in',
+  'not_in',
+  'is_null',
+  'is_not_null',
+  'contains',
+  'starts_with',
+])
 
 const execFileAsync = promisify(execFile)
 
@@ -309,7 +327,75 @@ async function getPymeCrmSample(args: { limit?: number; onlyValidContact?: boole
   })
 }
 
-async function executeTool(name: string, rawArgs?: string) {
+function normalizeSegmentCondition(condition: unknown): FilterCondition {
+  if (!condition || typeof condition !== 'object') {
+    throw new Error('Cada condición del segmento debe ser un objeto.')
+  }
+
+  const input = condition as Partial<FilterCondition>
+  const field = String(input.field ?? '')
+  const operator = String(input.operator ?? '') as FilterOperator
+
+  if (!ALLOWED_SEGMENT_FIELDS.has(field)) {
+    throw new Error(`Campo de segmento no permitido: ${field}`)
+  }
+
+  if (!ALLOWED_SEGMENT_OPERATORS.has(operator)) {
+    throw new Error(`Operador de segmento no permitido: ${operator}`)
+  }
+
+  return {
+    field,
+    operator,
+    value: input.value ?? null,
+    value2: input.value2 ?? null,
+  }
+}
+
+async function createSegmentDownload(args: Record<string, unknown>, userId: string, origin: string) {
+  const name = String(args.name ?? '').trim()
+  const description = typeof args.description === 'string' ? args.description.trim() : null
+  const rawFilters = args.filters as Partial<SegmentFilter> | undefined
+  const conditions = Array.isArray(rawFilters?.conditions)
+    ? rawFilters.conditions.map(normalizeSegmentCondition)
+    : []
+
+  if (!name) {
+    throw new Error('Debes indicar un nombre para el segmento.')
+  }
+
+  if (conditions.length === 0) {
+    throw new Error('No puedo generar una descarga sin filtros. Define al menos una condición de segmento.')
+  }
+
+  const filters: SegmentFilter = {
+    logic: rawFilters?.logic === 'OR' ? 'OR' : 'AND',
+    conditions,
+  }
+
+  const segmento = await createSegmento(name, description, filters, userId)
+  if (!segmento) {
+    throw new Error('No se pudo crear el segmento para descarga.')
+  }
+
+  const downloadPath = `/api/segmentos/export?segment_id=${encodeURIComponent(segmento.id)}`
+
+  return {
+    segment_id: segmento.id,
+    name: segmento.name,
+    description: segmento.description,
+    row_count: segmento.row_count,
+    download_url: `${origin}${downloadPath}`,
+    download_path: downloadPath,
+    format: 'csv',
+  }
+}
+
+async function executeTool(
+  name: string,
+  rawArgs: string | undefined,
+  context: { userId: string; origin: string }
+) {
   const args = rawArgs ? JSON.parse(rawArgs) : {}
 
   if (name === 'webSearch') {
@@ -334,6 +420,10 @@ async function executeTool(name: string, rawArgs?: string) {
       onlyValidContact: args.only_valid_contact,
       onlyWithCrm: args.only_with_crm,
     }), null, 2)
+  }
+
+  if (name === 'createSegmentDownload') {
+    return JSON.stringify(await createSegmentDownload(args, context.userId, context.origin), null, 2)
   }
 
   return `Tool desconocida: ${name}`
@@ -378,6 +468,9 @@ Reglas obligatorias:
 - Para conteos como "cuanta bdd pyme tenemos" o "cuantos tienen contacto con CRM", llama getPymeCrmOverview.
 - Si el usuario pide muestra, ejemplos o filas, llama getPymeCrmSample y devuelve una tabla Markdown breve con los campos más útiles.
 - Explica de forma clara si los datos vienen de persona_scores/contact_center_feedback sincronizados desde crm_feedback_export_v1.
+- Si el usuario pide "descargar", "exportar", "link", "enlace" o "URL" para un segmento inferible, llama createSegmentDownload y entrega el enlace Markdown de descarga. No respondas que no puedes si existen filtros concretos.
+- Si pide "base de autos", interpreta el segmento como RUTs con vehículos (tiene_autos = true). Si pide empresas/PyME, usa tiene_empresa = true. Si pide bienes raíces, usa tiene_bienes_raices = true. Combina con región, comuna, score o cantidad cuando el usuario lo indique.
+- No generes descarga de la base completa sin filtros. En ese caso pide criterios o propone 2-3 segmentos exportables.
 - SIEMPRE usa Markdown. Mantén un tono ejecutivo, preciso y práctico.
 
 STATUS ACTUAL DE LA BASE DE DATOS (KPIs en vivo):
@@ -490,6 +583,76 @@ ${JSON.stringify(stats, null, 2)}
             }
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'createSegmentDownload',
+          description: 'Crea un segmento filtrado sobre master_personas_view y devuelve una URL directa de descarga CSV. Usar cuando el usuario pide descargar/exportar/link/enlace/URL para una base segmentada. No usar para base completa sin filtros.',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Nombre ejecutivo del segmento, por ejemplo "Base autos con propietario".'
+              },
+              description: {
+                type: 'string',
+                description: 'Descripción breve de los criterios usados.'
+              },
+              filters: {
+                type: 'object',
+                description: 'Filtros del segmento. Campos permitidos: region_part, domicilio_region, comuna_part, domicilio_comuna, n_autos, tiene_autos, tiene_empresa, tiene_bienes_raices, n_bienes_raices, totalavaluos, score_patrimonial, cobertura_pct.',
+                properties: {
+                  logic: {
+                    type: 'string',
+                    enum: ['AND', 'OR']
+                  },
+                  conditions: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        field: {
+                          type: 'string',
+                          enum: [
+                            'region_part',
+                            'domicilio_region',
+                            'comuna_part',
+                            'domicilio_comuna',
+                            'n_autos',
+                            'tiene_autos',
+                            'tiene_empresa',
+                            'tiene_bienes_raices',
+                            'n_bienes_raices',
+                            'totalavaluos',
+                            'score_patrimonial',
+                            'cobertura_pct'
+                          ]
+                        },
+                        operator: {
+                          type: 'string',
+                          enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'not_in', 'is_null', 'is_not_null', 'contains', 'starts_with']
+                        },
+                        value: {
+                          type: ['string', 'number', 'boolean', 'null'],
+                          description: 'Valor primario del filtro. Para booleanos usa true/false; para números usa number; para texto usa string.',
+                        },
+                        value2: {
+                          type: ['string', 'number', 'null'],
+                          description: 'Segundo valor solo para between.',
+                        }
+                      },
+                      required: ['field', 'operator']
+                    }
+                  }
+                },
+                required: ['logic', 'conditions']
+              }
+            },
+            required: ['name', 'filters']
+          }
+        }
       }
     ]
 
@@ -518,7 +681,10 @@ ${JSON.stringify(stats, null, 2)}
 
       for (const tc of toolCalls as ToolCall[]) {
         try {
-          const toolResult = await executeTool(tc.function.name, tc.function.arguments)
+          const toolResult = await executeTool(tc.function.name, tc.function.arguments, {
+            userId: user.id,
+            origin: req.nextUrl.origin,
+          })
           currentMessages.push({
             role: 'tool',
             tool_call_id: tc.id,
