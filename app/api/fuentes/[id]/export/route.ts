@@ -8,6 +8,7 @@ export const maxDuration = 300
 
 const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_BATCH_SIZE = 1000
+const COMPANY_EXPORT_BATCH_SIZE = 10000
 
 type ExportableSource = {
   id: string
@@ -27,6 +28,11 @@ type ExportPlan = {
   tableName: string
   orderColumn: string | null
   columns: ExportColumn[] | null
+}
+
+type CompanyCursor = {
+  razon_social_empresa: string
+  rutid: string
 }
 
 const CRM_EXPORT_COLUMNS = [
@@ -189,6 +195,29 @@ function supportsCrmExport(source: ExportableSource) {
   return source.slug === 'empresa_resumen' || source.canonical_table === 'empresa_resumen'
 }
 
+function isCompanyCursor(value: unknown): value is CompanyCursor {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    'razon_social_empresa' in value &&
+    'rutid' in value &&
+    typeof (value as CompanyCursor).razon_social_empresa === 'string' &&
+    typeof (value as CompanyCursor).rutid === 'string'
+  )
+}
+
+function getCompanyCursor(row: Record<string, unknown> | undefined): CompanyCursor | null {
+  const razonSocial = row?.razon_social_empresa
+  const rutid = row?.rutid
+
+  if (typeof razonSocial !== 'string' || typeof rutid !== 'string') return null
+
+  return {
+    razon_social_empresa: razonSocial,
+    rutid,
+  }
+}
+
 function getPostgresConnectionString() {
   const connectionString = process.env.POSTGRES_URL_NON_POOLING
     ?? process.env.POSTGRES_URL
@@ -280,13 +309,14 @@ async function fetchCompanyBatchWithCrm(
   batchSize: number,
   cursorValue: unknown
 ) {
-  const cursorClause = cursorValue !== null && cursorValue !== undefined
-    ? 'AND pm.rutid > $1'
+  const companyCursor = isCompanyCursor(cursorValue) ? cursorValue : null
+  const cursorClause = companyCursor
+    ? 'AND (pm.razon_social_empresa, pm.rutid) > ($1, $2)'
     : ''
-  const params = cursorValue !== null && cursorValue !== undefined
-    ? [cursorValue, batchSize]
+  const params = companyCursor
+    ? [companyCursor.razon_social_empresa, companyCursor.rutid, batchSize]
     : [batchSize]
-  const limitParam = cursorValue !== null && cursorValue !== undefined ? '$2' : '$1'
+  const limitParam = companyCursor ? '$3' : '$1'
 
   const result = await client.query(
     `
@@ -321,7 +351,7 @@ async function fetchCompanyBatchWithCrm(
         COALESCE(lf.managed_at, ps.last_feedback_at) AS "CRM - Última gestión",
         lf.outcome AS "CRM - Último resultado",
         lf.outcome_subtype AS "CRM - Subresultado",
-        lf.channel AS "CRM - Último canal",
+        COALESCE(lf.channel, ps.best_channel) AS "CRM - Último canal",
         lf.agent_name AS "CRM - Último agente",
         lf.campaign_name AS "CRM - Última campaña",
         ps.last_contact_at AS "CRM - Último contacto",
@@ -347,7 +377,7 @@ async function fetchCompanyBatchWithCrm(
         ON lf.target_rutid = pm.rutid
       WHERE pm.razon_social_empresa IS NOT NULL
       ${cursorClause}
-      ORDER BY pm.rutid ASC
+      ORDER BY pm.razon_social_empresa ASC, pm.rutid ASC
       LIMIT ${limitParam}
     `,
     params
@@ -361,13 +391,14 @@ async function fetchCompanyBatch(
   batchSize: number,
   cursorValue: unknown
 ) {
-  const cursorClause = cursorValue !== null && cursorValue !== undefined
-    ? 'AND pm.rutid > $1'
+  const companyCursor = isCompanyCursor(cursorValue) ? cursorValue : null
+  const cursorClause = companyCursor
+    ? 'AND (pm.razon_social_empresa, pm.rutid) > ($1, $2)'
     : ''
-  const params = cursorValue !== null && cursorValue !== undefined
-    ? [cursorValue, batchSize]
+  const params = companyCursor
+    ? [companyCursor.razon_social_empresa, companyCursor.rutid, batchSize]
     : [batchSize]
-  const limitParam = cursorValue !== null && cursorValue !== undefined ? '$2' : '$1'
+  const limitParam = companyCursor ? '$3' : '$1'
 
   const result = await client.query(
     `
@@ -378,7 +409,7 @@ async function fetchCompanyBatch(
       FROM public.personas_master pm
       WHERE pm.razon_social_empresa IS NOT NULL
       ${cursorClause}
-      ORDER BY pm.rutid ASC
+      ORDER BY pm.razon_social_empresa ASC, pm.rutid ASC
       LIMIT ${limitParam}
     `,
     params
@@ -464,6 +495,7 @@ function createCsvStream(source: ExportableSource, plan: ExportPlan) {
       let headerColumns: string[] = []
       let cursorValue: unknown = null
       let offset = 0
+      const batchSize = supportsCrmExport(source) ? COMPANY_EXPORT_BATCH_SIZE : DEFAULT_BATCH_SIZE
 
       try {
         client = await pool.connect()
@@ -479,7 +511,7 @@ function createCsvStream(source: ExportableSource, plan: ExportPlan) {
           const rows = await fetchBatch(
             client,
             plan,
-            DEFAULT_BATCH_SIZE,
+            batchSize,
             cursorValue,
             offset,
             source,
@@ -506,11 +538,16 @@ function createCsvStream(source: ExportableSource, plan: ExportPlan) {
 
           controller.enqueue(encoder.encode(`${csvChunk}\n`))
 
-          if (rows.length < DEFAULT_BATCH_SIZE) {
+          if (rows.length < batchSize) {
             break
           }
 
-          if (plan.orderColumn) {
+          if (supportsCrmExport(source)) {
+            cursorValue = getCompanyCursor(rows.at(-1))
+            if (!cursorValue) {
+              offset += rows.length
+            }
+          } else if (plan.orderColumn) {
             cursorValue = rows.at(-1)?.[plan.orderColumn]
             if (cursorValue === null || cursorValue === undefined) {
               offset += rows.length
@@ -563,7 +600,7 @@ function createCsvStreamWithCrm(source: ExportableSource, plan: ExportPlan) {
           const rows = await fetchBatch(
             client,
             plan,
-            DEFAULT_BATCH_SIZE,
+            COMPANY_EXPORT_BATCH_SIZE,
             cursorValue,
             0,
             source,
@@ -578,10 +615,10 @@ function createCsvStreamWithCrm(source: ExportableSource, plan: ExportPlan) {
 
           controller.enqueue(encoder.encode(`${csvChunk}\n`))
 
-          if (rows.length < DEFAULT_BATCH_SIZE) break
+          if (rows.length < COMPANY_EXPORT_BATCH_SIZE) break
 
-          cursorValue = rows.at(-1)?.rutid
-          if (cursorValue === null || cursorValue === undefined) break
+          cursorValue = getCompanyCursor(rows.at(-1))
+          if (!cursorValue) break
         }
 
         controller.close()
