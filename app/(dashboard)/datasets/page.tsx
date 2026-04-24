@@ -5,7 +5,7 @@ import { Header } from '@/components/layout/Header'
 import { LoadingState, EmptyState } from '@/components/ui/Spinner'
 import type { DataSource } from '@/types'
 import {
-  Plus, Database, Download, FileText, Globe, Table2,
+  AlertCircle, Database, Download, Eye, FileText, Globe, Loader2, Plus, Table2, X,
 } from 'lucide-react'
 import { formatDatetime, formatNumber, formatRelativeTime } from '@/lib/utils/formatters'
 
@@ -37,12 +37,34 @@ function supportsCrmExport(fuente: DataSource) {
   return fuente.slug === 'empresa_resumen' || fuente.canonical_table === 'empresa_resumen'
 }
 
+type DatasetPreview = {
+  source: {
+    id: string
+    name?: string | null
+    slug?: string | null
+    table_name: string
+  }
+  columns: string[]
+  rows: Record<string, unknown>[]
+  row_limit: number
+}
+
+function formatPreviewValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
 export default function DatasetsPage() {
   const [fuentes, setFuentes] = useState<DataSource[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ name: '', source_type: 'csv', description: '' })
+  const [previewSource, setPreviewSource] = useState<DataSource | null>(null)
+  const [preview, setPreview] = useState<DatasetPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
   useEffect(() => {
     loadFuentes()
@@ -72,6 +94,37 @@ export default function DatasetsPage() {
       loadFuentes()
     }
     setCreating(false)
+  }
+
+  async function openPreview(fuente: DataSource) {
+    if (!fuente.canonical_table && !fuente.source_table_name) return
+
+    setPreviewSource(fuente)
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(true)
+
+    try {
+      const res = await fetch(`/api/fuentes/${fuente.id}/preview`)
+      const json = await res.json()
+
+      if (!res.ok) {
+        throw new Error(json.error ?? 'No se pudo cargar la preview.')
+      }
+
+      setPreview(json.data)
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : 'No se pudo cargar la preview.')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  function closePreview() {
+    setPreviewSource(null)
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
   }
 
   return (
@@ -113,7 +166,15 @@ export default function DatasetsPage() {
                 ? `${exportHref}?include_crm=1`
                 : null
               return (
-                <div key={fuente.id} className="card-hover p-5 group">
+                <div
+                  key={fuente.id}
+                  onClick={event => {
+                    const target = event.target as HTMLElement
+                    if (target.closest('a, button')) return
+                    openPreview(fuente)
+                  }}
+                  className="card-hover p-5 group cursor-pointer"
+                >
                   <div className="flex items-start justify-between mb-3">
                     <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center border border-brand-500/20">
                       <Icon className="w-5 h-5 text-brand-400" />
@@ -176,6 +237,15 @@ export default function DatasetsPage() {
 
                     {exportHref && (
                       <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => openPreview(fuente)}
+                          className="btn-secondary w-full justify-center text-xs py-2"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver preview
+                        </button>
+
                         <a
                           href={exportHref}
                           className="btn-secondary w-full justify-center text-xs py-2"
@@ -284,6 +354,120 @@ export default function DatasetsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {previewSource && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
+          <div className="card w-full max-w-7xl h-[86vh] animate-slide-in flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-[#334155]/80">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                  <Database className="w-3.5 h-3.5" />
+                  <span className="font-mono truncate">
+                    {preview?.source.table_name ?? previewSource.canonical_table ?? previewSource.source_table_name}
+                  </span>
+                </div>
+                <h2 className="text-lg font-semibold text-white truncate">
+                  Preview de {previewSource.name}
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Columnas completas y máximo 10 filas de muestra
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePreview}
+                aria-label="Cerrar preview"
+                className="btn-secondary px-2.5 py-2 shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-[#253357]/80 bg-[#0f172a]/35">
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span className="badge-neutral">
+                  {preview ? `${formatNumber(preview.columns.length)} columnas` : 'Cargando columnas'}
+                </span>
+                <span className="badge-neutral">
+                  {preview ? `${formatNumber(preview.rows.length)} filas` : 'Hasta 10 filas'}
+                </span>
+              </div>
+              {previewSource.latest_loaded_row_count || previewSource.record_count ? (
+                <span className="text-xs text-slate-500">
+                  Total registrado: {formatNumber(previewSource.latest_loaded_row_count ?? previewSource.record_count ?? 0)}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex-1 min-h-0 p-5">
+              {previewLoading ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                  <Loader2 className="w-8 h-8 animate-spin text-brand-400 mb-3" />
+                  <span className="text-sm">Cargando preview del dataset...</span>
+                </div>
+              ) : previewError ? (
+                <div className="h-full flex flex-col items-center justify-center text-center">
+                  <div className="w-11 h-11 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center mb-3">
+                    <AlertCircle className="w-5 h-5 text-red-400" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-white mb-1">No se pudo abrir la preview</h3>
+                  <p className="text-sm text-slate-400 max-w-md">{previewError}</p>
+                </div>
+              ) : preview && preview.columns.length > 0 ? (
+                <div className="h-full overflow-auto rounded-lg border border-[#334155]/80 bg-[#0f172a]/70">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="sticky top-0 z-10 bg-[#111c31] shadow-[0_1px_0_0_rgba(51,65,85,0.9)]">
+                      <tr>
+                        {preview.columns.map(column => (
+                          <th
+                            key={column}
+                            className="px-3 py-3 font-semibold text-slate-300 whitespace-nowrap border-r border-[#334155]/60 last:border-r-0"
+                          >
+                            {column}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={preview.columns.length}
+                            className="px-4 py-10 text-center text-sm text-slate-500"
+                          >
+                            Esta tabla no tiene filas para mostrar.
+                          </td>
+                        </tr>
+                      ) : (
+                        preview.rows.map((row, rowIndex) => (
+                          <tr
+                            key={rowIndex}
+                            className="border-b border-[#253357]/80 last:border-b-0 hover:bg-white/[0.03]"
+                          >
+                            {preview.columns.map(column => (
+                              <td
+                                key={`${rowIndex}-${column}`}
+                                className="px-3 py-2.5 text-slate-300 whitespace-nowrap max-w-[280px] truncate border-r border-[#253357]/60 last:border-r-0"
+                                title={formatPreviewValue(row[column])}
+                              >
+                                {formatPreviewValue(row[column])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-sm text-slate-500">
+                  No hay columnas disponibles para este dataset.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
