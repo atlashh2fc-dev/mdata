@@ -25,6 +25,7 @@ type PreviewColumn = {
 type PreviewPlan = {
   tableName: string
   orderColumn: string | null
+  orderDirection?: 'ASC' | 'DESC'
   columns: PreviewColumn[] | null
   whereClause?: string
 }
@@ -56,9 +57,15 @@ const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   },
   acumulado_resumen: {
     tableName: 'personas_master',
-    orderColumn: 'rutid',
+    orderColumn: 'n_bienes_raices',
+    orderDirection: 'DESC',
     whereClause: `COALESCE("n_bienes_raices", 0) > 0 OR COALESCE("totalavaluos", 0) > 0`,
-    columns: null,
+    columns: [
+      { source: 'rutid' },
+      { source: 'n_bienes_raices' },
+      { source: 'totalavaluos' },
+      { source: 'loaded_at' },
+    ],
   },
 }
 
@@ -268,7 +275,8 @@ export async function GET(
     const tableRef = `${quoteIdentifier('public')}.${quoteIdentifier(plan.tableName)}`
     const selectClause = buildSelectClause(plan)
     const whereClause = plan.whereClause ? ` WHERE ${plan.whereClause}` : ''
-    const orderClause = orderColumn ? ` ORDER BY ${quoteIdentifier(orderColumn)} ASC` : ''
+    const orderDirection = plan.orderDirection === 'DESC' ? 'DESC' : 'ASC'
+    const orderClause = orderColumn ? ` ORDER BY ${quoteIdentifier(orderColumn)} ${orderDirection}` : ''
     const result = await client.query(
       `SELECT ${selectClause} FROM ${tableRef}${whereClause}${orderClause} LIMIT $1`,
       [PREVIEW_LIMIT]
