@@ -26,12 +26,14 @@ type PreviewPlan = {
   tableName: string
   orderColumn: string | null
   columns: PreviewColumn[] | null
+  whereClause?: string
 }
 
 const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   pernat_resumen: {
     tableName: 'personas_master',
     orderColumn: 'rutid',
+    whereClause: `COALESCE(NULLIF(BTRIM("nombres"), ''), NULLIF(BTRIM("paterno"), ''), NULLIF(BTRIM("materno"), '')) IS NOT NULL`,
     columns: [
       { source: 'rutid' },
       { source: 'nombres' },
@@ -47,6 +49,7 @@ const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   autos_resumen: {
     tableName: 'personas_master',
     orderColumn: 'rutid',
+    whereClause: `"n_autos" > 0`,
     columns: [
       { source: 'rutid' },
       { source: 'n_autos' },
@@ -55,7 +58,8 @@ const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   },
   empresa_resumen: {
     tableName: 'personas_master',
-    orderColumn: 'rutid',
+    orderColumn: 'razon_social_empresa',
+    whereClause: `"razon_social_empresa" IS NOT NULL`,
     columns: [
       { source: 'rutid' },
       { source: 'razon_social_empresa' },
@@ -65,6 +69,7 @@ const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   domicilio_resumen: {
     tableName: 'personas_master',
     orderColumn: 'rutid',
+    whereClause: `COALESCE(NULLIF(BTRIM("domicilio_comuna"), ''), NULLIF(BTRIM("domicilio_region"), '')) IS NOT NULL`,
     columns: [
       { source: 'rutid' },
       { source: 'domicilio_comuna', alias: 'comuna' },
@@ -75,6 +80,7 @@ const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   acumulado_resumen: {
     tableName: 'personas_master',
     orderColumn: 'rutid',
+    whereClause: `COALESCE("n_bienes_raices", 0) > 0 OR COALESCE("totalavaluos", 0) > 0`,
     columns: [
       { source: 'rutid' },
       { source: 'n_bienes_raices' },
@@ -289,9 +295,10 @@ export async function GET(
 
     const tableRef = `${quoteIdentifier('public')}.${quoteIdentifier(plan.tableName)}`
     const selectClause = buildSelectClause(plan)
+    const whereClause = plan.whereClause ? ` WHERE ${plan.whereClause}` : ''
     const orderClause = orderColumn ? ` ORDER BY ${quoteIdentifier(orderColumn)} ASC` : ''
     const result = await client.query(
-      `SELECT ${selectClause} FROM ${tableRef}${orderClause} LIMIT $1`,
+      `SELECT ${selectClause} FROM ${tableRef}${whereClause}${orderClause} LIMIT $1`,
       [PREVIEW_LIMIT]
     )
 
