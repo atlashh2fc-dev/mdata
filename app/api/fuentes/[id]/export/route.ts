@@ -59,6 +59,11 @@ const CRM_EXPORT_COLUMNS = [
   'CRM - Mejor hora',
   'CRM - Mejor teléfono',
   'CRM - Mejor email',
+  'CRM - Ejecutivo nombre',
+  'CRM - Ejecutivo cargo',
+  'CRM - Ejecutivo RUT',
+  'CRM - Ejecutivo teléfono',
+  'CRM - Ejecutivo email',
 ] as const
 
 const DATASET_EXPORT_FALLBACKS: Record<string, ExportPlan> = {
@@ -369,12 +374,19 @@ async function fetchCompanyBatchWithCrm(
           ELSE LPAD(ps.best_contact_hour::text, 2, '0') || ':00'
         END AS "CRM - Mejor hora",
         ps.best_phone AS "CRM - Mejor teléfono",
-        ps.best_email AS "CRM - Mejor email"
+        ps.best_email AS "CRM - Mejor email",
+        ec.nombre_ejecutivo AS "CRM - Ejecutivo nombre",
+        ec.cargo AS "CRM - Ejecutivo cargo",
+        ec.rutid_ejecutivo AS "CRM - Ejecutivo RUT",
+        ec.mejor_telefono AS "CRM - Ejecutivo teléfono",
+        ec.email AS "CRM - Ejecutivo email"
       FROM public.personas_master pm
       LEFT JOIN public.persona_scores ps
         ON ps.rutid = pm.rutid
       LEFT JOIN latest_feedback lf
         ON lf.target_rutid = pm.rutid
+      LEFT JOIN public.company_best_executive_contact ec
+        ON ec.rutid = pm.rutid
       WHERE pm.razon_social_empresa IS NOT NULL
       ${cursorClause}
       ORDER BY pm.razon_social_empresa ASC, pm.rutid ASC

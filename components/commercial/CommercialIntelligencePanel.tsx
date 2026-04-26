@@ -222,14 +222,29 @@ export function CommercialIntelligencePanel({ rut }: { rut: string }) {
               <div className="text-xs text-slate-500">Puntos de contacto conocidos</div>
               <div className="mt-2 text-lg font-semibold text-white">{contact_points.length}</div>
             </div>
-            {contact_points.slice(0, 6).map(point => (
-              <div key={point.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-300">
-                <div className="font-medium text-white">{point.contact_value}</div>
-                <div className="mt-1 text-slate-500">
-                  {point.contact_type} · {point.source_name} · calidad {point.quality_score}
+            {contact_points.slice(0, 6).map(point => {
+              const executiveName = typeof point.metadata?.nombre_ejecutivo === 'string'
+                ? point.metadata.nombre_ejecutivo
+                : null
+              const executiveRole = typeof point.metadata?.cargo === 'string'
+                ? point.metadata.cargo
+                : null
+
+              return (
+                <div key={point.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-300">
+                  <div className="font-medium text-white">{point.contact_value}</div>
+                  <div className="mt-1 text-slate-500">
+                    {point.contact_type} · {point.source_name} · calidad {point.quality_score}
+                  </div>
+                  {executiveName && (
+                    <div className="mt-2 text-slate-400">
+                      {executiveName}
+                      {executiveRole ? ` · ${executiveRole}` : ''}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>

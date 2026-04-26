@@ -29,6 +29,23 @@ type CommercialSummaryFeedbackRow = {
   agent_name: string | null
 }
 
+type ExecutiveContactRow = {
+  rutid: string
+  nombre_ejecutivo: string | null
+  cargo: string | null
+  rutid_ejecutivo: string | null
+  mejor_telefono: string | null
+  email: string | null
+}
+
+type ExecutiveCommercialRutSummary = CommercialRutSummary & {
+  executive_contact_name: string | null
+  executive_contact_role: string | null
+  executive_contact_rutid: string | null
+  executive_contact_phone: string | null
+  executive_contact_email: string | null
+}
+
 function normalizeRutForDb(value?: string | null): string | null {
   if (!value) return null
   const cleaned = cleanRut(value)
@@ -517,6 +534,23 @@ export async function getCommercialSummariesByRutids(
     fetchFeedbackHistory('rutid'),
   ])
 
+  const executiveContacts: ExecutiveContactRow[] = []
+  for (const batch of chunkArray(normalizedRutids, CRM_SUMMARY_QUERY_BATCH_SIZE)) {
+    const { data, error } = await db
+      .from('company_best_executive_contact')
+      .select('rutid,nombre_ejecutivo,cargo,rutid_ejecutivo,mejor_telefono,email')
+      .in('rutid', batch)
+
+    if (error) {
+      console.error('[getCommercialSummariesByRutids.executives]', error)
+      continue
+    }
+
+    executiveContacts.push(...((data ?? []) as ExecutiveContactRow[]))
+  }
+
+  const executiveContactByRut = new Map(executiveContacts.map(item => [item.rutid, item]))
+
   const latestFeedbackByRut = new Map<string, CommercialSummaryFeedbackRow>()
   const seenEventIds = new Set<string>()
 
@@ -534,15 +568,21 @@ export async function getCommercialSummariesByRutids(
 
   const summaryMap = new Map(summaries.map(item => [item.rutid, item]))
 
-  return normalizedRutids
+  const enrichedSummaries = normalizedRutids
     .map(rutid => {
       const summary = summaryMap.get(rutid)
       if (!summary) return null
 
       const latestFeedback = latestFeedbackByRut.get(rutid)
+      const executiveContact = executiveContactByRut.get(rutid)
 
       return {
         ...summary,
+        executive_contact_name: executiveContact?.nombre_ejecutivo ?? null,
+        executive_contact_role: executiveContact?.cargo ?? null,
+        executive_contact_rutid: executiveContact?.rutid_ejecutivo ?? null,
+        executive_contact_phone: executiveContact?.mejor_telefono ?? null,
+        executive_contact_email: executiveContact?.email ?? null,
         latest_outcome: latestFeedback?.outcome ?? null,
         latest_outcome_subtype: latestFeedback?.outcome_subtype ?? null,
         latest_channel: latestFeedback?.channel ?? null,
@@ -551,7 +591,9 @@ export async function getCommercialSummariesByRutids(
         latest_managed_at: latestFeedback?.managed_at ?? summary.last_feedback_at ?? null,
       }
     })
-    .filter((item): item is CommercialRutSummary => Boolean(item))
+    .filter((item): item is ExecutiveCommercialRutSummary => Boolean(item))
+
+  return enrichedSummaries
 }
 
 async function getPersonaScore(rutid: string): Promise<PersonaScoreCard | null> {

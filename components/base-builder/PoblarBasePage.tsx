@@ -64,7 +64,20 @@ const CRM_EXPORT_COLUMNS = [
   'CRM - Mejor hora',
   'CRM - Mejor teléfono',
   'CRM - Mejor email',
+  'CRM - Ejecutivo nombre',
+  'CRM - Ejecutivo cargo',
+  'CRM - Ejecutivo RUT',
+  'CRM - Ejecutivo teléfono',
+  'CRM - Ejecutivo email',
 ] as const
+
+type ExecutiveCommercialRutSummary = CommercialRutSummary & {
+  executive_contact_name?: string | null
+  executive_contact_role?: string | null
+  executive_contact_rutid?: string | null
+  executive_contact_phone?: string | null
+  executive_contact_email?: string | null
+}
 
 type AnalyzeProgress = {
   pass: number
@@ -725,7 +738,9 @@ function attachCrmSummaryToRows(
   crmSummaryMap: Map<string, CommercialRutSummary>
 ): BaseBuilderExportRow[] {
   return rows.map(row => {
-    const summary = row.rutid ? crmSummaryMap.get(row.rutid) : undefined
+    const summary = row.rutid
+      ? crmSummaryMap.get(row.rutid) as ExecutiveCommercialRutSummary | undefined
+      : undefined
 
     return {
       ...row,
@@ -749,6 +764,11 @@ function attachCrmSummaryToRows(
       'CRM - Mejor hora': formatHour(summary?.best_contact_hour),
       'CRM - Mejor teléfono': summary?.best_phone ?? null,
       'CRM - Mejor email': summary?.best_email ?? null,
+      'CRM - Ejecutivo nombre': summary?.executive_contact_name ?? null,
+      'CRM - Ejecutivo cargo': summary?.executive_contact_role ?? null,
+      'CRM - Ejecutivo RUT': summary?.executive_contact_rutid ?? null,
+      'CRM - Ejecutivo teléfono': summary?.executive_contact_phone ?? null,
+      'CRM - Ejecutivo email': summary?.executive_contact_email ?? null,
     }
   })
 }
