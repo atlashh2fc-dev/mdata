@@ -39,9 +39,14 @@ const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
   },
   autos_resumen: {
     tableName: 'personas_master',
-    orderColumn: 'rutid',
+    orderColumn: 'n_autos',
+    orderDirection: 'DESC',
     whereClause: `"n_autos" > 0`,
-    columns: null,
+    columns: [
+      { source: 'rutid' },
+      { source: 'n_autos' },
+      { source: 'loaded_at' },
+    ],
   },
   empresa_resumen: {
     tableName: 'personas_master',
