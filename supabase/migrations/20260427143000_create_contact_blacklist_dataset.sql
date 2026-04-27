@@ -22,7 +22,7 @@ WITH feedback_signals AS (
     f.contact_phone AS contact_value,
     f.phone_normalized AS normalized_value,
     'telefono_erroneo_crm'::TEXT AS blacklist_reason,
-    'CRM'::TEXT AS source_label,
+    CASE WHEN f.external_source = 'vocal' THEN 'Vocal' ELSE 'CRM' END AS source_label,
     f.external_source,
     f.external_event_id,
     f.rutid,
@@ -41,8 +41,8 @@ WITH feedback_signals AS (
   WHERE f.phone_normalized IS NOT NULL
     AND COALESCE(f.external_source, '') NOT IN ('atlas_lead_engine', 'atlas_lead_engine_bridge')
     AND (
-      f.signal_text ~ '(n[uú]mero|numero|tel[eé]fono|telefono|fono|phone).*(equivocado|err[oó]neo|erroneo|incorrecto|inv[aá]lido|invalido|no existe|no corresponde|wrong|invalid)'
-      OR f.signal_text ~ '(equivocado|err[oó]neo|erroneo|incorrecto|inv[aá]lido|invalido|no existe|no corresponde|wrong|invalid).*(n[uú]mero|numero|tel[eé]fono|telefono|fono|phone)'
+      f.signal_text ~ '(n[uú]mero|numero|tel[eé]fono|telefono|fono|phone).*(equivocado|err[oó]neo|erroneo|incorrecto|inv[aá]lido|invalido|no existe|no corresponde|fuera de servicio|sin servicio|wrong|invalid)'
+      OR f.signal_text ~ '(equivocado|err[oó]neo|erroneo|incorrecto|inv[aá]lido|invalido|no existe|no corresponde|fuera de servicio|sin servicio|wrong|invalid).*(n[uú]mero|numero|tel[eé]fono|telefono|fono|phone)'
     )
 
   UNION ALL

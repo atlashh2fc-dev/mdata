@@ -4,8 +4,25 @@ import { normalizeCompanyName } from '@/lib/utils/company-match'
 import { cleanRut } from '@/lib/utils/rut'
 import type { ContactCenterFeedbackInput } from '@/types'
 
-const ATLAS_ALLOWED_EVENT_TYPES = new Set(['sent', 'opened', 'clicked', 'bounced', 'bounce'])
-const ATLAS_SUPPORTED_EVENT_TYPES = new Set(['opened', 'clicked', 'bounced', 'bounce'])
+const ATLAS_ALLOWED_EVENT_TYPES = new Set([
+  'sent',
+  'opened',
+  'clicked',
+  'bounced',
+  'bounce',
+  'failed',
+  'delivery_failed',
+  'undeliverable',
+])
+const ATLAS_SUPPORTED_EVENT_TYPES = new Set([
+  'opened',
+  'clicked',
+  'bounced',
+  'bounce',
+  'failed',
+  'delivery_failed',
+  'undeliverable',
+])
 const ATLAS_MAX_SIGNATURE_AGE_MS = 15 * 60 * 1000
 
 type AtlasLeadBridgePayload = {
@@ -282,7 +299,7 @@ export function parseAtlasLeadBridgePayload(payload: unknown): AtlasBridgePayloa
     }
   }
 
-  const normalizedEventType = eventType === 'bounce'
+  const normalizedEventType = ['bounce', 'failed', 'delivery_failed', 'undeliverable'].includes(eventType)
     ? 'bounced'
     : eventType as 'opened' | 'clicked' | 'bounced'
 
