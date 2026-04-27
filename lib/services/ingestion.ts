@@ -16,6 +16,52 @@ import type {
 // DATA SOURCES
 // ============================================================
 
+type BlacklistBreakdown = {
+  emails: number
+  phones: number
+}
+
+async function getContactBlacklistBreakdown(): Promise<BlacklistBreakdown | null> {
+  const contactBlacklist = (db as any).from('contact_blacklist')
+  const [emails, phones] = await Promise.all([
+    contactBlacklist
+      .select('blacklist_key', { count: 'exact', head: true })
+      .eq('contact_type', 'email'),
+    contactBlacklist
+      .select('blacklist_key', { count: 'exact', head: true })
+      .eq('contact_type', 'phone'),
+  ])
+
+  if (emails.error || phones.error) {
+    console.warn('[getContactBlacklistBreakdown]', emails.error ?? phones.error)
+    return null
+  }
+
+  return {
+    emails: emails.count ?? 0,
+    phones: phones.count ?? 0,
+  }
+}
+
+async function enrichContactBlacklistSource(sources: DataSource[]): Promise<DataSource[]> {
+  if (!sources.some(source => source.slug === 'contact_blacklist')) return sources
+
+  const breakdown = await getContactBlacklistBreakdown()
+  if (!breakdown) return sources
+
+  return sources.map(source => {
+    if (source.slug !== 'contact_blacklist') return source
+
+    return {
+      ...source,
+      config: {
+        ...(source.config ?? {}),
+        blacklist_breakdown: breakdown,
+      },
+    }
+  })
+}
+
 export async function getFuentes(): Promise<DataSource[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const datasetOverview = (db as any)
@@ -36,9 +82,9 @@ export async function getFuentes(): Promise<DataSource[]> {
       return []
     }
 
-    return (fallback.data ?? []) as DataSource[]
+    return enrichContactBlacklistSource((fallback.data ?? []) as DataSource[])
   }
-  return (data ?? []) as DataSource[]
+  return enrichContactBlacklistSource((data ?? []) as DataSource[])
 }
 
 export async function createFuente(

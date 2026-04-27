@@ -37,6 +37,17 @@ function supportsCrmExport(fuente: DataSource) {
   return fuente.slug === 'empresa_resumen' || fuente.canonical_table === 'empresa_resumen'
 }
 
+function getBlacklistBreakdown(fuente: DataSource) {
+  const breakdown = fuente.config?.blacklist_breakdown
+  if (!breakdown || typeof breakdown !== 'object') return null
+
+  const values = breakdown as { emails?: unknown; phones?: unknown }
+  return {
+    emails: typeof values.emails === 'number' ? values.emails : 0,
+    phones: typeof values.phones === 'number' ? values.phones : 0,
+  }
+}
+
 type DatasetPreview = {
   source: {
     id: string
@@ -165,6 +176,7 @@ export default function DatasetsPage() {
               const crmExportHref = supportsCrmExport(fuente)
                 ? `${exportHref}?include_crm=1`
                 : null
+              const blacklistBreakdown = getBlacklistBreakdown(fuente)
               return (
                 <div
                   key={fuente.id}
@@ -209,6 +221,18 @@ export default function DatasetsPage() {
                         {formatNumber(fuente.latest_loaded_row_count ?? fuente.record_count ?? 0)}
                       </span>
                     </div>
+                    {blacklistBreakdown && (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>Emails exclusión</span>
+                          <span className="text-slate-300">{formatNumber(blacklistBreakdown.emails)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>Teléfonos exclusión</span>
+                          <span className="text-slate-300">{formatNumber(blacklistBreakdown.phones)}</span>
+                        </div>
+                      </>
+                    )}
                     {(fuente.latest_version_status || fuente.last_job_status) && (
                       <div className="flex items-center justify-between gap-3">
                         <span>Última carga</span>
