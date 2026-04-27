@@ -4,8 +4,8 @@ import { normalizeCompanyName } from '@/lib/utils/company-match'
 import { cleanRut } from '@/lib/utils/rut'
 import type { ContactCenterFeedbackInput } from '@/types'
 
-const ATLAS_ALLOWED_EVENT_TYPES = new Set(['sent', 'opened', 'clicked'])
-const ATLAS_SUPPORTED_EVENT_TYPES = new Set(['opened', 'clicked'])
+const ATLAS_ALLOWED_EVENT_TYPES = new Set(['sent', 'opened', 'clicked', 'bounced', 'bounce'])
+const ATLAS_SUPPORTED_EVENT_TYPES = new Set(['opened', 'clicked', 'bounced', 'bounce'])
 const ATLAS_MAX_SIGNATURE_AGE_MS = 15 * 60 * 1000
 
 type AtlasLeadBridgePayload = {
@@ -49,7 +49,7 @@ type AtlasBridgePayloadParseResult =
   | {
       ok: true
       ignored: false
-      eventType: 'opened' | 'clicked'
+      eventType: 'opened' | 'clicked' | 'bounced'
       eventAt: string
       campaignType: string | null
       record: ContactCenterFeedbackInput
@@ -282,19 +282,23 @@ export function parseAtlasLeadBridgePayload(payload: unknown): AtlasBridgePayloa
     }
   }
 
+  const normalizedEventType = eventType === 'bounce'
+    ? 'bounced'
+    : eventType as 'opened' | 'clicked' | 'bounced'
+
   const eventAt =
     normalizeIsoDatetime(typedPayload.eventAt) ??
     normalizeIsoDatetime(
-      eventType === 'opened'
+      normalizedEventType === 'opened'
         ? typedPayload.outreach?.openedAt
-        : typedPayload.outreach?.clickedAt
+        : normalizedEventType === 'clicked'
+          ? typedPayload.outreach?.clickedAt
+          : typedPayload.outreach?.sentAt
     )
 
   if (!eventAt) {
     return { ok: false, status: 400, error: 'eventAt es inválido.' }
   }
-
-  const normalizedEventType = eventType as 'opened' | 'clicked'
 
   const messageId = readString(typedPayload.outreach?.messageId)
   const requestId = readString(typedPayload.context?.requestId)
@@ -309,10 +313,10 @@ export function parseAtlasLeadBridgePayload(payload: unknown): AtlasBridgePayloa
   const sentAt = normalizeIsoDatetime(typedPayload.outreach?.sentAt)
   const openedAt =
     normalizeIsoDatetime(typedPayload.outreach?.openedAt) ??
-    (eventType === 'opened' || eventType === 'clicked' ? eventAt : null)
+    (normalizedEventType === 'opened' || normalizedEventType === 'clicked' ? eventAt : null)
   const clickedAt =
     normalizeIsoDatetime(typedPayload.outreach?.clickedAt) ??
-    (eventType === 'clicked' ? eventAt : null)
+    (normalizedEventType === 'clicked' ? eventAt : null)
   const rutid = extractLeadRutid(typedPayload)
   const externalEventId = requestId ?? `${messageId ?? 'unknown'}:${eventType}:${eventAt}`
 
@@ -328,8 +332,8 @@ export function parseAtlasLeadBridgePayload(payload: unknown): AtlasBridgePayloa
     channel: 'email',
     managed_at: eventAt,
     outcome: normalizedEventType,
-    outcome_subtype: messageType,
-    outcome_reason: null,
+    outcome_subtype: normalizedEventType === 'bounced' ? 'email_bounce' : messageType,
+    outcome_reason: normalizedEventType === 'bounced' ? 'Atlas Lead email bounced' : null,
     direction: 'outbound',
     agent_id: null,
     agent_name: 'Atlas Lead Engine',
