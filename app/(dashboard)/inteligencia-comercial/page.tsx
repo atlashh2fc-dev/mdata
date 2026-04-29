@@ -16,6 +16,7 @@ import type { ReactNode } from 'react'
 import { Header } from '@/components/layout/Header'
 import { getCommercialBrainOverview } from '@/lib/services/commercial-brain'
 import { getCommercialOverview } from '@/lib/services/commercial-intelligence'
+import { getUnifiedCrmUntouchedPropensitySummary } from '@/lib/services/crm-unified-bases'
 import { formatDatetime, formatNumber, formatPercentage } from '@/lib/utils/formatters'
 import type { CampaignHealthCard, LeadActionItem, SegmentHealthInsight, TacticalRecommendation, WindowPerformance } from '@/types'
 
@@ -103,6 +104,24 @@ function ProgressRail({ value, tone = 'cyan' }: { value: number; tone?: 'cyan' |
       <div className={`progress-fill ${toneClass}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
     </div>
   )
+}
+
+function PropensityBadge({ color }: { color: 'green' | 'yellow' | 'red' | 'sin_score' }) {
+  const classes = {
+    green: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+    yellow: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+    red: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+    sin_score: 'border-slate-700 bg-slate-800/60 text-slate-300',
+  }[color]
+
+  const label = {
+    green: 'Verde',
+    yellow: 'Amarillo',
+    red: 'Rojo',
+    sin_score: 'Sin score',
+  }[color]
+
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${classes}`}>{label}</span>
 }
 
 function CampaignCard({ campaign }: { campaign: CampaignHealthCard }) {
@@ -354,6 +373,146 @@ function LeadTable({ leads }: { leads: LeadActionItem[] }) {
   )
 }
 
+async function UnifiedUntouchedUniverse() {
+  try {
+    const summary = await getUnifiedCrmUntouchedPropensitySummary()
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Layers3 className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Base unificada sin contacto y no tocada</h2>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+          <StatCard
+            label="Universo único"
+            value={formatNumber(summary.unique_universe)}
+            hint={`${formatNumber(summary.untouched_unique)} no tocados`}
+            accent="emerald"
+          />
+          <StatCard
+            label="Filas elegibles"
+            value={formatNumber(summary.eligible_rows_before_dedupe)}
+            hint={`${formatNumber(summary.duplicate_rows_removed)} duplicados removidos`}
+            accent="cyan"
+          />
+          <StatCard
+            label="Recorridos"
+            value={formatNumber(summary.recorridos_sin_contacto)}
+            hint="Discado sin contacto real"
+            accent="amber"
+          />
+          <StatCard
+            label="Verdes"
+            value={formatNumber(summary.green)}
+            hint="Alta propensión Equifax"
+            accent="emerald"
+          />
+          <StatCard
+            label="Amarillos"
+            value={formatNumber(summary.yellow)}
+            hint="Madurar con secuencia"
+            accent="amber"
+          />
+          <StatCard
+            label="Rojos"
+            value={formatNumber(summary.red)}
+            hint="Baja prioridad comercial"
+            accent="rose"
+          />
+          <StatCard
+            label="Sin score"
+            value={formatNumber(summary.sin_score)}
+            hint={`${formatNumber(summary.scored)} cruzaron con modelo`}
+            accent="cyan"
+          />
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400">
+          Bases Dicom desde {summary.bases_from}: {formatNumber(summary.crm_base_rows)} filas revisadas. Se excluyeron {formatNumber(summary.excluded_contacted_rows)} filas contactadas, {formatNumber(summary.excluded_bad_number_rows)} por número malo y {formatNumber(summary.excluded_exception_rows)} por excepción.
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
+          <div className="card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Target className="h-4 w-4 text-cyan-400" />
+              <h3 className="text-sm font-semibold text-white">Resultado por semáforo</h3>
+            </div>
+            <div className="space-y-3">
+              {summary.by_color.map(bucket => (
+                <div key={bucket.color} className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <PropensityBadge color={bucket.color} />
+                    <div className="text-lg font-semibold text-white">{formatNumber(bucket.total)}</div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-300">
+                    <div>Score {bucket.avg_lead_score}</div>
+                    <div>Contacto {bucket.avg_contact_probability}</div>
+                    <div>Compra {bucket.avg_purchase_probability}</div>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">
+                    No tocados: {formatNumber(bucket.untouched)} · Recorridos sin contacto: {formatNumber(bucket.recorridos_sin_contacto)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Activity className="h-4 w-4 text-amber-400" />
+              <h3 className="text-sm font-semibold text-white">Desglose por base origen</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="table-base">
+                <thead>
+                  <tr>
+                    <th>Base</th>
+                    <th>Total único</th>
+                    <th>Verde</th>
+                    <th>Amarillo</th>
+                    <th>Rojo</th>
+                    <th>Sin score</th>
+                    <th>No tocados</th>
+                    <th>Recorridos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.by_base.slice(0, 12).map(row => (
+                    <tr key={row.base_name}>
+                      <td className="font-medium text-white">{row.base_name}</td>
+                      <td>{formatNumber(row.total)}</td>
+                      <td className="text-emerald-300">{formatNumber(row.green)}</td>
+                      <td className="text-amber-300">{formatNumber(row.yellow)}</td>
+                      <td className="text-rose-300">{formatNumber(row.red)}</td>
+                      <td>{formatNumber(row.sin_score)}</td>
+                      <td>{formatNumber(row.untouched)}</td>
+                      <td>{formatNumber(row.recorridos_sin_contacto)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              Generado: {formatDatetime(summary.generated_at)}. El cruce deduplica por RUT y excluye contactos efectivos previos.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  } catch (error) {
+    return (
+      <div className="card p-5">
+        <div className="text-sm font-semibold text-white">Base unificada sin contacto y no tocada</div>
+        <p className="mt-2 text-sm text-slate-400">
+          {error instanceof Error ? error.message : 'No fue posible calcular el universo unificado.'}
+        </p>
+      </div>
+    )
+  }
+}
+
 export default async function InteligenciaComercialPage() {
   const [overview, brain] = await Promise.all([
     getCommercialOverview(),
@@ -466,6 +625,8 @@ export default async function InteligenciaComercialPage() {
         </div>
 
         <LeadTable leads={brain.lead_actions} />
+
+        <UnifiedUntouchedUniverse />
 
         <div className="grid gap-4 xl:grid-cols-3">
           <div className="card p-5">
