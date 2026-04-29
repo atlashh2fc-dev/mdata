@@ -113,6 +113,15 @@ function normalizePhone(value) {
   return digits.length >= 10 ? `+${digits}` : null
 }
 
+function phoneVariants(value) {
+  const normalized = normalizePhone(value)
+  if (!normalized) return []
+  const digits = normalized.replace(/\D/g, '')
+  const variants = [normalized, digits]
+  if (digits.startsWith('56') && digits.length > 9) variants.push(digits.slice(-9))
+  return uniqueStrings(variants)
+}
+
 function mobilePhone(value) {
   const phone = normalizePhone(value)
   if (!phone) return null
@@ -335,7 +344,7 @@ async function insertContacts(rows, campaignId, existing) {
       rut: formatRut(row.rutid),
       full_name: row.nombre || row.rutid,
       email: row.email || null,
-      phones: [phone],
+      phones: phoneVariants(phone),
       phone_mobile: mobilePhone(phone),
       phone_contact: row.telefono_original || phone,
       phone_normalized: phone,
@@ -383,13 +392,13 @@ async function updateExistingContacts(rows, campaignId, contactMaps) {
       if (!contact?.id) continue
 
       const tags = uniqueStrings([...(contact.tags ?? []), 'rut-intelligence', 'dicom-disponible', 'consulta-ejecutivos'])
-      const phones = uniqueStrings([...(contact.phones ?? []), phone])
+      const phones = uniqueStrings([...(contact.phones ?? []), ...phoneVariants(phone)])
       updates.push({
         id: contact.id,
         full_name: contact.full_name || row.nombre || row.rutid,
         email: contact.email || row.email || null,
         phones,
-        phone_mobile: contact.phone_mobile || mobilePhone(phone),
+        phone_mobile: mobilePhone(phone) || contact.phone_mobile,
         phone_contact: contact.phone_contact || row.telefono_original || phone,
         phone_normalized: contact.phone_normalized || phone,
         comuna: contact.comuna || row.comuna || null,
