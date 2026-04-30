@@ -352,6 +352,11 @@ export interface DashboardStats {
   con_bienes_raices: number
   total_avaluos: number
   total_propiedades_cargadas: number
+  empresas_tendencia_total: number
+  empresas_tendencia_sube: number
+  empresas_tendencia_baja: number
+  empresas_tendencia_estable: number
+  empresas_tendencia_sin_datos: number
   jobs_completados: number
   jobs_fallidos: number
   total_segmentos: number

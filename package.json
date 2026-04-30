@@ -27,6 +27,8 @@
     "ops:import:bbrr": "node --env-file=.env.local scripts/master-sync/import-bbrr-propiedades.mjs",
     "ops:bbrr:rollup": "node --env-file=.env.local scripts/master-sync/refresh-bbrr-rollups.mjs",
     "ops:import:geobpo": "node --env-file=.env.local scripts/master-sync/import-geobpo-access-phones.mjs",
+    "ops:empresas:trend:generate": "node --max-old-space-size=8192 scripts/master-sync/generate-empresas-ventas-trend.mjs",
+    "ops:empresas:trend:load": "node --env-file=.env.local scripts/master-sync/load-empresas-ventas-trend.mjs",
     "ops:import:wom:chunks": "bash scripts/master-sync/apply-wom-latest-chunks.sh",
     "ops:refresh:dashboard": "bash scripts/master-sync/refresh-dashboard-materialized-views.sh",
     "ops:equifax:import:sales": "node --env-file=.env.local scripts/equifax/import-sales-xlsx.mjs",

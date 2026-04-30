@@ -4,7 +4,7 @@ import { formatNumber, formatCurrency, formatPercentage } from '@/lib/utils/form
 import type { DashboardStats } from '@/types'
 import {
   Users, Mail, Phone, Car, Building2,
-  Home, TrendingUp, Landmark, Activity, Database,
+  Home, TrendingUp, Landmark, Activity, Database, ArrowUpDown,
 } from 'lucide-react'
 
 interface KPIItem {
@@ -66,6 +66,14 @@ function buildKPIs(stats: DashboardStats): KPIItem[] {
       icon: Building2,
       color: 'text-purple-400',
       bg: 'bg-purple-500/10',
+    },
+    {
+      label: 'Empresas tendencia',
+      value: formatNumber(stats.empresas_tendencia_total),
+      sub: `Sube ${formatNumber(stats.empresas_tendencia_sube)} · Baja ${formatNumber(stats.empresas_tendencia_baja)}`,
+      icon: ArrowUpDown,
+      color: 'text-lime-400',
+      bg: 'bg-lime-500/10',
     },
     {
       label: 'Con domicilio',
