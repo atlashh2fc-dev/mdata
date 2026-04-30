@@ -39,6 +39,9 @@ const CRM_EXPORT_COLUMNS = [
   'rutid',
   'razon_social_empresa',
   'loaded_at',
+  'direccion_empresa',
+  'comuna_empresa',
+  'region_empresa',
   'CRM - Tiene historial',
   'CRM - Última gestión',
   'CRM - Último resultado',
@@ -98,6 +101,9 @@ const DATASET_EXPORT_FALLBACKS: Record<string, ExportPlan> = {
       { source: 'rutid' },
       { source: 'razon_social_empresa' },
       { source: 'loaded_at' },
+      { source: 'direccion_empresa' },
+      { source: 'comuna_empresa' },
+      { source: 'region_empresa' },
     ],
   },
   domicilio_resumen: {
@@ -352,6 +358,17 @@ async function fetchCompanyBatchWithCrm(
         pm.rutid,
         pm.razon_social_empresa,
         pm.loaded_at,
+        commercial_address.direccion_empresa,
+        COALESCE(
+          commercial_address.comuna_empresa,
+          NULLIF(BTRIM(pm.domicilio_comuna), ''),
+          NULLIF(BTRIM(pm.comuna_part), '')
+        ) AS comuna_empresa,
+        COALESCE(
+          commercial_address.region_empresa,
+          NULLIF(BTRIM(pm.domicilio_region), ''),
+          NULLIF(BTRIM(pm.region_part), '')
+        ) AS region_empresa,
         CASE WHEN COALESCE(ps.feedback_coverage, FALSE) THEN 'Sí' ELSE 'No' END AS "CRM - Tiene historial",
         COALESCE(lf.managed_at, ps.last_feedback_at) AS "CRM - Última gestión",
         lf.outcome AS "CRM - Último resultado",
@@ -387,6 +404,31 @@ async function fetchCompanyBatchWithCrm(
         ON lf.target_rutid = pm.rutid
       LEFT JOIN public.company_best_executive_contact ec
         ON ec.rutid = pm.rutid
+      LEFT JOIN LATERAL (
+        SELECT
+          NULLIF(
+            BTRIM(
+              CONCAT_WS(
+                ' ',
+                NULLIF(BTRIM(pcp.metadata->>'calle_comer'), ''),
+                NULLIF(BTRIM(pcp.metadata->>'numero_comer'), '')
+              )
+            ),
+            ''
+          ) AS direccion_empresa,
+          NULLIF(BTRIM(pcp.metadata->>'comuna_comer'), '') AS comuna_empresa,
+          NULLIF(BTRIM(pcp.metadata->>'region_comer'), '') AS region_empresa
+        FROM public.persona_contact_points pcp
+        WHERE pcp.rutid = pm.rutid
+          AND pcp.source_name = 'geobpo_access_phones'
+          AND (
+            NULLIF(BTRIM(pcp.metadata->>'calle_comer'), '') IS NOT NULL
+            OR NULLIF(BTRIM(pcp.metadata->>'comuna_comer'), '') IS NOT NULL
+            OR NULLIF(BTRIM(pcp.metadata->>'region_comer'), '') IS NOT NULL
+          )
+        ORDER BY pcp.is_verified DESC, pcp.quality_score DESC, pcp.last_seen_at DESC
+        LIMIT 1
+      ) commercial_address ON TRUE
       WHERE pm.razon_social_empresa IS NOT NULL
       ${cursorClause}
       ORDER BY pm.razon_social_empresa ASC, pm.rutid ASC
@@ -417,8 +459,44 @@ async function fetchCompanyBatch(
       SELECT
         pm.rutid,
         pm.razon_social_empresa,
-        pm.loaded_at
+        pm.loaded_at,
+        commercial_address.direccion_empresa,
+        COALESCE(
+          commercial_address.comuna_empresa,
+          NULLIF(BTRIM(pm.domicilio_comuna), ''),
+          NULLIF(BTRIM(pm.comuna_part), '')
+        ) AS comuna_empresa,
+        COALESCE(
+          commercial_address.region_empresa,
+          NULLIF(BTRIM(pm.domicilio_region), ''),
+          NULLIF(BTRIM(pm.region_part), '')
+        ) AS region_empresa
       FROM public.personas_master pm
+      LEFT JOIN LATERAL (
+        SELECT
+          NULLIF(
+            BTRIM(
+              CONCAT_WS(
+                ' ',
+                NULLIF(BTRIM(pcp.metadata->>'calle_comer'), ''),
+                NULLIF(BTRIM(pcp.metadata->>'numero_comer'), '')
+              )
+            ),
+            ''
+          ) AS direccion_empresa,
+          NULLIF(BTRIM(pcp.metadata->>'comuna_comer'), '') AS comuna_empresa,
+          NULLIF(BTRIM(pcp.metadata->>'region_comer'), '') AS region_empresa
+        FROM public.persona_contact_points pcp
+        WHERE pcp.rutid = pm.rutid
+          AND pcp.source_name = 'geobpo_access_phones'
+          AND (
+            NULLIF(BTRIM(pcp.metadata->>'calle_comer'), '') IS NOT NULL
+            OR NULLIF(BTRIM(pcp.metadata->>'comuna_comer'), '') IS NOT NULL
+            OR NULLIF(BTRIM(pcp.metadata->>'region_comer'), '') IS NOT NULL
+          )
+        ORDER BY pcp.is_verified DESC, pcp.quality_score DESC, pcp.last_seen_at DESC
+        LIMIT 1
+      ) commercial_address ON TRUE
       WHERE pm.razon_social_empresa IS NOT NULL
       ${cursorClause}
       ORDER BY pm.razon_social_empresa ASC, pm.rutid ASC
