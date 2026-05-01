@@ -4,7 +4,7 @@ import { formatNumber, formatCurrency, formatPercentage } from '@/lib/utils/form
 import type { DashboardStats } from '@/types'
 import {
   Users, Mail, Phone, Car, Building2,
-  Home, TrendingUp, Landmark, Activity, Database, ArrowUpDown,
+  Home, TrendingUp, Landmark, Activity, Database, MapPin,
 } from 'lucide-react'
 
 interface KPIItem {
@@ -60,22 +60,6 @@ function buildKPIs(stats: DashboardStats): KPIItem[] {
       bg: 'bg-orange-500/10',
     },
     {
-      label: 'Con empresa',
-      value: formatNumber(stats.con_empresa),
-      sub: formatPercentage((stats.con_empresa / total) * 100),
-      icon: Building2,
-      color: 'text-purple-400',
-      bg: 'bg-purple-500/10',
-    },
-    {
-      label: 'Empresas tendencia',
-      value: formatNumber(stats.empresas_tendencia_total),
-      sub: `Sube ${formatNumber(stats.empresas_tendencia_sube)} · Baja ${formatNumber(stats.empresas_tendencia_baja)}`,
-      icon: ArrowUpDown,
-      color: 'text-lime-400',
-      bg: 'bg-lime-500/10',
-    },
-    {
       label: 'Con domicilio',
       value: formatNumber(stats.con_domicilio),
       sub: formatPercentage((stats.con_domicilio / total) * 100),
@@ -110,6 +94,78 @@ function buildKPIs(stats: DashboardStats): KPIItem[] {
   ]
 }
 
+function CompanyUniverseCard({ stats }: { stats: DashboardStats }) {
+  const total = stats.empresas_universo_total || 1
+  const populatedCount = Math.max(
+    stats.empresas_con_region,
+    stats.empresas_con_comuna,
+    stats.empresas_con_direccion
+  )
+  const populatedPct = formatPercentage((populatedCount / total) * 100)
+
+  const sizeSegments = [
+    { label: 'Micro', value: stats.empresas_segmento_micro },
+    { label: 'Pequeña', value: stats.empresas_segmento_pequena },
+    { label: 'Mediana', value: stats.empresas_segmento_mediana },
+    { label: 'Grande', value: stats.empresas_segmento_gran_empresa },
+    { label: 'Corp.', value: stats.empresas_segmento_corporacion },
+    { label: 'PyME s/tramo', value: stats.empresas_segmento_pyme_master_sin_tramo },
+  ]
+
+  return (
+    <div className="stat-card animate-fade-in col-span-2 lg:col-span-3 xl:col-span-2 min-h-[194px]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center shrink-0">
+          <Building2 className="w-5 h-5 text-purple-300" />
+        </div>
+        <div className="text-right">
+          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Poblado</p>
+          <p className="text-sm font-semibold text-white">{populatedPct}</p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <p className="text-3xl font-bold text-white leading-none">
+            {formatNumber(stats.empresas_universo_total)}
+          </p>
+          <p className="text-sm text-slate-400 mt-1">Universo empresas</p>
+          <p className="text-xs text-slate-600 mt-0.5">
+            PyME {formatNumber(stats.empresas_pyme)} · Grandes {formatNumber(stats.empresas_grandes)} · Corp. {formatNumber(stats.empresas_corporacion)}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-x-4 gap-y-2">
+          {sizeSegments.map(segment => (
+            <div key={segment.label} className="min-w-0">
+              <p className="text-[11px] text-slate-500 truncate">{segment.label}</p>
+              <p className="text-sm font-semibold text-slate-100 leading-tight">{formatNumber(segment.value)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 border-t border-slate-700/60 pt-3">
+          <div className="min-w-0">
+            <p className="text-[11px] text-slate-500">Región</p>
+            <p className="text-xs font-semibold text-slate-100">{formatNumber(stats.empresas_con_region)}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] text-slate-500">Comuna</p>
+            <p className="text-xs font-semibold text-slate-100">{formatNumber(stats.empresas_con_comuna)}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] text-slate-500 flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              Dirección
+            </p>
+            <p className="text-xs font-semibold text-slate-100">{formatNumber(stats.empresas_con_direccion)}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface KPIGridProps {
   stats: DashboardStats
 }
@@ -119,6 +175,7 @@ export function KPIGrid({ stats }: KPIGridProps) {
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <CompanyUniverseCard stats={stats} />
       {kpis.map(kpi => {
         const Icon = kpi.icon
         return (

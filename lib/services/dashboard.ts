@@ -3,7 +3,25 @@
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import type { DashboardStats, CoberturaItem } from '@/types'
 
-const emptyTrendStats = {
+const emptyEmpresaStats = {
+  empresas_universo_total: 0,
+  empresas_base_pyme: 0,
+  empresas_base_tendencia: 0,
+  empresas_cruzadas: 0,
+  empresas_solo_pyme_master: 0,
+  empresas_solo_tendencia: 0,
+  empresas_con_direccion: 0,
+  empresas_con_comuna: 0,
+  empresas_con_region: 0,
+  empresas_pyme: 0,
+  empresas_grandes: 0,
+  empresas_corporacion: 0,
+  empresas_segmento_micro: 0,
+  empresas_segmento_pequena: 0,
+  empresas_segmento_mediana: 0,
+  empresas_segmento_gran_empresa: 0,
+  empresas_segmento_corporacion: 0,
+  empresas_segmento_pyme_master_sin_tramo: 0,
   empresas_tendencia_total: 0,
   empresas_tendencia_sube: 0,
   empresas_tendencia_baja: 0,
@@ -24,7 +42,7 @@ function emptyDashboardStats(): DashboardStats {
     con_bienes_raices: 0,
     total_avaluos: 0,
     total_propiedades_cargadas: 0,
-    ...emptyTrendStats,
+    ...emptyEmpresaStats,
     jobs_completados: 0,
     jobs_fallidos: 0,
     total_segmentos: 0,
@@ -32,9 +50,42 @@ function emptyDashboardStats(): DashboardStats {
   }
 }
 
-async function getEmpresasTrendStats() {
+async function getEmpresasStats() {
   if (!hasSupabaseAdminEnv) {
-    return emptyTrendStats
+    return emptyEmpresaStats
+  }
+
+  const { data: universeStats, error: universeError } = await db
+    .from('empresas_comercial_unificada_stats')
+    .select('*')
+    .single()
+
+  if (!universeError && universeStats) {
+    return {
+      empresas_universo_total: Number(universeStats.total_empresas_unicas ?? 0),
+      empresas_base_pyme: Number(universeStats.empresas_base_pyme ?? 0),
+      empresas_base_tendencia: Number(universeStats.empresas_base_tendencia ?? 0),
+      empresas_cruzadas: Number(universeStats.empresas_cruzadas ?? 0),
+      empresas_solo_pyme_master: Number(universeStats.empresas_solo_pyme_master ?? 0),
+      empresas_solo_tendencia: Number(universeStats.empresas_solo_tendencia ?? 0),
+      empresas_con_direccion: Number(universeStats.empresas_con_direccion ?? 0),
+      empresas_con_comuna: Number(universeStats.empresas_con_comuna ?? 0),
+      empresas_con_region: Number(universeStats.empresas_con_region ?? 0),
+      empresas_pyme: Number(universeStats.empresas_pyme ?? 0),
+      empresas_grandes: Number(universeStats.empresas_grandes ?? 0),
+      empresas_corporacion: Number(universeStats.empresas_corporacion ?? 0),
+      empresas_segmento_micro: Number(universeStats.segmento_micro ?? 0),
+      empresas_segmento_pequena: Number(universeStats.segmento_pequena ?? 0),
+      empresas_segmento_mediana: Number(universeStats.segmento_mediana ?? 0),
+      empresas_segmento_gran_empresa: Number(universeStats.segmento_gran_empresa ?? 0),
+      empresas_segmento_corporacion: Number(universeStats.segmento_corporacion ?? 0),
+      empresas_segmento_pyme_master_sin_tramo: Number(universeStats.segmento_pyme_master_sin_tramo ?? 0),
+      empresas_tendencia_total: Number(universeStats.empresas_base_tendencia ?? 0),
+      empresas_tendencia_sube: Number(universeStats.empresas_sube ?? 0),
+      empresas_tendencia_baja: Number(universeStats.empresas_baja ?? 0),
+      empresas_tendencia_estable: Number(universeStats.empresas_estable ?? 0),
+      empresas_tendencia_sin_datos: Number(universeStats.empresas_sin_datos ?? 0),
+    }
   }
 
   const { data: resumen, error: resumenError } = await db
@@ -44,6 +95,7 @@ async function getEmpresasTrendStats() {
 
   if (!resumenError && resumen) {
     return {
+      ...emptyEmpresaStats,
       empresas_tendencia_total: Number(resumen.total_empresas ?? 0),
       empresas_tendencia_sube: Number(resumen.empresas_sube ?? 0),
       empresas_tendencia_baja: Number(resumen.empresas_baja ?? 0),
@@ -75,6 +127,7 @@ async function getEmpresasTrendStats() {
   ])
 
   return {
+    ...emptyEmpresaStats,
     empresas_tendencia_total: total,
     empresas_tendencia_sube: sube,
     empresas_tendencia_baja: baja,
@@ -87,10 +140,10 @@ async function getEmpresasTrendStats() {
  * Obtiene los KPIs principales del dashboard desde la vista materializada
  */
 export async function getDashboardKPIs(): Promise<DashboardStats> {
-  const trendStats = await getEmpresasTrendStats()
+  const empresaStats = await getEmpresasStats()
 
   if (!hasSupabaseAdminEnv) {
-    return { ...emptyDashboardStats(), ...trendStats }
+    return { ...emptyDashboardStats(), ...empresaStats }
   }
 
   const { data, error } = await db
@@ -100,7 +153,7 @@ export async function getDashboardKPIs(): Promise<DashboardStats> {
 
   if (error || !data) {
     console.error('[getDashboardKPIs]', error)
-    return { ...emptyDashboardStats(), ...trendStats }
+    return { ...emptyDashboardStats(), ...empresaStats }
   }
 
   return {
@@ -115,7 +168,7 @@ export async function getDashboardKPIs(): Promise<DashboardStats> {
     con_bienes_raices: data.con_bienes_raices ?? 0,
     total_avaluos: data.total_avaluos ?? 0,
     total_propiedades_cargadas: data.total_propiedades_cargadas ?? 0,
-    ...trendStats,
+    ...empresaStats,
     jobs_completados: data.jobs_completados ?? 0,
     jobs_fallidos: data.jobs_fallidos ?? 0,
     total_segmentos: data.total_segmentos ?? 0,

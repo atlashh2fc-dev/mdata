@@ -352,6 +352,24 @@ export interface DashboardStats {
   con_bienes_raices: number
   total_avaluos: number
   total_propiedades_cargadas: number
+  empresas_universo_total: number
+  empresas_base_pyme: number
+  empresas_base_tendencia: number
+  empresas_cruzadas: number
+  empresas_solo_pyme_master: number
+  empresas_solo_tendencia: number
+  empresas_con_direccion: number
+  empresas_con_comuna: number
+  empresas_con_region: number
+  empresas_pyme: number
+  empresas_grandes: number
+  empresas_corporacion: number
+  empresas_segmento_micro: number
+  empresas_segmento_pequena: number
+  empresas_segmento_mediana: number
+  empresas_segmento_gran_empresa: number
+  empresas_segmento_corporacion: number
+  empresas_segmento_pyme_master_sin_tramo: number
   empresas_tendencia_total: number
   empresas_tendencia_sube: number
   empresas_tendencia_baja: number
