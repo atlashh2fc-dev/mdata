@@ -104,12 +104,42 @@ function CompanyUniverseCard({ stats }: { stats: DashboardStats }) {
   const populatedPct = formatPercentage((populatedCount / total) * 100)
 
   const sizeSegments = [
-    { label: 'Micro', value: stats.empresas_segmento_micro },
-    { label: 'Pequeña', value: stats.empresas_segmento_pequena },
-    { label: 'Mediana', value: stats.empresas_segmento_mediana },
-    { label: 'Grande', value: stats.empresas_segmento_gran_empresa },
-    { label: 'Corp.', value: stats.empresas_segmento_corporacion },
-    { label: 'PyME s/tramo', value: stats.empresas_segmento_pyme_master_sin_tramo },
+    {
+      label: 'Micro',
+      value: stats.empresas_segmento_micro,
+      sube: stats.empresas_segmento_micro_sube,
+      baja: stats.empresas_segmento_micro_baja,
+    },
+    {
+      label: 'Pequeña',
+      value: stats.empresas_segmento_pequena,
+      sube: stats.empresas_segmento_pequena_sube,
+      baja: stats.empresas_segmento_pequena_baja,
+    },
+    {
+      label: 'Mediana',
+      value: stats.empresas_segmento_mediana,
+      sube: stats.empresas_segmento_mediana_sube,
+      baja: stats.empresas_segmento_mediana_baja,
+    },
+    {
+      label: 'Grande',
+      value: stats.empresas_segmento_gran_empresa,
+      sube: stats.empresas_segmento_gran_empresa_sube,
+      baja: stats.empresas_segmento_gran_empresa_baja,
+    },
+    {
+      label: 'Corp.',
+      value: stats.empresas_segmento_corporacion,
+      sube: stats.empresas_segmento_corporacion_sube,
+      baja: stats.empresas_segmento_corporacion_baja,
+    },
+    {
+      label: 'PyME s/tramo',
+      value: stats.empresas_segmento_pyme_master_sin_tramo,
+      sube: stats.empresas_segmento_pyme_master_sin_tramo_sube,
+      baja: stats.empresas_segmento_pyme_master_sin_tramo_baja,
+    },
   ]
 
   return (
@@ -131,6 +161,9 @@ function CompanyUniverseCard({ stats }: { stats: DashboardStats }) {
           </p>
           <p className="text-sm text-slate-400 mt-1">Universo empresas</p>
           <p className="text-xs text-slate-600 mt-0.5">
+            Sube {formatNumber(stats.empresas_tendencia_sube)} · Baja {formatNumber(stats.empresas_tendencia_baja)}
+          </p>
+          <p className="text-xs text-slate-600 mt-0.5">
             PyME {formatNumber(stats.empresas_pyme)} · Grandes {formatNumber(stats.empresas_grandes)} · Corp. {formatNumber(stats.empresas_corporacion)}
           </p>
         </div>
@@ -140,6 +173,11 @@ function CompanyUniverseCard({ stats }: { stats: DashboardStats }) {
             <div key={segment.label} className="min-w-0">
               <p className="text-[11px] text-slate-500 truncate">{segment.label}</p>
               <p className="text-sm font-semibold text-slate-100 leading-tight">{formatNumber(segment.value)}</p>
+              <p className="text-[11px] leading-tight text-slate-500">
+                <span className="text-emerald-400">Sube {formatNumber(segment.sube)}</span>
+                <span className="text-slate-600"> · </span>
+                <span className="text-rose-400">Baja {formatNumber(segment.baja)}</span>
+              </p>
             </div>
           ))}
         </div>

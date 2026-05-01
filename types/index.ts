@@ -365,11 +365,23 @@ export interface DashboardStats {
   empresas_grandes: number
   empresas_corporacion: number
   empresas_segmento_micro: number
+  empresas_segmento_micro_sube: number
+  empresas_segmento_micro_baja: number
   empresas_segmento_pequena: number
+  empresas_segmento_pequena_sube: number
+  empresas_segmento_pequena_baja: number
   empresas_segmento_mediana: number
+  empresas_segmento_mediana_sube: number
+  empresas_segmento_mediana_baja: number
   empresas_segmento_gran_empresa: number
+  empresas_segmento_gran_empresa_sube: number
+  empresas_segmento_gran_empresa_baja: number
   empresas_segmento_corporacion: number
+  empresas_segmento_corporacion_sube: number
+  empresas_segmento_corporacion_baja: number
   empresas_segmento_pyme_master_sin_tramo: number
+  empresas_segmento_pyme_master_sin_tramo_sube: number
+  empresas_segmento_pyme_master_sin_tramo_baja: number
   empresas_tendencia_total: number
   empresas_tendencia_sube: number
   empresas_tendencia_baja: number
