@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -17,10 +18,14 @@ import {
   Target,
   WandSparkles,
   Building2,
+  LoaderCircle,
+  Trophy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/formatters'
 import { supabaseBrowser } from '@/lib/db/client'
 import { useRouter } from 'next/navigation'
+
+const HH_ALLOWED_EMAIL = 'hh2fc24@gmail.com'
 
 const NAV_ITEMS = [
   {
@@ -40,6 +45,7 @@ const NAV_ITEMS = [
   {
     group: 'AI & Análisis',
     items: [
+      { href: '/hh', label: 'HH', icon: Trophy, allowedEmails: [HH_ALLOWED_EMAIL] },
       { href: '/inteligencia-comercial', label: 'Inteligencia Comercial', icon: Target },
       { href: '/ai', label: 'Cerebro de Negocios', icon: BrainCircuit },
       { href: '/universos', label: 'Explorador Universos', icon: Database },
@@ -57,9 +63,15 @@ const NAV_ITEMS = [
   },
 ]
 
-export function Sidebar() {
+export function Sidebar({ userEmail }: { userEmail?: string | null }) {
   const pathname = usePathname()
   const router = useRouter()
+  const [pendingHref, setPendingHref] = useState<string | null>(null)
+  const normalizedUserEmail = userEmail?.toLowerCase() ?? null
+
+  useEffect(() => {
+    setPendingHref(null)
+  }, [pathname])
 
   async function handleLogout() {
     await supabaseBrowser.auth.signOut()
@@ -87,30 +99,50 @@ export function Sidebar() {
               {group.group}
             </p>
             <div className="space-y-0.5">
-              {group.items.map(item => {
+              {group.items.filter(item => {
+                const allowedEmails = 'allowedEmails' in item ? item.allowedEmails : undefined
+                return !allowedEmails || allowedEmails.includes(normalizedUserEmail ?? '')
+              }).map(item => {
                 const Icon = item.icon
                 const isActive = item.href === '/poblar'
                   ? pathname.startsWith('/poblar') || pathname.startsWith('/exportar')
                   : item.href === '/equifax-bdd'
                     ? pathname.startsWith('/equifax-bdd')
+                  : item.href === '/hh'
+                    ? pathname.startsWith('/hh')
                   : item.href === '/inteligencia-comercial'
                     ? pathname.startsWith('/inteligencia-comercial') || pathname.startsWith('/inteligencia')
                     : pathname.startsWith(item.href)
+                const isPending = pendingHref === item.href && !isActive
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={() => {
+                      if (!isActive) setPendingHref(item.href)
+                    }}
                     className={cn(
                       'sidebar-item relative overflow-hidden transition-all duration-300',
-                      isActive ? 'active shadow-[0_0_10px_rgba(6,182,212,0.15)] bg-[#1e293b]/50 border border-slate-700/50' : 'hover:bg-slate-800/40'
+                      isActive ? 'active shadow-[0_0_10px_rgba(6,182,212,0.15)] bg-[#1e293b]/50 border border-slate-700/50' : 'hover:bg-slate-800/40',
+                      isPending ? 'text-white bg-slate-800/50' : ''
                     )}
                   >
                     {isActive && (
                       <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-transparent pointer-events-none" />
                     )}
-                    <Icon className={cn("w-4 h-4 flex-shrink-0 relative z-10", isActive ? "text-cyan-400" : "")} />
+                    {isPending ? (
+                      <LoaderCircle className="w-4 h-4 flex-shrink-0 relative z-10 animate-spin text-cyan-300" />
+                    ) : (
+                      <Icon className={cn("w-4 h-4 flex-shrink-0 relative z-10", isActive ? "text-cyan-400" : "")} />
+                    )}
                     <span className="flex-1 relative z-10">{item.label}</span>
-                    {isActive && <ChevronRight className="w-3 h-3 opacity-80 text-cyan-500 relative z-10 animate-pulse" />}
+                    {isPending ? (
+                      <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-cyan-300 relative z-10">
+                        abriendo
+                      </span>
+                    ) : isActive ? (
+                      <ChevronRight className="w-3 h-3 opacity-80 text-cyan-500 relative z-10 animate-pulse" />
+                    ) : null}
                   </Link>
                 )
               })}
