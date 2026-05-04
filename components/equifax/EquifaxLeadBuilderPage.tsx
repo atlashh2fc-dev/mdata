@@ -478,11 +478,11 @@ export function EquifaxLeadBuilderPage() {
         }),
       })
       const json = await parseApiResponse<{ success?: boolean; data?: EquifaxPipelineRunResult; error?: string }>(res)
-      if (!res.ok) throw new Error(json.error ?? 'No se pudo ejecutar el pipeline Equifax.')
+      if (!res.ok) throw new Error(json.error ?? 'No se pudieron actualizar los colores Equifax.')
       setPipelineRunResult(json.data ?? null)
       await loadPipelineOverview()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo ejecutar el pipeline Equifax.')
+      setError(err instanceof Error ? err.message : 'No se pudieron actualizar los colores Equifax.')
     } finally {
       setRunningPipeline(false)
     }
@@ -553,11 +553,185 @@ export function EquifaxLeadBuilderPage() {
         </div>
 
         <section className="card p-5">
+          <div>
+            <h2 className="text-sm font-semibold text-white">1. Definir universo a trabajar</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Partimos desde empresas activas, sacamos lo ya gestionado por call/CRM y limpiamos no-target antes de aplicar colores.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-400">¿Cuántos registros quieres exportar?</span>
+              <select
+                value={volume}
+                onChange={event => setVolume(Number(event.target.value))}
+                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+              >
+                <option value={30000}>30.000 registros</option>
+                <option value={40000}>40.000 registros</option>
+                <option value={50000}>50.000 registros</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-medium text-slate-400">Mínimo teléfonos</span>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                value={minPhoneCount}
+                onChange={event => setMinPhoneCount(Number(event.target.value))}
+                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-medium text-slate-400">Mínimo emails</span>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                value={minEmailCount}
+                onChange={event => setMinEmailCount(Number(event.target.value))}
+                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+              />
+            </label>
+
+            <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={includeExistingCustomers}
+                onChange={event => setIncludeExistingCustomers(event.target.checked)}
+              />
+              <span>Incluir clientes Equifax actuales</span>
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-400">Regiones objetivo</span>
+              <input
+                value={regions}
+                onChange={event => setRegions(event.target.value)}
+                placeholder="Ej: Metropolitana, Valparaíso, Biobío"
+                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+              />
+            </label>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-xs text-slate-400">
+              La base se arma en cascada: empresas activas 2024, sin gestión previa de call, sin iglesias/corporaciones/fundaciones/gobierno y con contacto útil.
+            </div>
+          </div>
+        </section>
+
+        <div className="grid gap-6">
+          <section className="card p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold text-white">2. Catálogo de productos Equifax</h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  Sube un `CSV/XLSX` o un `PDF` comercial para extraer `nombre`, `categoria`, `descripcion`, `rubro` y `keywords`.
+                </p>
+              </div>
+              {savingProducts && <Spinner size="sm" />}
+            </div>
+
+            <label className="mt-4 flex cursor-pointer items-center justify-center gap-3 rounded-2xl border border-dashed border-amber-500/35 bg-amber-500/5 px-4 py-6 text-sm text-amber-200 transition hover:bg-amber-500/10">
+              <Upload className="h-4 w-4" />
+              <span>Subir catálogo o PDF comercial</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.pdf"
+                className="hidden"
+                onChange={handleProductUpload}
+              />
+            </label>
+
+            <p className="mt-3 text-xs text-slate-500">
+              Ejemplo: brochure PDF, ficha de producto, propuesta comercial o planilla estructurada.
+            </p>
+
+            {productImportMessage && (
+              <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                {productImportMessage}
+              </div>
+            )}
+
+            <div className="mt-5 flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Productos seleccionados
+              </div>
+              <div className="text-xs text-slate-500">{formatNumber(selectedProducts.length)} elegidos</div>
+            </div>
+
+            {(catalog?.products?.length ?? 0) === 0 ? (
+              <EmptyState
+                title="Sin productos cargados"
+                description="Sube el catálogo comercial para que el motor pueda inferir el mejor fit."
+              />
+            ) : (
+              <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                {catalog?.products.map(product => {
+                  const checked = selectedProductIds.includes(product.id)
+                  return (
+                    <label
+                      key={product.id}
+                      className={cn(
+                        'flex cursor-pointer items-start gap-3 rounded-2xl border px-3 py-3 transition',
+                        checked
+                          ? 'border-cyan-500/35 bg-cyan-500/10'
+                          : 'border-slate-800 bg-slate-950/30 hover:border-slate-700'
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={checked}
+                        onChange={event => {
+                          setSelectedProductIds(prev =>
+                            event.target.checked
+                              ? [...prev, product.id]
+                              : prev.filter(id => id !== product.id)
+                          )
+                        }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-medium text-white">{product.name}</div>
+                          {product.category && (
+                            <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
+                              {product.category}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          {product.description || product.target_rubro || 'Sin descripción adicional'}
+                        </div>
+                        {!!product.target_company_keywords?.length && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {product.target_company_keywords.slice(0, 6).map(keyword => (
+                              <span key={`${product.id}-${keyword}`} className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
+                                {keyword}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <section className="card p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-semibold text-white">Control del modelo Equifax</h2>
+              <h2 className="text-sm font-semibold text-white">3. Aplicar colores al universo</h2>
               <p className="mt-1 text-xs text-slate-400">
-                Estado del aprendizaje automático, guardrails de activación, proyección comercial y ejecución manual del pipeline.
+                Después de definir el universo, actualiza el semáforo y valida los modelos que colorean la base final.
               </p>
             </div>
 
@@ -578,7 +752,7 @@ export function EquifaxLeadBuilderPage() {
                 className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {runningPipeline || pipelineIsActive ? <Spinner size="sm" /> : <RefreshCcw className="h-4 w-4" />}
-                {pipelineIsActive ? 'Pipeline corriendo' : 'Ejecutar pipeline'}
+                {pipelineIsActive ? 'Colores actualizándose' : 'Actualizar colores'}
               </button>
             </div>
           </div>
@@ -593,8 +767,8 @@ export function EquifaxLeadBuilderPage() {
                   : 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100'
             )}>
               {pipelineRunResult.status === 'running'
-                ? `${pipelineRunResult.message ?? (pipelineRunResult.already_running ? 'Ya había una corrida en progreso.' : 'Pipeline iniciado en segundo plano.')} Run ${pipelineRunResult.run_id} · modo ${getPipelineModeLabel(pipelineRunResult.trigger_mode)}.`
-                : `Pipeline ejecutado. Run ${pipelineRunResult.run_id} · modo ${getPipelineModeLabel(pipelineRunResult.trigger_mode)} · ${formatNumber(pipelineRunResult.refreshed_rutids)} RUTs refrescados.`}
+                ? `${pipelineRunResult.message ?? (pipelineRunResult.already_running ? 'Ya había una corrida en progreso.' : 'Colores en actualización.')} Run ${pipelineRunResult.run_id} · modo ${getPipelineModeLabel(pipelineRunResult.trigger_mode)}.`
+                : `Colores actualizados. Run ${pipelineRunResult.run_id} · modo ${getPipelineModeLabel(pipelineRunResult.trigger_mode)} · ${formatNumber(pipelineRunResult.refreshed_rutids)} RUTs refrescados.`}
             </div>
           )}
 
@@ -850,177 +1024,21 @@ export function EquifaxLeadBuilderPage() {
           </div>
         </section>
 
-        <div className="grid gap-6">
-          <section className="card p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-white">1. Catálogo de productos Equifax</h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Sube un `CSV/XLSX` o un `PDF` comercial para extraer `nombre`, `categoria`, `descripcion`, `rubro` y `keywords`.
-                </p>
-              </div>
-              {savingProducts && <Spinner size="sm" />}
-            </div>
-
-            <label className="mt-4 flex cursor-pointer items-center justify-center gap-3 rounded-2xl border border-dashed border-amber-500/35 bg-amber-500/5 px-4 py-6 text-sm text-amber-200 transition hover:bg-amber-500/10">
-              <Upload className="h-4 w-4" />
-              <span>Subir catálogo o PDF comercial</span>
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv,.pdf"
-                className="hidden"
-                onChange={handleProductUpload}
-              />
-            </label>
-
-            <p className="mt-3 text-xs text-slate-500">
-              Ejemplo: brochure PDF, ficha de producto, propuesta comercial o planilla estructurada.
-            </p>
-
-            {productImportMessage && (
-              <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                {productImportMessage}
-              </div>
-            )}
-
-            <div className="mt-5 flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Productos seleccionados
-              </div>
-              <div className="text-xs text-slate-500">{formatNumber(selectedProducts.length)} elegidos</div>
-            </div>
-
-            {(catalog?.products?.length ?? 0) === 0 ? (
-              <EmptyState
-                title="Sin productos cargados"
-                description="Sube el catálogo comercial para que el motor pueda inferir el mejor fit."
-              />
-            ) : (
-              <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
-                {catalog?.products.map(product => {
-                  const checked = selectedProductIds.includes(product.id)
-                  return (
-                    <label
-                      key={product.id}
-                      className={cn(
-                        'flex cursor-pointer items-start gap-3 rounded-2xl border px-3 py-3 transition',
-                        checked
-                          ? 'border-cyan-500/35 bg-cyan-500/10'
-                          : 'border-slate-800 bg-slate-950/30 hover:border-slate-700'
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={checked}
-                        onChange={event => {
-                          setSelectedProductIds(prev =>
-                            event.target.checked
-                              ? [...prev, product.id]
-                              : prev.filter(id => id !== product.id)
-                          )
-                        }}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="font-medium text-white">{product.name}</div>
-                          {product.category && (
-                            <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
-                              {product.category}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-400">
-                          {product.description || product.target_rubro || 'Sin descripción adicional'}
-                        </div>
-                        {!!product.target_company_keywords?.length && (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {product.target_company_keywords.slice(0, 6).map(keyword => (
-                              <span key={`${product.id}-${keyword}`} className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
-                                {keyword}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </label>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-        </div>
-
         <section className="card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-semibold text-white">2. Explorar escenarios de base</h2>
+              <h2 className="text-sm font-semibold text-white">4. Explorar escenarios y generar base</h2>
               <p className="mt-1 text-xs text-slate-400">
-                Primero analizamos escenarios posibles sobre el universo empresarial disponible. Solo después eliges uno y generamos la base final.
+                Con el universo definido y los colores disponibles, analizamos escenarios y generamos la base final.
               </p>
             </div>
             {analyzing && <Spinner size="sm" />}
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-400">¿Cuántos registros quieres exportar?</span>
-              <select
-                value={volume}
-                onChange={event => setVolume(Number(event.target.value))}
-                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
-              >
-                <option value={30000}>30.000 registros</option>
-                <option value={40000}>40.000 registros</option>
-                <option value={50000}>50.000 registros</option>
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="text-xs font-medium text-slate-400">Mínimo teléfonos</span>
-              <input
-                type="number"
-                min={0}
-                max={10}
-                value={minPhoneCount}
-                onChange={event => setMinPhoneCount(Number(event.target.value))}
-                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs font-medium text-slate-400">Mínimo emails</span>
-              <input
-                type="number"
-                min={0}
-                max={10}
-                value={minEmailCount}
-                onChange={event => setMinEmailCount(Number(event.target.value))}
-                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
-              />
-            </label>
-
-            <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
-              <input
-                type="checkbox"
-                checked={includeExistingCustomers}
-                onChange={event => setIncludeExistingCustomers(event.target.checked)}
-              />
-              <span>Incluir clientes Equifax actuales</span>
-            </label>
-          </div>
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-400">Regiones objetivo</span>
-              <input
-                value={regions}
-                onChange={event => setRegions(event.target.value)}
-                placeholder="Ej: Metropolitana, Valparaíso, Biobío"
-                className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
-              />
-            </label>
-
+          <div className="mt-5 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-xs text-slate-400">
+              Exportación objetivo: {formatNumber(volume)} registros · mínimo {formatNumber(minPhoneCount)} teléfono(s) · mínimo {formatNumber(minEmailCount)} email(s){regions ? ` · regiones: ${regions}` : ''}.
+            </div>
             <label className="block">
               <span className="text-xs font-medium text-slate-400">Brief comercial para la IA</span>
               <textarea
