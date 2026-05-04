@@ -49,7 +49,9 @@
     "ops:apply:crm-contract": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-contract/apply-registro-intel-contract.mjs",
     "ops:atlas:backfill-company-matches": "node --env-file=${ENV_FILE:-.env.production} scripts/commercial-intelligence/backfill-atlas-company-matches.mjs",
     "ops:push:crm-actions": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/push-registro-intel.mjs",
-    "ops:sync:crm-loop": "npm run ops:sync:crm-feedback && npm run ops:push:crm-actions"
+    "ops:sync:crm-loop": "npm run ops:sync:crm-feedback && npm run ops:push:crm-actions",
+    "ops:hh:pipeline": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-pipeline.mjs",
+    "ops:hh:week": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-week.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
