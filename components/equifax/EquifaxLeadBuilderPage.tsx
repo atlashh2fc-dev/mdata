@@ -32,7 +32,6 @@ import type {
   EquifaxLeadPreviewResult,
   EquifaxLeadScenario,
   EquifaxProductCatalogItem,
-  EquifaxSalesImportResult,
 } from '@/types/equifax'
 
 type CatalogResponse = {
@@ -198,7 +197,6 @@ export function EquifaxLeadBuilderPage() {
   const [minEmailCount, setMinEmailCount] = useState(0)
   const [includeExistingCustomers, setIncludeExistingCustomers] = useState(true)
   const [savingProducts, setSavingProducts] = useState(false)
-  const [importingSales, setImportingSales] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [generatingScenarioKey, setGeneratingScenarioKey] = useState<string | null>(null)
   const [pushingToCrm, setPushingToCrm] = useState(false)
@@ -221,7 +219,6 @@ export function EquifaxLeadBuilderPage() {
   })
   const [pipelineOverview, setPipelineOverview] = useState<EquifaxPipelineLatestResponse | null>(null)
   const [pipelineRunResult, setPipelineRunResult] = useState<EquifaxPipelineRunResult | null>(null)
-  const [salesImportResult, setSalesImportResult] = useState<EquifaxSalesImportResult | null>(null)
   const [productImportMessage, setProductImportMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -311,34 +308,6 @@ export function EquifaxLeadBuilderPage() {
 
     return () => window.clearInterval(intervalId)
   }, [latestPipelineStatus])
-
-  async function handleSalesImport(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    setImportingSales(true)
-    setError(null)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/equifax/import-sales', {
-        method: 'POST',
-        body: formData,
-      })
-      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxSalesImportResult; error?: string }>(res)
-      if (!res.ok) throw new Error(json.error ?? 'No se pudo importar el Excel.')
-
-      setSalesImportResult(json.data ?? null)
-      await loadCatalog()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo importar ventas.')
-    } finally {
-      setImportingSales(false)
-      event.target.value = ''
-    }
-  }
 
   async function handleProductUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -881,55 +850,11 @@ export function EquifaxLeadBuilderPage() {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="grid gap-6">
           <section className="card p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-sm font-semibold text-white">1. Cargar histórico de ventas</h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Sube el Excel con hojas `Recurrente` y `One Time` para dejar el histórico en Supabase.
-                </p>
-              </div>
-              {importingSales && <Spinner size="sm" />}
-            </div>
-
-            <label className="mt-4 flex cursor-pointer items-center justify-center gap-3 rounded-2xl border border-dashed border-cyan-500/35 bg-cyan-500/5 px-4 py-6 text-sm text-cyan-200 transition hover:bg-cyan-500/10">
-              <Upload className="h-4 w-4" />
-              <span>Seleccionar Excel de ventas Equifax</span>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={handleSalesImport}
-              />
-            </label>
-
-            {salesImportResult && (
-              <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                Se importaron {formatNumber(salesImportResult.total_rows)} filas desde {salesImportResult.sheets.join(', ')}.
-              </div>
-            )}
-
-            <div className="mt-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Servicios más vendidos</div>
-              <div className="mt-3 space-y-2">
-                {(catalog?.summary.top_services ?? []).map(service => (
-                  <div key={service.service} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
-                    <div className="text-slate-200">{service.service}</div>
-                    <div className="text-right">
-                      <div className="font-semibold text-white">{formatNumber(service.count)}</div>
-                      <div className="text-[11px] text-slate-500">{formatNumber(service.total_amount)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="card p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-white">2. Catálogo de productos Equifax</h2>
+                <h2 className="text-sm font-semibold text-white">1. Catálogo de productos Equifax</h2>
                 <p className="mt-1 text-xs text-slate-400">
                   Sube un `CSV/XLSX` o un `PDF` comercial para extraer `nombre`, `categoria`, `descripcion`, `rubro` y `keywords`.
                 </p>
@@ -1029,7 +954,7 @@ export function EquifaxLeadBuilderPage() {
         <section className="card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-semibold text-white">3. Explorar escenarios de base</h2>
+              <h2 className="text-sm font-semibold text-white">2. Explorar escenarios de base</h2>
               <p className="mt-1 text-xs text-slate-400">
                 Primero analizamos escenarios posibles sobre el universo empresarial disponible. Solo después eliges uno y generamos la base final.
               </p>
