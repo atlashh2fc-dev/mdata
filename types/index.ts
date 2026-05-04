@@ -1121,3 +1121,64 @@ export interface CommercialActionFeed {
   lead_instructions: LeadActionInstruction[]
   recommendations: TacticalRecommendation[]
 }
+
+export type MiroFishScenarioScope = 'commercial_brain' | 'portfolio' | 'equifax'
+
+export type MiroFishScenarioLifecycleStatus =
+  | 'draft'
+  | 'running'
+  | 'completed'
+  | 'failed'
+
+export type MiroFishScenarioPhase =
+  | 'pack_built'
+  | 'graph_building'
+  | 'graph_ready'
+  | 'simulation_created'
+  | 'simulation_preparing'
+  | 'simulation_ready'
+  | 'simulation_running'
+  | 'simulation_completed'
+  | 'report_generating'
+  | 'report_ready'
+
+export interface MiroFishScenarioRun {
+  id: string
+  title: string
+  scenario_scope: MiroFishScenarioScope
+  status: MiroFishScenarioLifecycleStatus
+  phase: MiroFishScenarioPhase
+  simulation_requirement: string
+  hypothesis: string | null
+  additional_context: string | null
+  scenario_pack_markdown: string
+  source_payload: Record<string, unknown>
+  remote_project_id: string | null
+  remote_graph_id: string | null
+  remote_graph_task_id: string | null
+  remote_simulation_id: string | null
+  remote_prepare_task_id: string | null
+  remote_report_task_id: string | null
+  remote_report_id: string | null
+  remote_status_payload: Record<string, unknown>
+  report_markdown: string | null
+  report_summary: string | null
+  last_error: string | null
+  created_by: string | null
+  started_at: string
+  completed_at: string | null
+  last_synced_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MiroFishScenarioStartRequest {
+  title: string
+  hypothesis: string
+  simulation_requirement?: string | null
+  additional_context?: string | null
+  scope?: MiroFishScenarioScope
+  include_equifax_projection?: boolean
+  equifax_generation_params?: Record<string, unknown> | null
+  max_rounds?: number | null
+}
