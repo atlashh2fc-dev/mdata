@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
-import { generateEquifaxLeads, previewEquifaxLeadScenarios } from '@/lib/services/equifax-bdd'
+import { generateEquifaxLeads, previewEquifaxLeadScenarios, previewFreshEquifaxUniverse } from '@/lib/services/equifax-bdd'
 import { getEquifaxRunActionFeed, pushEquifaxRunToCrm } from '@/lib/services/equifax-crm'
 import type { EquifaxLeadGenerationParams } from '@/types/equifax'
 
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const action =
-      body?.action === 'generate' || body?.action === 'push_to_crm'
+      body?.action === 'generate' || body?.action === 'push_to_crm' || body?.action === 'preview_universe'
         ? body.action
         : 'preview'
 
@@ -95,9 +95,11 @@ export async function POST(req: NextRequest) {
       scored_universe_limit: body?.scored_universe_limit == null ? null : Number(body.scored_universe_limit),
     }
 
-    const result = action === 'generate'
-      ? await generateEquifaxLeads(params, user.id)
-      : await previewEquifaxLeadScenarios(params)
+    const result = action === 'preview_universe'
+      ? await previewFreshEquifaxUniverse(params)
+      : action === 'generate'
+        ? await generateEquifaxLeads(params, user.id)
+        : await previewEquifaxLeadScenarios(params)
 
     return NextResponse.json({ success: true, data: result })
   } catch (error) {

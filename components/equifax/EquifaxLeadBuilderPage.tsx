@@ -31,6 +31,7 @@ import type {
   EquifaxLeadGenerationResult,
   EquifaxLeadPreviewResult,
   EquifaxLeadScenario,
+  EquifaxUniversePreviewResult,
   EquifaxProductCatalogItem,
 } from '@/types/equifax'
 
@@ -197,12 +198,16 @@ export function EquifaxLeadBuilderPage() {
   const [minEmailCount, setMinEmailCount] = useState(0)
   const [includeExistingCustomers, setIncludeExistingCustomers] = useState(true)
   const [savingProducts, setSavingProducts] = useState(false)
+  const [buildingUniverse, setBuildingUniverse] = useState(false)
+  const [useProductValidation, setUseProductValidation] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [generatingScenarioKey, setGeneratingScenarioKey] = useState<string | null>(null)
   const [pushingToCrm, setPushingToCrm] = useState(false)
   const [loadingPipeline, setLoadingPipeline] = useState(false)
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [pipelineMode, setPipelineMode] = useState<'safe' | 'dry-run' | 'force'>('safe')
+  const [universePreview, setUniversePreview] = useState<EquifaxUniversePreviewResult | null>(null)
+  const [universeRequestKey, setUniverseRequestKey] = useState<string | null>(null)
   const [preview, setPreview] = useState<EquifaxLeadPreviewResult | null>(null)
   const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
   const [result, setResult] = useState<EquifaxLeadGenerationResult | null>(null)
@@ -263,9 +268,7 @@ export function EquifaxLeadBuilderPage() {
     return (catalog?.products ?? []).filter(item => ids.has(item.id))
   }, [catalog?.products, selectedProductIds])
 
-  const generationPayload = useMemo(() => ({
-    product_ids: selectedProductIds,
-    prompt,
+  const universePayload = useMemo(() => ({
     volume,
     regions: regions.split(',').map(item => item.trim()).filter(Boolean),
     include_existing_customers: includeExistingCustomers,
@@ -277,18 +280,33 @@ export function EquifaxLeadBuilderPage() {
     includeExistingCustomers,
     minEmailCount,
     minPhoneCount,
-    prompt,
     regions,
-    selectedProductIds,
     volume,
+  ])
+
+  const generationPayload = useMemo(() => ({
+    ...universePayload,
+    product_ids: useProductValidation ? selectedProductIds : [],
+    prompt,
+  }), [
+    prompt,
+    selectedProductIds,
+    universePayload,
+    useProductValidation,
   ])
 
   const currentRequestKey = useMemo(
     () => JSON.stringify(generationPayload),
     [generationPayload]
   )
+  const currentUniverseRequestKey = useMemo(
+    () => JSON.stringify(universePayload),
+    [universePayload]
+  )
 
   const isPreviewStale = Boolean(preview && previewRequestKey && previewRequestKey !== currentRequestKey)
+  const isUniverseStale = Boolean(universePreview && universeRequestKey && universeRequestKey !== currentUniverseRequestKey)
+  const hasValidatedUniverse = Boolean(universePreview && universeRequestKey === currentUniverseRequestKey)
   const latestPipelineRun = pipelineOverview?.latest as Record<string, unknown> | null
   const latestPipelineStatus = String(latestPipelineRun?.status ?? '')
   const pipelineIsActive = latestPipelineStatus === 'running'
@@ -370,6 +388,34 @@ export function EquifaxLeadBuilderPage() {
     } finally {
       setSavingProducts(false)
       event.target.value = ''
+    }
+  }
+
+  async function handleBuildUniverse() {
+    setBuildingUniverse(true)
+    setError(null)
+    setPreview(null)
+    setResult(null)
+
+    try {
+      const res = await fetch('/api/equifax/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'preview_universe',
+          ...universePayload,
+        }),
+      })
+      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxUniversePreviewResult; error?: string }>(res)
+      if (!res.ok) throw new Error(json.error ?? 'No se pudo construir el universo.')
+      setUniversePreview(json.data ?? null)
+      setUniverseRequestKey(currentUniverseRequestKey)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo construir el universo.')
+    } finally {
+      setBuildingUniverse(false)
     }
   }
 
@@ -623,18 +669,95 @@ export function EquifaxLeadBuilderPage() {
               La base se arma en cascada: empresas activas 2024, sin gestión previa de call, sin iglesias/corporaciones/fundaciones/gobierno y con contacto útil.
             </div>
           </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleBuildUniverse}
+              disabled={buildingUniverse}
+              className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {buildingUniverse ? <Spinner size="sm" /> : <Database className="h-4 w-4" />}
+              {universePreview ? 'Reconstruir universo' : 'Buscar universo'}
+            </button>
+            {isUniverseStale && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                Cambiaste reglas. Vuelve a buscar el universo.
+              </div>
+            )}
+          </div>
+
+          {universePreview && (
+            <div className="mt-5 space-y-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                  <div className="text-lg font-semibold text-white">{formatNumber(universePreview.eligible_matches)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Listos para exportar</div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                  <div className="text-lg font-semibold text-white">{formatNumber(universePreview.universe_analyzed)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Universo revisado</div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                  <div className="text-lg font-semibold text-white">{formatNumber(universePreview.summary.with_phone)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Con teléfono</div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                  <div className="text-lg font-semibold text-white">{formatNumber(universePreview.summary.with_email)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Con email</div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+                  <div className="text-lg font-semibold text-white">{formatNumber(universePreview.summary.pyme)}</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">PyME</div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reglas aplicadas</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {universePreview.rules.map(rule => (
+                      <span key={rule} className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-200">
+                        {rule}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Muestra top</div>
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    {universePreview.sample_rows.slice(0, 4).map(row => (
+                      <div key={row.rutid} className="rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2">
+                        <div className="text-sm font-medium text-white">{row.company_name}</div>
+                        <div className="mt-1 text-xs text-slate-400">{row.region ?? 'Sin región'} · {row.segment ?? 'Sin segmento'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         <div className="grid gap-6">
           <section className="card p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-sm font-semibold text-white">2. Catálogo de productos Equifax</h2>
+                <h2 className="text-sm font-semibold text-white">2. Validación de productos Equifax</h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  Sube un `CSV/XLSX` o un `PDF` comercial para extraer `nombre`, `categoria`, `descripcion`, `rubro` y `keywords`.
+                  Opcional: usa productos para ajustar el fit comercial después de validar el universo.
                 </p>
               </div>
-              {savingProducts && <Spinner size="sm" />}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={useProductValidation}
+                    onChange={event => setUseProductValidation(event.target.checked)}
+                  />
+                  <span>Incluir productos</span>
+                </label>
+                {savingProducts && <Spinner size="sm" />}
+              </div>
             </div>
 
             <label className="mt-4 flex cursor-pointer items-center justify-center gap-3 rounded-2xl border border-dashed border-amber-500/35 bg-amber-500/5 px-4 py-6 text-sm text-amber-200 transition hover:bg-amber-500/10">
@@ -739,7 +862,7 @@ export function EquifaxLeadBuilderPage() {
               <select
                 value={pipelineMode}
                 onChange={event => setPipelineMode(event.target.value as 'safe' | 'dry-run' | 'force')}
-                disabled={runningPipeline || pipelineIsActive}
+                disabled={!hasValidatedUniverse || runningPipeline || pipelineIsActive}
                 className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-500"
               >
                 <option value="safe">Modo safe</option>
@@ -748,11 +871,11 @@ export function EquifaxLeadBuilderPage() {
               </select>
               <button
                 onClick={handleRunPipeline}
-                disabled={runningPipeline || pipelineIsActive}
+                disabled={!hasValidatedUniverse || runningPipeline || pipelineIsActive}
                 className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {runningPipeline || pipelineIsActive ? <Spinner size="sm" /> : <RefreshCcw className="h-4 w-4" />}
-                {pipelineIsActive ? 'Colores actualizándose' : 'Actualizar colores'}
+                {!hasValidatedUniverse ? 'Primero valida universo' : pipelineIsActive ? 'Colores actualizándose' : 'Actualizar colores'}
               </button>
             </div>
           </div>
@@ -1054,11 +1177,11 @@ export function EquifaxLeadBuilderPage() {
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
               onClick={handleAnalyze}
-              disabled={analyzing || selectedProductIds.length === 0}
+              disabled={analyzing || !hasValidatedUniverse || isUniverseStale || (useProductValidation && selectedProductIds.length === 0)}
               className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <BrainCircuit className="h-4 w-4" />
-              {preview ? 'Analizar nuevamente' : 'Analizar escenarios con IA'}
+              {preview ? 'Reestimar escenarios' : 'Estimar escenarios'}
             </button>
             {preview && (
               <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-300">
@@ -1066,9 +1189,13 @@ export function EquifaxLeadBuilderPage() {
               </div>
             )}
             <div className="text-xs text-slate-500">
-              {selectedProducts.length > 0
-                ? `${formatNumber(selectedProducts.length)} producto(s) seleccionado(s)`
-                : 'Selecciona al menos un producto'}
+              {!hasValidatedUniverse
+                ? 'Primero busca y valida el universo'
+                : useProductValidation
+                  ? selectedProducts.length > 0
+                    ? `${formatNumber(selectedProducts.length)} producto(s) seleccionado(s)`
+                    : 'Selecciona al menos un producto o desactiva validación de productos'
+                  : 'Validación de productos desactivada'}
             </div>
           </div>
 

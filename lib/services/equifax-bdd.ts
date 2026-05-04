@@ -13,6 +13,7 @@ import type {
   EquifaxLeadScoreSnapshot,
   EquifaxLeadResultItem,
   EquifaxLeadScenario,
+  EquifaxUniversePreviewResult,
   EquifaxProductCatalogItem,
   EquifaxSalesImportResult,
 } from '@/types/equifax'
@@ -1590,6 +1591,78 @@ function buildRunSummary(rows: EquifaxLeadResultItem[]) {
     green_leads: rows.filter(row => row.lead_temperature === 'green').length,
     yellow_leads: rows.filter(row => row.lead_temperature === 'yellow').length,
     red_leads: rows.filter(row => row.lead_temperature === 'red').length,
+  }
+}
+
+function countTopValues<T extends string>(values: Array<T | null | undefined>, fallback: T) {
+  const counts = new Map<T, number>()
+
+  for (const value of values) {
+    const key = value ?? fallback
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 8)
+}
+
+export async function previewFreshEquifaxUniverse(
+  params: EquifaxLeadGenerationParams
+): Promise<EquifaxUniversePreviewResult> {
+  const volume = clamp(Math.round(params.volume || 30000), 1, MAX_GENERATION_VOLUME)
+  const regions = uniqueStrings((params.regions ?? []).map(item => item.trim()).filter(Boolean))
+  const requestedSampleSize = Number(params.scored_universe_limit ?? 0)
+  const sampleSize = Math.min(
+    MAX_FRESH_COMPANY_CANDIDATES,
+    Math.max(volume * 8, 60000, Number.isFinite(requestedSampleSize) ? requestedSampleSize : 0)
+  )
+  const candidates = await fetchFreshCompanyCandidates(
+    sampleSize,
+    regions,
+    buildScoredUniverseFallbackProfile(params.prompt)
+  )
+  const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
+  const minEmailCount = Math.max(0, Math.round(params.min_email_count ?? 0))
+  const eligible = candidates.filter(candidate => {
+    const phoneCount = candidate.fono_cel ? 1 : 0
+    const emailCount = candidate.email ? 1 : 0
+    return phoneCount >= minPhoneCount && emailCount >= minEmailCount
+  })
+  const selected = eligible.slice(0, volume)
+
+  return {
+    requested_volume: volume,
+    universe_analyzed: candidates.length,
+    eligible_matches: selected.length,
+    rules: [
+      'Empresas activas 2024',
+      'Sin gestión previa en call/CRM',
+      'Sin iglesias, corporaciones, fundaciones, gobierno ni educación',
+      'Sin corporaciones por tramo',
+      `Mínimo ${minPhoneCount} teléfono(s) y ${minEmailCount} email(s)`,
+      regions.length ? `Regiones: ${regions.join(', ')}` : 'Todas las regiones',
+    ],
+    summary: {
+      with_phone: selected.filter(row => Boolean(row.fono_cel)).length,
+      with_email: selected.filter(row => Boolean(row.email)).length,
+      with_phone_and_email: selected.filter(row => Boolean(row.fono_cel) && Boolean(row.email)).length,
+      pyme: selected.filter(row => row.es_pyme).length,
+      regions: countTopValues(selected.map(row => row.region_canonica), 'Sin region')
+        .map(([region, count]) => ({ region, count })),
+      segments: countTopValues(selected.map(row => row.segmento_tamano_empresa), 'sin_segmento')
+        .map(([segment, count]) => ({ segment, count })),
+    },
+    sample_rows: selected.slice(0, 12).map(row => ({
+      rutid: row.rutid,
+      company_name: row.razon_social_empresa ?? 'Sin razon social',
+      region: row.region_canonica,
+      comuna: row.comuna_canonica,
+      phone: row.fono_cel,
+      email: row.email,
+      segment: row.segmento_tamano_empresa ?? null,
+      trend: row.resultado_tendencia ?? null,
+    })),
   }
 }
 

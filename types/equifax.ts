@@ -49,6 +49,31 @@ export interface EquifaxLeadGenerationParams {
   scored_universe_limit?: number | null
 }
 
+export interface EquifaxUniversePreviewResult {
+  requested_volume: number
+  universe_analyzed: number
+  eligible_matches: number
+  rules: string[]
+  summary: {
+    with_phone: number
+    with_email: number
+    with_phone_and_email: number
+    pyme: number
+    regions: Array<{ region: string; count: number }>
+    segments: Array<{ segment: string; count: number }>
+  }
+  sample_rows: Array<{
+    rutid: string
+    company_name: string
+    region: string | null
+    comuna: string | null
+    phone: string | null
+    email: string | null
+    segment: string | null
+    trend: string | null
+  }>
+}
+
 export interface EquifaxLeadResultItem {
   rutid: string
   company_name: string
