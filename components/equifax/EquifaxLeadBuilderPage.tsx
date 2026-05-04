@@ -31,6 +31,7 @@ import type {
   EquifaxLeadGenerationResult,
   EquifaxLeadPreviewResult,
   EquifaxLeadScenario,
+  EquifaxUniverseProgress,
   EquifaxUniversePreviewResult,
   EquifaxProductCatalogItem,
 } from '@/types/equifax'
@@ -207,6 +208,7 @@ export function EquifaxLeadBuilderPage() {
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [pipelineMode, setPipelineMode] = useState<'safe' | 'dry-run' | 'force'>('safe')
   const [universePreview, setUniversePreview] = useState<EquifaxUniversePreviewResult | null>(null)
+  const [universeProgress, setUniverseProgress] = useState<EquifaxUniverseProgress | null>(null)
   const [universeRequestKey, setUniverseRequestKey] = useState<string | null>(null)
   const [preview, setPreview] = useState<EquifaxLeadPreviewResult | null>(null)
   const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
@@ -275,7 +277,7 @@ export function EquifaxLeadBuilderPage() {
     min_phone_count: minPhoneCount,
     min_email_count: minEmailCount,
     universe_source: 'fresh_companies' as const,
-    scored_universe_limit: Math.min(180000, Math.max(Math.ceil(volume * 6), 60000)),
+    scored_universe_limit: Math.min(180000, Math.max(Math.ceil(volume * 2), 1000)),
   }), [
     includeExistingCustomers,
     minEmailCount,
@@ -396,6 +398,14 @@ export function EquifaxLeadBuilderPage() {
     setError(null)
     setPreview(null)
     setResult(null)
+    setUniverseProgress({
+      phase: 'starting',
+      percent: 0,
+      message: 'Iniciando busqueda de universo.',
+      scanned: 0,
+      collected: 0,
+      target: volume,
+    })
 
     try {
       const res = await fetch('/api/equifax/leads', {
@@ -404,13 +414,50 @@ export function EquifaxLeadBuilderPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          action: 'preview_universe',
+          action: 'preview_universe_stream',
           ...universePayload,
         }),
       })
-      const json = await parseApiResponse<{ success?: boolean; data?: EquifaxUniversePreviewResult; error?: string }>(res)
-      if (!res.ok) throw new Error(json.error ?? 'No se pudo construir el universo.')
-      setUniversePreview(json.data ?? null)
+
+      if (!res.ok || !res.body) {
+        const json = await parseApiResponse<{ error?: string }>(res)
+        throw new Error(json.error ?? 'No se pudo construir el universo.')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalData: EquifaxUniversePreviewResult | null = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const event = JSON.parse(line) as {
+            type?: 'progress' | 'result' | 'error'
+            progress?: EquifaxUniverseProgress
+            data?: EquifaxUniversePreviewResult
+            error?: string
+          }
+
+          if (event.type === 'progress' && event.progress) {
+            setUniverseProgress(event.progress)
+          } else if (event.type === 'result' && event.data) {
+            finalData = event.data
+          } else if (event.type === 'error') {
+            throw new Error(event.error ?? 'No se pudo construir el universo.')
+          }
+        }
+      }
+
+      if (!finalData) throw new Error('La busqueda no devolvio un universo valido.')
+      setUniversePreview(finalData)
       setUniverseRequestKey(currentUniverseRequestKey)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo construir el universo.')
@@ -685,6 +732,26 @@ export function EquifaxLeadBuilderPage() {
               </div>
             )}
           </div>
+
+          {universeProgress && (
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-white">{universeProgress.message}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Revisadas {formatNumber(universeProgress.scanned)} · limpias {formatNumber(universeProgress.collected)} · objetivo {formatNumber(universeProgress.target)}
+                  </div>
+                </div>
+                <div className="text-sm font-semibold text-cyan-200">{formatNumber(universeProgress.percent)}%</div>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-900">
+                <div
+                  className="h-full rounded-full bg-cyan-400 transition-[width] duration-300"
+                  style={{ width: `${universeProgress.percent}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {universePreview && (
             <div className="mt-5 space-y-4">

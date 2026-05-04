@@ -74,6 +74,15 @@ export interface EquifaxUniversePreviewResult {
   }>
 }
 
+export interface EquifaxUniverseProgress {
+  phase: 'starting' | 'reading_companies' | 'matching_contacts' | 'excluding_managed' | 'cleaning' | 'done'
+  percent: number
+  message: string
+  scanned: number
+  collected: number
+  target: number
+}
+
 export interface EquifaxLeadResultItem {
   rutid: string
   company_name: string

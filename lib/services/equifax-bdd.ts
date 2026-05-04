@@ -5,6 +5,7 @@ import {
   normalizeEquifaxKeyword,
 } from '@/lib/services/equifax-targeting'
 import { cleanRut } from '@/lib/utils/rut'
+import { Client } from 'pg'
 import type {
   EquifaxCatalogSummary,
   EquifaxLeadGenerationParams,
@@ -13,6 +14,7 @@ import type {
   EquifaxLeadScoreSnapshot,
   EquifaxLeadResultItem,
   EquifaxLeadScenario,
+  EquifaxUniverseProgress,
   EquifaxUniversePreviewResult,
   EquifaxProductCatalogItem,
   EquifaxSalesImportResult,
@@ -21,6 +23,7 @@ import type {
 const INCEPTION_API_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
 const INCEPTION_MODEL = 'mercury-2'
 const FETCH_CHUNK_SIZE = 1000
+const FRESH_COMPANY_FETCH_CHUNK_SIZE = 5000
 const RUT_LOOKUP_CHUNK_SIZE = 250
 const MAX_GENERATION_VOLUME = 50000
 const MAX_CANDIDATES = 60000
@@ -97,6 +100,33 @@ type PersonaScoreRow = {
   best_email: string | null
   known_phone_count: number | null
   known_email_count: number | null
+}
+
+type FreshUniverseProgressHandler = (progress: EquifaxUniverseProgress) => void
+
+type FreshCompanyTrendRow = {
+  rutid: string
+  razon_social: string | null
+  region: string | null
+  comuna: string | null
+  ultimo_tramo_ventas: number | null
+  resultado_tendencia: string | null
+  rubro_economico_ultimo: string | null
+  actividad_economica_ultima: string | null
+}
+
+type FreshMasterPersonaRow = {
+  rutid: string
+  email: string | null
+  fono_cel: string | null
+  region_part: string | null
+  comuna_part: string | null
+  domicilio_region: string | null
+  domicilio_comuna: string | null
+  razon_social_empresa: string | null
+  n_autos: number | null
+  n_bienes_raices: number | null
+  totalavaluos: number | null
 }
 
 type EquifaxFeatureSnapshot = {
@@ -228,6 +258,45 @@ const EQUFAX_SCENARIOS: ScenarioConfig[] = [
     },
   },
 ]
+
+function sanitizePostgresConnectionString(value: string) {
+  const url = new URL(value)
+  url.searchParams.delete('sslmode')
+  url.searchParams.delete('pgbouncer')
+  url.searchParams.delete('supa')
+  return url.toString()
+}
+
+function resolvePostgresConnectionString() {
+  return process.env.POSTGRES_URL_NON_POOLING
+    ?? process.env.POSTGRES_URL
+    ?? process.env.POSTGRES_PRISMA_URL
+    ?? process.env.DATABASE_URL
+    ?? null
+}
+
+async function withPostgresClient<T>(operation: (client: Client) => Promise<T>) {
+  const connectionString = resolvePostgresConnectionString()
+  if (!connectionString) {
+    throw new Error('Falta configurar POSTGRES_URL_NON_POOLING para construir el universo.')
+  }
+
+  const client = new Client({
+    connectionString: sanitizePostgresConnectionString(connectionString),
+    ssl: { rejectUnauthorized: false },
+    statement_timeout: 0,
+    query_timeout: 0,
+    connectionTimeoutMillis: 30000,
+  })
+
+  await client.connect()
+  try {
+    await client.query('set statement_timeout = 0')
+    return await operation(client)
+  } finally {
+    await client.end()
+  }
+}
 
 function normalizeRutForDb(value: string | null | undefined): string | null {
   if (!value) return null
@@ -1190,90 +1259,235 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[], pr
     .slice(0, sampleSize)
 }
 
-async function fetchFreshCompanyCandidates(sampleSize: number, regions: string[], profile: ProductProfile) {
+function emitFreshUniverseProgress(
+  onProgress: FreshUniverseProgressHandler | undefined,
+  progress: EquifaxUniverseProgress
+) {
+  onProgress?.({
+    ...progress,
+    percent: Math.max(0, Math.min(100, Math.round(progress.percent))),
+  })
+}
+
+function mapFreshCompanyCandidate(
+  trendRow: FreshCompanyTrendRow,
+  scoreRow: PersonaScoreRow | undefined,
+  masterRow: FreshMasterPersonaRow | undefined
+): CandidateCompany {
+  const tramoVentas = toNullableNumber(trendRow.ultimo_tramo_ventas)
+  const nAutos = toNullableNumber(masterRow?.n_autos) ?? 0
+  const nBienesRaices = toNullableNumber(masterRow?.n_bienes_raices) ?? 0
+  const totalAvaluos = toNullableNumber(masterRow?.totalavaluos) ?? 0
+  const email = toNullableString(scoreRow?.best_email) ?? toNullableString(masterRow?.email)
+  const phone = toNullableString(scoreRow?.best_phone) ?? toNullableString(masterRow?.fono_cel)
+  const scorePatrimonial = toNullableNumber(scoreRow?.priority_score)
+    ?? (nAutos * 10
+      + nBienesRaices * 20
+      + Number(Boolean(masterRow?.razon_social_empresa || trendRow.razon_social)) * 15
+      + Number(Boolean(email)) * 5
+      + Number(Boolean(phone)) * 5)
+  const coberturaPct = toNullableNumber(scoreRow?.contactability_score)
+    ?? Math.round((
+      Number(Boolean(email))
+      + Number(Boolean(phone))
+      + Number(Boolean(masterRow?.region_part || masterRow?.domicilio_region || trendRow.region))
+      + Number(nAutos > 0)
+      + Number(nBienesRaices > 0 || totalAvaluos > 0)
+      + Number(Boolean(masterRow?.razon_social_empresa || trendRow.razon_social))
+    ) / 6 * 100)
+
+  return {
+    rutid: String(trendRow.rutid ?? '').trim(),
+    razon_social_empresa: toNullableString(trendRow.razon_social) ?? toNullableString(masterRow?.razon_social_empresa),
+    region_canonica: toNullableString(trendRow.region) ?? toNullableString(masterRow?.region_part) ?? toNullableString(masterRow?.domicilio_region),
+    comuna_canonica: toNullableString(trendRow.comuna) ?? toNullableString(masterRow?.comuna_part) ?? toNullableString(masterRow?.domicilio_comuna),
+    email,
+    fono_cel: phone,
+    score_patrimonial: scorePatrimonial,
+    cobertura_pct: coberturaPct,
+    tiene_empresa: true,
+    tiene_autos: nAutos > 0,
+    tiene_bienes_raices: nBienesRaices > 0 || totalAvaluos > 0,
+    n_autos: nAutos,
+    n_bienes_raices: nBienesRaices,
+    source_universe: 'empresas_comercial_unificada',
+    segmento_tamano_empresa:
+      tramoVentas != null && tramoVentas >= 13
+        ? 'corporacion'
+        : tramoVentas != null && tramoVentas >= 10
+          ? 'gran_empresa'
+          : tramoVentas != null && tramoVentas >= 1
+            ? 'pyme'
+            : 'sin_tramo',
+    resultado_tendencia: toNullableString(trendRow.resultado_tendencia),
+    rubro_economico: toNullableString(trendRow.rubro_economico_ultimo),
+    actividad_economica: toNullableString(trendRow.actividad_economica_ultima),
+    es_pyme: tramoVentas != null && tramoVentas >= 1 && tramoVentas <= 9,
+    es_corporacion: tramoVentas != null && tramoVentas >= 13,
+  }
+}
+
+async function fetchPersonaScoreRowsByRutids(client: Client, rutids: string[]) {
+  const lookupRutids = uniqueStrings(rutids.flatMap(rutid => rutLookupVariants(rutid)))
+  const map = new Map<string, PersonaScoreRow>()
+  if (lookupRutids.length === 0) return map
+
+  for (let start = 0; start < lookupRutids.length; start += 5000) {
+    const chunk = lookupRutids.slice(start, start + 5000)
+    const result = await client.query<PersonaScoreRow>(
+      `
+        select
+          rutid,
+          contactability_score,
+          purchase_propensity_score,
+          priority_score,
+          best_phone,
+          best_email,
+          known_phone_count,
+          known_email_count
+        from public.persona_scores
+        where rutid = any($1::varchar[])
+      `,
+      [chunk]
+    )
+
+    for (const row of result.rows) {
+      map.set(row.rutid, row)
+    }
+  }
+
+  return map
+}
+
+async function fetchMasterPersonaRowsByRutids(client: Client, rutids: string[]) {
+  const lookupRutids = uniqueStrings(rutids.flatMap(rutid => rutLookupVariants(rutid)))
+  const map = new Map<string, FreshMasterPersonaRow>()
+  if (lookupRutids.length === 0) return map
+
+  for (let start = 0; start < lookupRutids.length; start += 5000) {
+    const chunk = lookupRutids.slice(start, start + 5000)
+    const result = await client.query<FreshMasterPersonaRow>(
+      `
+        select
+          rutid,
+          email,
+          fono_cel,
+          region_part,
+          comuna_part,
+          domicilio_region,
+          domicilio_comuna,
+          razon_social_empresa,
+          n_autos,
+          n_bienes_raices,
+          totalavaluos
+        from public.personas_master
+        where rutid = any($1::varchar[])
+      `,
+      [chunk]
+    )
+
+    for (const row of result.rows) {
+      map.set(row.rutid, row)
+    }
+  }
+
+  return map
+}
+
+async function fetchFreshCompanyCandidates(
+  sampleSize: number,
+  regions: string[],
+  profile: ProductProfile,
+  onProgress?: FreshUniverseProgressHandler
+) {
   const rows: CandidateCompany[] = []
   const targetRows = Math.min(sampleSize, MAX_FRESH_COMPANY_CANDIDATES)
 
-  for (let start = 0; rows.length < targetRows; start += FETCH_CHUNK_SIZE) {
-    let query = db
-      .from('empresas_comercial_unificada')
-      .select(`
-        rutid,
-        razon_social,
-        region,
-        comuna,
-        email,
-        fono_cel,
-        score_patrimonial,
-        cobertura_pct,
-        n_autos,
-        n_bienes_raices,
-        totalavaluos,
-        segmento_tamano_empresa,
-        resultado_tendencia,
-        rubro_economico_ultimo,
-        actividad_economica_ultima,
-        es_pyme,
-        es_corporacion
-      `)
-      .eq('es_universo_operativo_ventas', true)
-      .neq('segmento_tamano_empresa', 'corporacion')
-      .or('email.not.is.null,fono_cel.not.is.null')
-      .order('es_pyme', { ascending: false, nullsFirst: false })
-      .order('score_patrimonial', { ascending: false, nullsFirst: false })
-      .order('cobertura_pct', { ascending: false, nullsFirst: false })
-      .range(start, start + FETCH_CHUNK_SIZE - 1)
+  emitFreshUniverseProgress(onProgress, {
+    phase: 'starting',
+    percent: 1,
+    message: 'Preparando lectura de empresas activas 2024.',
+    scanned: 0,
+    collected: 0,
+    target: targetRows,
+  })
 
-    if (regions.length > 0) {
-      query = query.in('region', regions)
-    }
+  await withPostgresClient(async client => {
+    for (let start = 0; rows.length < targetRows; start += FRESH_COMPANY_FETCH_CHUNK_SIZE) {
+      const params: unknown[] = [FRESH_COMPANY_FETCH_CHUNK_SIZE, start]
+      const regionClause = regions.length > 0
+        ? `and evt.region_ultima = any($${params.push(regions)}::text[])`
+        : ''
 
-    const { data, error } = await query
-    if (error) {
-      console.error('[fetchFreshCompanyCandidates]', error)
-      throw new Error('No se pudo leer el universo activo de empresas.')
-    }
+      const companyResult = await client.query<FreshCompanyTrendRow>(
+        `
+          select
+            evt.rutid,
+            evt.razon_social_ultima as razon_social,
+            evt.region_ultima as region,
+            evt.comuna_ultima as comuna,
+            evt.ultimo_tramo_ventas,
+            evt.resultado_tendencia,
+            evt.rubro_economico_ultimo,
+            evt.actividad_economica_ultima
+          from public.empresas_ventas_tendencia evt
+          where evt.anio_ultimo = 2024
+            and evt.fecha_termino_giro_ultima is null
+            and (evt.ultimo_tramo_ventas is null or evt.ultimo_tramo_ventas < 13)
+            ${regionClause}
+          limit $1 offset $2
+        `,
+        params
+      )
 
-    const chunk = ((data ?? []) as Array<Record<string, unknown>>)
-      .map(row => ({
-        rutid: String(row.rutid ?? '').trim(),
-        razon_social_empresa: toNullableString(row.razon_social),
-        region_canonica: toNullableString(row.region),
-        comuna_canonica: toNullableString(row.comuna),
-        email: toNullableString(row.email),
-        fono_cel: toNullableString(row.fono_cel),
-        score_patrimonial: toNullableNumber(row.score_patrimonial),
-        cobertura_pct: toNullableNumber(row.cobertura_pct),
-        tiene_empresa: true,
-        tiene_autos: Number(row.n_autos ?? 0) > 0,
-        tiene_bienes_raices: Number(row.n_bienes_raices ?? 0) > 0 || Number(row.totalavaluos ?? 0) > 0,
-        n_autos: toNullableNumber(row.n_autos),
-        n_bienes_raices: toNullableNumber(row.n_bienes_raices),
-        source_universe: 'empresas_comercial_unificada' as const,
-        segmento_tamano_empresa: toNullableString(row.segmento_tamano_empresa),
-        resultado_tendencia: toNullableString(row.resultado_tendencia),
-        rubro_economico: toNullableString(row.rubro_economico_ultimo),
-        actividad_economica: toNullableString(row.actividad_economica_ultima),
-        es_pyme: row.es_pyme === true,
-        es_corporacion: row.es_corporacion === true,
-      }))
-      .filter(row => {
-        if (!row.rutid || !row.razon_social_empresa) return false
-        if (row.es_corporacion) return false
-        return !detectEquifaxNonTargetCompany(row.razon_social_empresa, {
-          rutid: row.rutid,
-          region: row.region_canonica,
+      const chunkRutids = companyResult.rows.map(row => row.rutid)
+      const [scoreRows, masterRows] = await Promise.all([
+        fetchPersonaScoreRowsByRutids(client, chunkRutids),
+        fetchMasterPersonaRowsByRutids(client, chunkRutids),
+      ])
+
+      const chunk = companyResult.rows
+        .map(row => mapFreshCompanyCandidate(
+          row,
+          getMapByRutVariants(scoreRows, row.rutid),
+          getMapByRutVariants(masterRows, row.rutid)
+        ))
+        .filter(row => {
+          if (!row.rutid || !row.razon_social_empresa) return false
+          if (!row.email && !row.fono_cel) return false
+          if (row.es_corporacion) return false
+          return !detectEquifaxNonTargetCompany(row.razon_social_empresa, {
+            rutid: row.rutid,
+            region: row.region_canonica,
+          })
         })
+
+      rows.push(...chunk)
+      emitFreshUniverseProgress(onProgress, {
+        phase: 'matching_contacts',
+        percent: Math.min(72, 8 + (rows.length / Math.max(targetRows, 1)) * 64),
+        message: `Leídas ${rows.length.toLocaleString('es-CL')} empresas con contacto útil.`,
+        scanned: start + companyResult.rows.length,
+        collected: rows.length,
+        target: targetRows,
       })
 
-    rows.push(...chunk)
-    if ((data ?? []).length < FETCH_CHUNK_SIZE) break
-  }
+      if (companyResult.rows.length < FRESH_COMPANY_FETCH_CHUNK_SIZE) break
+    }
+  })
 
   const deduped = dedupeCandidateCompanies(rows)
+  emitFreshUniverseProgress(onProgress, {
+    phase: 'excluding_managed',
+    percent: 78,
+    message: `Cruzando ${deduped.length.toLocaleString('es-CL')} empresas contra call/CRM.`,
+    scanned: rows.length,
+    collected: deduped.length,
+    target: targetRows,
+  })
   const managedRutids = await fetchManagedRutidsFromCallBase(deduped.map(row => row.rutid))
 
-  return deduped
+  const freshRows = deduped
     .filter(row => !hasManagedRutid(managedRutids, row.rutid))
     .sort((left, right) => {
       const leftScore =
@@ -1297,6 +1511,17 @@ async function fetchFreshCompanyCandidates(sampleSize: number, regions: string[]
       return rightScore - leftScore
     })
     .slice(0, sampleSize)
+
+  emitFreshUniverseProgress(onProgress, {
+    phase: 'cleaning',
+    percent: 94,
+    message: `Quedaron ${freshRows.length.toLocaleString('es-CL')} empresas nuevas limpias.`,
+    scanned: rows.length,
+    collected: freshRows.length,
+    target: targetRows,
+  })
+
+  return freshRows
 }
 
 async function fetchPersonaScoresMap(rutids: string[]) {
@@ -1608,19 +1833,21 @@ function countTopValues<T extends string>(values: Array<T | null | undefined>, f
 }
 
 export async function previewFreshEquifaxUniverse(
-  params: EquifaxLeadGenerationParams
+  params: EquifaxLeadGenerationParams,
+  onProgress?: FreshUniverseProgressHandler
 ): Promise<EquifaxUniversePreviewResult> {
   const volume = clamp(Math.round(params.volume || 30000), 1, MAX_GENERATION_VOLUME)
   const regions = uniqueStrings((params.regions ?? []).map(item => item.trim()).filter(Boolean))
   const requestedSampleSize = Number(params.scored_universe_limit ?? 0)
   const sampleSize = Math.min(
     MAX_FRESH_COMPANY_CANDIDATES,
-    Math.max(volume * 8, 60000, Number.isFinite(requestedSampleSize) ? requestedSampleSize : 0)
+    Math.max(volume * 2, 1000, Number.isFinite(requestedSampleSize) ? requestedSampleSize : 0)
   )
   const candidates = await fetchFreshCompanyCandidates(
     sampleSize,
     regions,
-    buildScoredUniverseFallbackProfile(params.prompt)
+    buildScoredUniverseFallbackProfile(params.prompt),
+    onProgress
   )
   const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
   const minEmailCount = Math.max(0, Math.round(params.min_email_count ?? 0))
@@ -1631,7 +1858,7 @@ export async function previewFreshEquifaxUniverse(
   })
   const selected = eligible.slice(0, volume)
 
-  return {
+  const result = {
     requested_volume: volume,
     universe_analyzed: candidates.length,
     eligible_matches: selected.length,
@@ -1664,6 +1891,17 @@ export async function previewFreshEquifaxUniverse(
       trend: row.resultado_tendencia ?? null,
     })),
   }
+
+  emitFreshUniverseProgress(onProgress, {
+    phase: 'done',
+    percent: 100,
+    message: `Universo listo: ${selected.length.toLocaleString('es-CL')} registros disponibles.`,
+    scanned: candidates.length,
+    collected: selected.length,
+    target: volume,
+  })
+
+  return result
 }
 
 function applyScenarioToCandidates(
@@ -2045,7 +2283,7 @@ async function prepareEquifaxCandidates(
     const requestedSampleSize = Number(params.scored_universe_limit ?? 0)
     const sampleSize = Math.min(
       MAX_FRESH_COMPANY_CANDIDATES,
-      Math.max(volume * 8, 60000, Number.isFinite(requestedSampleSize) ? requestedSampleSize : 0)
+      Math.max(volume * 3, 1000, Number.isFinite(requestedSampleSize) ? requestedSampleSize : 0)
     )
     const candidates = await fetchFreshCompanyCandidates(sampleSize, regions, aiProfile)
     const candidateRutids = candidates.map(row => row.rutid)

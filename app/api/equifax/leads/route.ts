@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import { generateEquifaxLeads, previewEquifaxLeadScenarios, previewFreshEquifaxUniverse } from '@/lib/services/equifax-bdd'
 import { getEquifaxRunActionFeed, pushEquifaxRunToCrm } from '@/lib/services/equifax-crm'
-import type { EquifaxLeadGenerationParams } from '@/types/equifax'
+import type { EquifaxLeadGenerationParams, EquifaxUniverseProgress } from '@/types/equifax'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -53,7 +53,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const action =
-      body?.action === 'generate' || body?.action === 'push_to_crm' || body?.action === 'preview_universe'
+      body?.action === 'generate'
+        || body?.action === 'push_to_crm'
+        || body?.action === 'preview_universe'
+        || body?.action === 'preview_universe_stream'
         ? body.action
         : 'preview'
 
@@ -93,6 +96,37 @@ export async function POST(req: NextRequest) {
             : 'fresh_companies',
       allowed_temperatures: Array.isArray(body?.allowed_temperatures) ? body.allowed_temperatures : undefined,
       scored_universe_limit: body?.scored_universe_limit == null ? null : Number(body.scored_universe_limit),
+    }
+
+    if (action === 'preview_universe_stream') {
+      const encoder = new TextEncoder()
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (payload: Record<string, unknown>) => {
+            controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`))
+          }
+
+          try {
+            const data = await previewFreshEquifaxUniverse(params, (progress: EquifaxUniverseProgress) => {
+              send({ type: 'progress', progress })
+            })
+            send({ type: 'result', data })
+          } catch (error) {
+            console.error('[equifax/leads:preview_universe_stream]', error)
+            const message = error instanceof Error ? error.message : 'No se pudo construir el universo.'
+            send({ type: 'error', error: message })
+          } finally {
+            controller.close()
+          }
+        },
+      })
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      })
     }
 
     const result = action === 'preview_universe'
