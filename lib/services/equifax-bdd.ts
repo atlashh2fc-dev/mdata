@@ -1456,7 +1456,12 @@ async function fetchFreshCompanyCandidates(
           if (!row.rutid || !row.razon_social_empresa) return false
           if (!row.email && !row.fono_cel) return false
           if (row.es_corporacion) return false
-          return !detectEquifaxNonTargetCompany(row.razon_social_empresa, {
+          const targetText = [
+            row.razon_social_empresa,
+            row.rubro_economico,
+            row.actividad_economica,
+          ].filter(Boolean).join(' ')
+          return !detectEquifaxNonTargetCompany(targetText, {
             rutid: row.rutid,
             region: row.region_canonica,
           })
@@ -1618,8 +1623,13 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
   const featureSnapshot = extractEquifaxFeatureSnapshot(equifaxLeadScore)
   const companyName = candidate.razon_social_empresa?.trim() || featureSnapshot?.company_name?.trim()
   if (!companyName) return null
+  const targetText = [
+    companyName,
+    candidate.rubro_economico,
+    candidate.actividad_economica,
+  ].filter(Boolean).join(' ')
   if (
-    detectEquifaxNonTargetCompany(companyName, {
+    detectEquifaxNonTargetCompany(targetText, {
       rutid: candidate.rutid,
       region: candidate.region_canonica ?? featureSnapshot?.region ?? null,
     })
