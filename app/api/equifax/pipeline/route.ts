@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse, unstable_after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient, db } from '@/lib/db/supabase'
 import {
   buildEquifaxProjectionSummary,
-  createEquifaxScoringPipelineRun,
   findLatestRunningEquifaxPipelineRun,
   markStaleEquifaxPipelineRunsAsFailed,
   runEquifaxScoringPipeline,
@@ -110,7 +109,7 @@ async function buildPipelineOverview() {
   return { latest, projections, crosscheck, active_models: activeModels }
 }
 
-async function enqueuePipelineRun(triggerSource: 'cron' | 'manual-api', mode: 'safe' | 'force' | 'dry-run') {
+async function executePipelineRun(triggerSource: 'cron' | 'manual-api', mode: 'safe' | 'force' | 'dry-run') {
   await markStaleEquifaxPipelineRunsAsFailed()
 
   const existingRun = await findLatestRunningEquifaxPipelineRun()
@@ -123,27 +122,14 @@ async function enqueuePipelineRun(triggerSource: 'cron' | 'manual-api', mode: 's
     }
   }
 
-  const run = await createEquifaxScoringPipelineRun({
+  const run = await runEquifaxScoringPipeline({
     triggerSource,
-    triggerMode: mode,
-  })
-
-  unstable_after(async () => {
-    try {
-      await runEquifaxScoringPipeline({
-        triggerSource,
-        activationMode: mode,
-        existingRunId: run.run_id,
-      })
-    } catch (error) {
-      console.error('[equifax/pipeline:after]', error)
-    }
+    activationMode: mode,
   })
 
   return {
     ...run,
-    queued: true,
-    message: 'Pipeline Equifax iniciado en segundo plano.',
+    message: 'Pipeline Equifax ejecutado.',
   }
 }
 
@@ -162,8 +148,8 @@ export async function GET(req: NextRequest) {
     }
 
     const mode = (req.nextUrl.searchParams.get('mode') ?? 'safe') as 'safe' | 'force' | 'dry-run'
-    const result = await enqueuePipelineRun(secretAuthorized ? 'cron' : 'manual-api', mode)
-    return NextResponse.json({ success: true, data: result }, { status: 202 })
+    const result = await executePipelineRun(secretAuthorized ? 'cron' : 'manual-api', mode)
+    return NextResponse.json({ success: true, data: result })
   } catch (error) {
     console.error('[equifax/pipeline:get]', error)
     const message = error instanceof Error ? error.message : 'No se pudo ejecutar el pipeline Equifax.'
@@ -188,8 +174,8 @@ export async function POST(req: NextRequest) {
     }
 
     const mode = (body?.mode ?? 'safe') as 'safe' | 'force' | 'dry-run'
-    const result = await enqueuePipelineRun(secretAuthorized ? 'cron' : 'manual-api', mode)
-    return NextResponse.json({ success: true, data: result }, { status: 202 })
+    const result = await executePipelineRun(secretAuthorized ? 'cron' : 'manual-api', mode)
+    return NextResponse.json({ success: true, data: result })
   } catch (error) {
     console.error('[equifax/pipeline:post]', error)
     const message = error instanceof Error ? error.message : 'No se pudo ejecutar el pipeline Equifax.'
