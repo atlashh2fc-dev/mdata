@@ -566,8 +566,9 @@ export function EquifaxLeadBuilderPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          action: 'run',
+          action: 'score_selected_universe',
           mode: pipelineMode,
+          ...universePayload,
         }),
       })
       const json = await parseApiResponse<{ success?: boolean; data?: EquifaxPipelineRunResult; error?: string }>(res)

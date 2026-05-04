@@ -1,4 +1,5 @@
 import { db } from '@/lib/db/supabase'
+import { cleanRut } from '@/lib/utils/rut'
 import type {
   EquifaxLeadFeatureSnapshot,
   EquifaxLeadScoreSnapshot,
@@ -14,6 +15,11 @@ const PYME_LEGAL_SIGNAL_PATTERN = /\b(SPA|S P A|LTDA|LIMITADA|EIRL|E I R L)\b/
 const LARGE_COMPANY_LEGAL_PATTERN = /\b(SA|S A|SOCIEDAD ANONIMA|CONCESIONARIA)\b/
 const NON_TARGET_COMPANY_PATTERN = /\b(MUNICIPALIDAD|GOBIERNO|MINISTERIO|SERVICIO DE SALUD|HOSPITAL|UNIVERSIDAD|COLEGIO|ESCUELA|LICEO|BANCO|BANCARIA|FINANCIERA|SEGUROS|HOLDING|CORPORACION|FUNDACION|IGLESIA|PARROQUIA|DIOCESIS|RELIGIOSA|SINDICATO|ASOCIACION GREMIAL|COOPERATIVA|CAJA DE COMPENSACION)\b/
 const PERSON_NAME_START_PATTERN = /^(JUAN|JOSE|MARIA|LUIS|CARLOS|PEDRO|SERGIO|MIGUEL|JORGE|CLAUDIO|RODRIGO|PATRICIO|FRANCISCO|FERNANDO|ANDRES|DANIEL|RAUL|RICARDO|VICTOR|GLADYS|MARCELA|PAOLA|ANA|ROSA|ELENA|HUGO|OSCAR|ALEJANDRO|MAURICIO|CRISTIAN|SEBASTIAN)\b/
+
+function normalizeRutForScoreLookup(value: string | null | undefined) {
+  const cleaned = cleanRut(value ?? '')
+  return cleaned.length >= 2 ? cleaned.padStart(10, '0') : null
+}
 
 type MasterRow = {
   rutid: string
@@ -1852,7 +1858,7 @@ export async function getEquifaxLeadScoresMap(
   rutids: string[],
   options?: { refreshIfMissing?: boolean }
 ) {
-  const uniqueRutids = uniqueStrings(rutids)
+  const uniqueRutids = uniqueStrings(rutids.map(normalizeRutForScoreLookup))
   const map = new Map<string, EquifaxLeadScoreSnapshot>()
   if (!uniqueRutids.length) return map
 
@@ -2332,7 +2338,17 @@ async function collectEquifaxFeedbackRutids() {
   return [...rutids]
 }
 
-async function fetchScoreProjectionRows() {
+async function fetchScoreProjectionRows(rutids?: string[]) {
+  if (rutids?.length) {
+    const rows = await fetchRowsInChunks<EquifaxLeadScoreSnapshot>(
+      'equifax_lead_scores',
+      'rutid,model_version,model_type,contact_probability,interest_probability,purchase_probability,fit_score,lead_score,lead_temperature,recommended_channel,recommended_hour,reason_tags,score_breakdown,scored_at',
+      uniqueStrings(rutids)
+    )
+
+    return rows.sort((left, right) => toNumber(right.lead_score) - toNumber(left.lead_score))
+  }
+
   const rows: EquifaxLeadScoreSnapshot[] = []
   let from = 0
 
@@ -2422,8 +2438,8 @@ function summarizeCrosscheckBucket(
   }
 }
 
-export async function buildEquifaxProjectionSummary(): Promise<ProjectionSummary> {
-  const rows = await fetchScoreProjectionRows()
+export async function buildEquifaxProjectionSummary(rutids?: string[]): Promise<ProjectionSummary> {
+  const rows = await fetchScoreProjectionRows(rutids)
 
   return {
     generated_at: new Date().toISOString(),
@@ -2431,6 +2447,72 @@ export async function buildEquifaxProjectionSummary(): Promise<ProjectionSummary
     top_1000: summarizeProjectionBucket(rows.slice(0, 1000)),
     top_3000: summarizeProjectionBucket(rows.slice(0, 3000)),
     top_10000: summarizeProjectionBucket(rows.slice(0, 10000)),
+  }
+}
+
+export async function runEquifaxScoringPipelineForRutids(
+  rutids: string[],
+  options?: {
+    triggerSource?: string
+    activationMode?: PipelineTriggerMode
+    notes?: string
+  }
+) {
+  const uniqueRutids = uniqueStrings(rutids.map(normalizeRutForScoreLookup))
+  const triggerSource = options?.triggerSource ?? 'manual-universe'
+  const activationMode = options?.activationMode ?? 'safe'
+  const runId = (await createEquifaxScoringPipelineRun({
+    triggerSource,
+    triggerMode: activationMode,
+  })).run_id
+
+  try {
+    let refreshedBatches = 0
+
+    if (activationMode !== 'dry-run') {
+      for (const subset of chunk(uniqueRutids, UPSERT_CHUNK_SIZE)) {
+        await refreshEquifaxLeadScoresForRutids(subset)
+        refreshedBatches += 1
+      }
+    }
+
+    const projections = await buildEquifaxProjectionSummary(uniqueRutids)
+    const finishedAt = new Date().toISOString()
+
+    await updatePipelineRun(runId, {
+      status: 'success',
+      refreshed_rutids: uniqueRutids.length,
+      refreshed_batches: refreshedBatches,
+      models_trained: 0,
+      training_payload: {
+        source: 'selected_universe',
+        selected_rutids: uniqueRutids.length,
+      },
+      projection_payload: projections,
+      notes: options?.notes ?? `Colores aplicados al universo seleccionado (${uniqueRutids.length} RUTs).`,
+      finished_at: finishedAt,
+    })
+
+    return {
+      run_id: runId,
+      trigger_source: triggerSource,
+      trigger_mode: activationMode,
+      status: 'success',
+      refreshed_rutids: uniqueRutids.length,
+      refreshed_batches: refreshedBatches,
+      training: null,
+      projections,
+      crosscheck: null,
+      finished_at: finishedAt,
+    } satisfies EquifaxPipelineRunResult
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error desconocido al colorear universo Equifax.'
+    await updatePipelineRun(runId, {
+      status: 'failed',
+      error_message: message,
+      finished_at: new Date().toISOString(),
+    })
+    throw error
   }
 }
 

@@ -1842,10 +1842,10 @@ function countTopValues<T extends string>(values: Array<T | null | undefined>, f
     .slice(0, 8)
 }
 
-export async function previewFreshEquifaxUniverse(
+async function buildFreshEquifaxUniverseSelection(
   params: EquifaxLeadGenerationParams,
   onProgress?: FreshUniverseProgressHandler
-): Promise<EquifaxUniversePreviewResult> {
+) {
   const volume = clamp(Math.round(params.volume || 30000), 1, MAX_GENERATION_VOLUME)
   const regions = uniqueStrings((params.regions ?? []).map(item => item.trim()).filter(Boolean))
   const requestedSampleSize = Number(params.scored_universe_limit ?? 0)
@@ -1868,7 +1868,7 @@ export async function previewFreshEquifaxUniverse(
   })
   const selected = eligible.slice(0, volume)
 
-  const result = {
+  const preview: EquifaxUniversePreviewResult = {
     requested_volume: volume,
     universe_analyzed: candidates.length,
     eligible_matches: selected.length,
@@ -1911,7 +1911,23 @@ export async function previewFreshEquifaxUniverse(
     target: volume,
   })
 
-  return result
+  return {
+    preview,
+    selected,
+  }
+}
+
+export async function previewFreshEquifaxUniverse(
+  params: EquifaxLeadGenerationParams,
+  onProgress?: FreshUniverseProgressHandler
+): Promise<EquifaxUniversePreviewResult> {
+  const { preview } = await buildFreshEquifaxUniverseSelection(params, onProgress)
+  return preview
+}
+
+export async function getFreshEquifaxUniverseRutids(params: EquifaxLeadGenerationParams) {
+  const { selected } = await buildFreshEquifaxUniverseSelection(params)
+  return selected.map(row => row.rutid)
 }
 
 function applyScenarioToCandidates(
