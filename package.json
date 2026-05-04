@@ -33,12 +33,12 @@
     "ops:refresh:dashboard": "bash scripts/master-sync/refresh-dashboard-materialized-views.sh",
     "ops:equifax:import:sales": "node --env-file=.env.local scripts/equifax/import-sales-xlsx.mjs",
     "ops:equifax:refresh:scores": "npx --yes tsx scripts/equifax/refresh-lead-scores.ts",
-  "ops:equifax:refresh:universe": "node --env-file=${ENV_FILE:-.env.production} --experimental-specifier-resolution=node --loader ./scripts/utils/ts-esm-loader.mjs scripts/equifax/refresh-score-universe.ts",
+    "ops:equifax:refresh:universe": "node --env-file=${ENV_FILE:-.env.production} --experimental-specifier-resolution=node --loader ./scripts/utils/ts-esm-loader.mjs scripts/equifax/refresh-score-universe.ts",
     "ops:equifax:refresh:master-pyme": "npx --yes tsx scripts/equifax/refresh-master-pyme-universe.ts",
     "ops:equifax:refresh:rutids-file": "npx --yes tsx scripts/equifax/refresh-rutids-from-file.ts",
     "ops:equifax:train:logit": "npx --yes tsx scripts/equifax/train-logistic-model.ts",
     "ops:equifax:bootstrap:model": "npx --yes tsx scripts/equifax/bootstrap-logistic-model.ts",
-  "ops:equifax:pipeline": "node --env-file=${ENV_FILE:-.env.production} --experimental-specifier-resolution=node --loader ./scripts/utils/ts-esm-loader.mjs scripts/equifax/run-scoring-pipeline.ts",
+    "ops:equifax:pipeline": "node --env-file=${ENV_FILE:-.env.production} --experimental-specifier-resolution=node --loader ./scripts/utils/ts-esm-loader.mjs scripts/equifax/run-scoring-pipeline.ts",
     "ops:equifax:generate:green": "npx --yes tsx scripts/equifax/generate-green-universe.ts",
     "ops:equifax:crm:feed": "npx --yes tsx scripts/equifax/generate-action-feed.ts",
     "ops:equifax:crm:push": "npx --yes tsx scripts/equifax/push-run-to-crm.ts",
@@ -52,7 +52,8 @@
     "ops:push:crm-actions": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/push-registro-intel.mjs",
     "ops:sync:crm-loop": "npm run ops:sync:crm-feedback && npm run ops:crm:dedupe-active-leads && npm run ops:push:crm-actions",
     "ops:hh:pipeline": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-pipeline.mjs",
-    "ops:hh:week": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-week.mjs"
+    "ops:hh:week": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-week.mjs",
+    "ops:equifax:sync:sales-crm": "node --env-file=${ENV_FILE:-.env.production} scripts/equifax/sync-sales-from-crm-feedback.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
