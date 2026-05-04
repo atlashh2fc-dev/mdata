@@ -202,6 +202,8 @@ export async function persistWeekRun(payload, { jsonPath = null, reportPath = nu
           horse: row.horse,
           horse_key: row.horse_key,
           saddle_number: row.number,
+          jockey: row.jockey,
+          trainer: row.trainer,
           program_url: projection.pdf_url,
           recent_positions: row.recent_positions ?? [],
           last_dividend: row.last_dividend,

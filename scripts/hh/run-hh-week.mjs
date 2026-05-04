@@ -161,6 +161,17 @@ function parseDividend(line) {
   return values.length ? values.at(-1) ?? null : null
 }
 
+function parseProgramConnections(line) {
+  const people = [...line.matchAll(/\b(?:[A-Z]\.\s*){1,3}[A-ZÁÉÍÓÚÑ][a-záéíóúñ.'-]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ.'-]+)?/g)]
+    .map(match => clean(match[0]))
+    .filter(value => !/\d/.test(value))
+
+  return {
+    jockey: people[0] ?? null,
+    trainer: people[1] ?? null,
+  }
+}
+
 function parseParticipants(section) {
   const lines = section.text.split('\n').map(clean).filter(Boolean)
   const participants = []
@@ -171,10 +182,13 @@ function parseParticipants(section) {
     const horse = extractHorseName(line)
     if (!horse || horse.length < 2) continue
     const recent = parseRecentPositions(line)
+    const connections = parseProgramConnections(line)
     participants.push({
       number,
       horse,
       horse_key: stripAccents(horse).toUpperCase(),
+      jockey: connections.jockey,
+      trainer: connections.trainer,
       recent_positions: recent,
       last_dividend: parseDividend(line),
       raw_line: line,
