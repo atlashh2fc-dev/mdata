@@ -135,7 +135,7 @@ function CompanyUniverseCard({ stats }: { stats: DashboardStats }) {
       baja: stats.empresas_segmento_corporacion_baja,
     },
     {
-      label: 'PyME s/tramo',
+      label: 'Sin tramo',
       value: stats.empresas_segmento_pyme_master_sin_tramo,
       sube: stats.empresas_segmento_pyme_master_sin_tramo_sube,
       baja: stats.empresas_segmento_pyme_master_sin_tramo_baja,
@@ -159,7 +159,8 @@ function CompanyUniverseCard({ stats }: { stats: DashboardStats }) {
           <p className="text-3xl font-bold text-white leading-none">
             {formatNumber(stats.empresas_universo_total)}
           </p>
-          <p className="text-sm text-slate-400 mt-1">Universo empresas</p>
+          <p className="text-sm text-slate-400 mt-1">Universo empresas activas</p>
+          <p className="text-xs text-slate-500 mt-0.5">SII 2024 sin termino de giro</p>
           <p className="text-xs text-slate-600 mt-0.5">
             Sube {formatNumber(stats.empresas_tendencia_sube)} · Baja {formatNumber(stats.empresas_tendencia_baja)}
           </p>
