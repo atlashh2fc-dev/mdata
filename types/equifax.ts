@@ -44,7 +44,7 @@ export interface EquifaxLeadGenerationParams {
   min_phone_count?: number
   min_email_count?: number
   scenario_key?: string | null
-  universe_source?: 'sampled_master' | 'scored_universe'
+  universe_source?: 'sampled_master' | 'scored_universe' | 'fresh_companies'
   allowed_temperatures?: Array<'green' | 'yellow' | 'red'>
   scored_universe_limit?: number | null
 }
@@ -79,7 +79,7 @@ export interface EquifaxLeadGenerationResult {
   run_id: string
   scenario_key: string
   scenario_title: string
-  universe_source: 'sampled_master' | 'scored_universe'
+  universe_source: 'sampled_master' | 'scored_universe' | 'fresh_companies'
   generated_count: number
   requested_volume: number
   ai_profile: Record<string, unknown>
@@ -124,7 +124,7 @@ export interface EquifaxLeadPreviewResult {
   universe_analyzed: number
   eligible_matches: number
   recommended_scenario_key: string
-  universe_source: 'sampled_master' | 'scored_universe'
+  universe_source: 'sampled_master' | 'scored_universe' | 'fresh_companies'
   ai_profile: Record<string, unknown>
   scenarios: EquifaxLeadScenario[]
 }

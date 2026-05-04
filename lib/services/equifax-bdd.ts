@@ -23,6 +23,7 @@ const FETCH_CHUNK_SIZE = 1000
 const RUT_LOOKUP_CHUNK_SIZE = 250
 const MAX_GENERATION_VOLUME = 50000
 const MAX_CANDIDATES = 60000
+const MAX_FRESH_COMPANY_CANDIDATES = 180000
 const MIN_SCORED_UNIVERSE_SAMPLE = 8000
 const INSERT_CHUNK_SIZE = 500
 
@@ -77,6 +78,13 @@ type CandidateCompany = {
   tiene_bienes_raices: boolean | null
   n_autos: number | null
   n_bienes_raices: number | null
+  source_universe?: 'master_personas_view' | 'empresas_comercial_unificada'
+  segmento_tamano_empresa?: string | null
+  resultado_tendencia?: string | null
+  rubro_economico?: string | null
+  actividad_economica?: string | null
+  es_pyme?: boolean | null
+  es_corporacion?: boolean | null
 }
 
 type PersonaScoreRow = {
@@ -142,7 +150,7 @@ type PreparedEquifaxCandidates = {
   candidates: ScoredLeadCandidate[]
   universeAnalyzed: number
   eligibleMatches: number
-  universeSource: 'sampled_master' | 'scored_universe'
+  universeSource: 'sampled_master' | 'scored_universe' | 'fresh_companies'
 }
 
 type PromptDirectives = {
@@ -227,6 +235,18 @@ function normalizeRutForDb(value: string | null | undefined): string | null {
   return cleaned.padStart(10, '0')
 }
 
+function normalizeRutForMatch(value: string | null | undefined): string | null {
+  if (!value) return null
+  const cleaned = cleanRut(value).replace(/^0+(?=\d)/, '')
+  return cleaned.length >= 2 ? cleaned : null
+}
+
+function rutLookupVariants(value: string | null | undefined): string[] {
+  const normalized = normalizeRutForMatch(value)
+  const padded = normalizeRutForDb(value)
+  return uniqueStrings([value ?? null, normalized, padded])
+}
+
 function normalizeKeyword(value: string): string {
   return normalizeEquifaxKeyword(value)
 }
@@ -289,8 +309,8 @@ function pickFirstValue(record: Record<string, unknown>, aliases: string[]): str
   return null
 }
 
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))]
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))]
 }
 
 function tokenizeKeywordCandidates(values: Array<string | null>): string[] {
@@ -908,6 +928,50 @@ function dedupeCandidateCompanies(rows: CandidateCompany[]) {
   return [...map.values()]
 }
 
+async function fetchManagedRutidsFromCallBase(rutids: string[]) {
+  const managed = new Set<string>()
+  const lookupRutids = uniqueStrings(rutids.flatMap(rutid => rutLookupVariants(rutid)))
+  if (lookupRutids.length === 0) return managed
+
+  async function readFeedbackColumn(column: 'rutid' | 'matched_rutid', subset: string[]) {
+    for (let from = 0; ; from += FETCH_CHUNK_SIZE) {
+      const { data, error } = await db
+        .from('contact_center_feedback')
+        .select('rutid,matched_rutid')
+        .in(column, subset)
+        .range(from, from + FETCH_CHUNK_SIZE - 1)
+
+      if (error) {
+        console.error(`[fetchManagedRutidsFromCallBase:${column}]`, error)
+        throw new Error('No se pudo cruzar contra la base de gestiones del call.')
+      }
+
+      const rows = (data ?? []) as Array<{ rutid: string | null; matched_rutid: string | null }>
+      for (const row of rows) {
+        for (const rutid of rutLookupVariants(row.matched_rutid ?? row.rutid)) {
+          managed.add(rutid)
+        }
+      }
+
+      if (rows.length < FETCH_CHUNK_SIZE) break
+    }
+  }
+
+  for (let start = 0; start < lookupRutids.length; start += RUT_LOOKUP_CHUNK_SIZE) {
+    const subset = lookupRutids.slice(start, start + RUT_LOOKUP_CHUNK_SIZE)
+    await Promise.all([
+      readFeedbackColumn('rutid', subset),
+      readFeedbackColumn('matched_rutid', subset),
+    ])
+  }
+
+  return managed
+}
+
+function hasManagedRutid(managedRutids: Set<string>, rutid: string) {
+  return rutLookupVariants(rutid).some(variant => managedRutids.has(variant))
+}
+
 async function fetchCandidateCompaniesByRutids(rutids: string[], regions: string[]) {
   const map = new Map<string, CandidateCompany>()
   if (rutids.length === 0) return map
@@ -1118,6 +1182,115 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[], pr
         Number(right.cobertura_pct ?? 0) * 0.4 +
         Number(right.score_patrimonial ?? 0) * 0.35 +
         Number(Boolean(right.tiene_empresa)) * 12 -
+        scoreEnterprisePenalty(right.razon_social_empresa ?? '', profile) * 0.8
+
+      return rightScore - leftScore
+    })
+    .slice(0, sampleSize)
+}
+
+async function fetchFreshCompanyCandidates(sampleSize: number, regions: string[], profile: ProductProfile) {
+  const rows: CandidateCompany[] = []
+  const targetRows = Math.min(sampleSize, MAX_FRESH_COMPANY_CANDIDATES)
+
+  for (let start = 0; rows.length < targetRows; start += FETCH_CHUNK_SIZE) {
+    let query = db
+      .from('empresas_comercial_unificada')
+      .select(`
+        rutid,
+        razon_social,
+        region,
+        comuna,
+        email,
+        fono_cel,
+        score_patrimonial,
+        cobertura_pct,
+        n_autos,
+        n_bienes_raices,
+        totalavaluos,
+        segmento_tamano_empresa,
+        resultado_tendencia,
+        rubro_economico_ultimo,
+        actividad_economica_ultima,
+        es_pyme,
+        es_corporacion
+      `)
+      .eq('es_universo_operativo_ventas', true)
+      .neq('segmento_tamano_empresa', 'corporacion')
+      .or('email.not.is.null,fono_cel.not.is.null')
+      .order('es_pyme', { ascending: false, nullsFirst: false })
+      .order('score_patrimonial', { ascending: false, nullsFirst: false })
+      .order('cobertura_pct', { ascending: false, nullsFirst: false })
+      .range(start, start + FETCH_CHUNK_SIZE - 1)
+
+    if (regions.length > 0) {
+      query = query.in('region', regions)
+    }
+
+    const { data, error } = await query
+    if (error) {
+      console.error('[fetchFreshCompanyCandidates]', error)
+      throw new Error('No se pudo leer el universo activo de empresas.')
+    }
+
+    const chunk = ((data ?? []) as Array<Record<string, unknown>>)
+      .map(row => ({
+        rutid: String(row.rutid ?? '').trim(),
+        razon_social_empresa: toNullableString(row.razon_social),
+        region_canonica: toNullableString(row.region),
+        comuna_canonica: toNullableString(row.comuna),
+        email: toNullableString(row.email),
+        fono_cel: toNullableString(row.fono_cel),
+        score_patrimonial: toNullableNumber(row.score_patrimonial),
+        cobertura_pct: toNullableNumber(row.cobertura_pct),
+        tiene_empresa: true,
+        tiene_autos: Number(row.n_autos ?? 0) > 0,
+        tiene_bienes_raices: Number(row.n_bienes_raices ?? 0) > 0 || Number(row.totalavaluos ?? 0) > 0,
+        n_autos: toNullableNumber(row.n_autos),
+        n_bienes_raices: toNullableNumber(row.n_bienes_raices),
+        source_universe: 'empresas_comercial_unificada' as const,
+        segmento_tamano_empresa: toNullableString(row.segmento_tamano_empresa),
+        resultado_tendencia: toNullableString(row.resultado_tendencia),
+        rubro_economico: toNullableString(row.rubro_economico_ultimo),
+        actividad_economica: toNullableString(row.actividad_economica_ultima),
+        es_pyme: row.es_pyme === true,
+        es_corporacion: row.es_corporacion === true,
+      }))
+      .filter(row => {
+        if (!row.rutid || !row.razon_social_empresa) return false
+        if (row.es_corporacion) return false
+        return !detectEquifaxNonTargetCompany(row.razon_social_empresa, {
+          rutid: row.rutid,
+          region: row.region_canonica,
+        })
+      })
+
+    rows.push(...chunk)
+    if ((data ?? []).length < FETCH_CHUNK_SIZE) break
+  }
+
+  const deduped = dedupeCandidateCompanies(rows)
+  const managedRutids = await fetchManagedRutidsFromCallBase(deduped.map(row => row.rutid))
+
+  return deduped
+    .filter(row => !hasManagedRutid(managedRutids, row.rutid))
+    .sort((left, right) => {
+      const leftScore =
+        Number(Boolean(left.email)) * 22 +
+        Number(Boolean(left.fono_cel)) * 30 +
+        Number(left.es_pyme) * 20 +
+        Number(left.resultado_tendencia === 'sube') * 12 +
+        Number(left.cobertura_pct ?? 0) * 0.35 +
+        Number(left.score_patrimonial ?? 0) * 0.3 -
+        scoreEnterprisePenalty(left.razon_social_empresa ?? '', profile) * 0.8
+
+      const rightScore =
+        Number(Boolean(right.email)) * 22 +
+        Number(Boolean(right.fono_cel)) * 30 +
+        Number(right.es_pyme) * 20 +
+        Number(right.resultado_tendencia === 'sube') * 12 +
+        Number(right.cobertura_pct ?? 0) * 0.35 +
+        Number(right.score_patrimonial ?? 0) * 0.3 -
         scoreEnterprisePenalty(right.razon_social_empresa ?? '', profile) * 0.8
 
       return rightScore - leftScore
@@ -1343,16 +1516,22 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
     is_existing_customer: isExistingCustomer,
     last_equifax_sale_at: customerSummary?.last_sale_at ?? null,
     services_bought: customerSummary?.services_bought ?? [],
-    reason_tags: buildLeadReasons({
-      phoneCount,
-      emailCount,
-      isExistingCustomer,
-      keywordHits: keywordMetrics.includeHits,
-      contactability: contactProbability,
-      purchase: purchaseProbability,
-      company: candidate,
-      customerSummary,
-    }),
+    reason_tags: uniqueStrings([
+      candidate.source_universe === 'empresas_comercial_unificada' ? 'universo-empresas-activo-2024' : null,
+      candidate.source_universe === 'empresas_comercial_unificada' ? 'sin-gestion-call-previa' : null,
+      candidate.segmento_tamano_empresa ? `segmento-${candidate.segmento_tamano_empresa}` : null,
+      candidate.resultado_tendencia ? `tendencia-${candidate.resultado_tendencia}` : null,
+      ...buildLeadReasons({
+        phoneCount,
+        emailCount,
+        isExistingCustomer,
+        keywordHits: keywordMetrics.includeHits,
+        contactability: contactProbability,
+        purchase: purchaseProbability,
+        company: candidate,
+        customerSummary,
+      }),
+    ]),
   }
 }
 
@@ -1485,6 +1664,15 @@ function scoreScenarioRecommendation(scenario: EquifaxLeadScenario) {
 
 function resolveScenarioConfig(scenarioKey?: string | null) {
   return EQUFAX_SCENARIOS.find(scenario => scenario.key === scenarioKey) ?? EQUFAX_SCENARIOS[0]
+}
+
+function getMapByRutVariants<T>(map: Map<string, T>, rutid: string) {
+  for (const variant of rutLookupVariants(rutid)) {
+    const value = map.get(variant)
+    if (value) return value
+  }
+
+  return undefined
 }
 
 async function insertRunItemsInChunks(runId: string, rows: EquifaxLeadResultItem[]) {
@@ -1681,7 +1869,11 @@ async function prepareEquifaxCandidates(
   const universeSource =
     params.universe_source === 'scored_universe' || isGreenOnlyScenario
       ? 'scored_universe'
-      : 'sampled_master'
+      : params.universe_source === 'fresh_companies'
+        ? 'fresh_companies'
+      : params.universe_source === 'sampled_master'
+        ? 'sampled_master'
+        : 'fresh_companies'
   const includeExistingCustomers = params.include_existing_customers !== false
   const minPhoneCount = Math.max(0, Math.round(params.min_phone_count ?? 1))
   const minEmailCount = Math.max(0, Math.round(params.min_email_count ?? 0))
@@ -1697,7 +1889,9 @@ async function prepareEquifaxCandidates(
     )
   )
 
-  const shouldUseActiveCatalogByDefault = universeSource === 'scored_universe' && !(params.product_ids?.length)
+  const shouldUseActiveCatalogByDefault =
+    (universeSource === 'scored_universe' || universeSource === 'fresh_companies') &&
+    !(params.product_ids?.length)
   const storedProducts = params.product_ids?.length
     ? await db
         .from('equifax_product_catalog')
@@ -1730,7 +1924,7 @@ async function prepareEquifaxCandidates(
   }))
 
   const products = [...normalizedStored, ...normalizedTransient]
-  if (!products.length && universeSource !== 'scored_universe') {
+  if (!products.length && universeSource !== 'scored_universe' && universeSource !== 'fresh_companies') {
     throw new Error('Debes subir o seleccionar al menos un producto para generar leads.')
   }
 
@@ -1767,6 +1961,37 @@ async function prepareEquifaxCandidates(
         candidate,
         aiProfile,
         equifaxLeadScore,
+        includeExistingCustomers,
+        minPhoneCount,
+        minEmailCount,
+      })
+
+      if (rankedCandidate) ranked.push(rankedCandidate)
+    }
+  } else if (universeSource === 'fresh_companies') {
+    const requestedSampleSize = Number(params.scored_universe_limit ?? 0)
+    const sampleSize = Math.min(
+      MAX_FRESH_COMPANY_CANDIDATES,
+      Math.max(volume * 8, 60000, Number.isFinite(requestedSampleSize) ? requestedSampleSize : 0)
+    )
+    const candidates = await fetchFreshCompanyCandidates(sampleSize, regions, aiProfile)
+    const candidateRutids = candidates.map(row => row.rutid)
+    const scoreLookupRutids = uniqueStrings(candidateRutids.flatMap(rutid => rutLookupVariants(rutid)))
+    const [scoresMap, customerMap, equifaxScoreMap] = await Promise.all([
+      fetchPersonaScoresMap(scoreLookupRutids),
+      fetchCustomerSummaryMap(scoreLookupRutids),
+      getEquifaxLeadScoresMap(scoreLookupRutids, { refreshIfMissing: false }),
+    ])
+
+    universeAnalyzed = candidates.length
+
+    for (const candidate of candidates) {
+      const rankedCandidate = buildScoredLeadCandidate({
+        candidate,
+        aiProfile,
+        scoreRow: getMapByRutVariants(scoresMap, candidate.rutid),
+        customerSummary: getMapByRutVariants(customerMap, candidate.rutid),
+        equifaxLeadScore: getMapByRutVariants(equifaxScoreMap, candidate.rutid),
         includeExistingCustomers,
         minPhoneCount,
         minEmailCount,
@@ -1818,18 +2043,25 @@ export async function previewEquifaxLeadScenarios(
   params: EquifaxLeadGenerationParams
 ): Promise<EquifaxLeadPreviewResult> {
   const prepared = await prepareEquifaxCandidates(params)
-  const greenPrepared =
-    params.scenario_key === 'solo_verdes'
-      ? prepared
-      : await prepareEquifaxCandidates({
-          ...params,
-          scenario_key: 'solo_verdes',
-          universe_source: 'scored_universe',
-          allowed_temperatures: ['green'],
-        })
+  let greenPrepared = prepared
+
+  if (params.scenario_key !== 'solo_verdes') {
+    try {
+      greenPrepared = await prepareEquifaxCandidates({
+        ...params,
+        scenario_key: 'solo_verdes',
+        universe_source: 'scored_universe',
+        allowed_temperatures: ['green'],
+      })
+    } catch (error) {
+      console.warn('[previewEquifaxLeadScenarios:greenPrepared]', error instanceof Error ? error.message : error)
+    }
+  }
 
   const scenarios = EQUFAX_SCENARIOS.map<EquifaxLeadScenario>(scenario => {
-    const sourcePrepared = scenario.key === 'solo_verdes' ? greenPrepared : prepared
+    const sourcePrepared = scenario.key === 'solo_verdes' && greenPrepared.universeSource === 'scored_universe'
+      ? greenPrepared
+      : prepared
     const applied = applyScenarioToCandidates(sourcePrepared.candidates, scenario, sourcePrepared.volume)
     return {
       key: scenario.key,

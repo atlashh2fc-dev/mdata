@@ -18,7 +18,22 @@ const NON_TARGET_MATCHERS = [
   {
     tag: 'equifax-non-target-foundation',
     tokens: [
+      'corporacion',
       'fundacion',
+    ],
+  },
+  {
+    tag: 'equifax-non-target-public-sector',
+    tokens: [
+      'municipalidad',
+      'gobierno',
+      'ministerio',
+      'servicio de salud',
+      'hospital',
+      'universidad',
+      'colegio',
+      'escuela',
+      'liceo',
     ],
   },
   {

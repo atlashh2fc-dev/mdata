@@ -193,7 +193,7 @@ export function EquifaxLeadBuilderPage() {
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
   const [prompt, setPrompt] = useState('')
   const [regions, setRegions] = useState('')
-  const [volume, setVolume] = useState(3000)
+  const [volume, setVolume] = useState(30000)
   const [minPhoneCount, setMinPhoneCount] = useState(1)
   const [minEmailCount, setMinEmailCount] = useState(0)
   const [includeExistingCustomers, setIncludeExistingCustomers] = useState(true)
@@ -274,8 +274,8 @@ export function EquifaxLeadBuilderPage() {
     include_existing_customers: includeExistingCustomers,
     min_phone_count: minPhoneCount,
     min_email_count: minEmailCount,
-    universe_source: 'scored_universe' as const,
-    scored_universe_limit: Math.min(60000, Math.max(Math.ceil(volume * 1.6), 12000)),
+    universe_source: 'fresh_companies' as const,
+    scored_universe_limit: Math.min(180000, Math.max(Math.ceil(volume * 6), 60000)),
   }), [
     includeExistingCustomers,
     minEmailCount,
@@ -1039,15 +1039,16 @@ export function EquifaxLeadBuilderPage() {
 
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <label className="block">
-              <span className="text-xs font-medium text-slate-400">Volumen objetivo</span>
-              <input
-                type="number"
-                min={1}
-                max={50000}
+              <span className="text-xs font-medium text-slate-400">¿Cuántos registros quieres exportar?</span>
+              <select
                 value={volume}
                 onChange={event => setVolume(Number(event.target.value))}
                 className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
-              />
+              >
+                <option value={30000}>30.000 registros</option>
+                <option value={40000}>40.000 registros</option>
+                <option value={50000}>50.000 registros</option>
+              </select>
             </label>
 
             <label className="block">
