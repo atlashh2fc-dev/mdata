@@ -602,7 +602,7 @@ ${JSON.stringify(stats, null, 2)}
               },
               filters: {
                 type: 'object',
-                description: 'Filtros del segmento. Campos permitidos: region_part, domicilio_region, comuna_part, domicilio_comuna, n_autos, tiene_autos, tiene_empresa, tiene_bienes_raices, n_bienes_raices, totalavaluos, score_patrimonial, cobertura_pct.',
+                description: 'Filtros del segmento. Campos permitidos: region_part, domicilio_region, comuna_part, domicilio_comuna, n_autos, tiene_autos, tiene_empresa, tiene_bienes_raices, uso_propiedad_inferido, n_propiedades_residenciales, n_propiedades_comerciales, n_bienes_raices, totalavaluos, score_patrimonial, cobertura_pct.',
                 properties: {
                   logic: {
                     type: 'string',
@@ -624,6 +624,9 @@ ${JSON.stringify(stats, null, 2)}
                             'tiene_autos',
                             'tiene_empresa',
                             'tiene_bienes_raices',
+                            'uso_propiedad_inferido',
+                            'n_propiedades_residenciales',
+                            'n_propiedades_comerciales',
                             'n_bienes_raices',
                             'totalavaluos',
                             'score_patrimonial',

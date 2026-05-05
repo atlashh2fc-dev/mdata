@@ -41,6 +41,8 @@ export async function GET(req: NextRequest) {
     tiene_bienes_raices: searchParams.has('tiene_bienes_raices')
       ? searchParams.get('tiene_bienes_raices') === 'true'
       : undefined,
+    uso_propiedad: searchParams.get('uso_propiedad') ?? undefined,
+    destino_propiedad: searchParams.get('destino_propiedad') ?? undefined,
     score_min: searchParams.has('score_min')
       ? parseInt(searchParams.get('score_min')!)
       : undefined,

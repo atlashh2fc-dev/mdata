@@ -11,6 +11,14 @@ import {
   Car, Building2, Home, Mail, ExternalLink,
 } from 'lucide-react'
 
+const USO_LABELS: Record<string, string> = {
+  residencial: 'Residencial',
+  comercial: 'Comercial',
+  mixto_comercial_residencial: 'Mixto',
+  rural_productivo: 'Rural',
+  indeterminado_o_especial: 'Especial',
+}
+
 interface Column {
   key: keyof PersonaView
   label: string
@@ -99,6 +107,26 @@ const COLUMNS: Column[] = [
           <span className="text-[10px] text-slate-500">
             ({formatCurrency(row.totalavaluos)})
           </span>
+        </div>
+      ) : (
+        <span className="text-slate-600">—</span>
+      ),
+  },
+  {
+    key: 'uso_propiedad_inferido',
+    label: 'Uso',
+    render: row =>
+      row.uso_propiedad_inferido ? (
+        <div className="flex flex-col gap-0.5 text-xs">
+          <span className="text-cyan-300 font-medium">
+            {USO_LABELS[row.uso_propiedad_inferido] ?? row.uso_propiedad_inferido}
+          </span>
+          {row.bbrr_destinos?.length > 0 && (
+            <span className="text-[10px] text-slate-500 truncate max-w-[180px]">
+              {row.bbrr_destinos.slice(0, 3).join(', ')}
+              {row.bbrr_destinos.length > 3 ? '…' : ''}
+            </span>
+          )}
         </div>
       ) : (
         <span className="text-slate-600">—</span>

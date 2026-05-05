@@ -76,6 +76,17 @@ export interface PersonaView {
   n_bienes_raices: number
   totalavaluos: number
   tiene_bienes_raices: boolean
+  uso_propiedad_inferido: string | null
+  bbrr_destinos: string[]
+  n_propiedades_detalle: number
+  n_propiedades_residenciales: number
+  n_propiedades_comerciales: number
+  n_propiedades_rurales: number
+  n_propiedades_indeterminadas: number
+  avaluo_residencial: number
+  avaluo_comercial: number
+  avaluo_rural: number
+  avaluo_indeterminado: number
   score_patrimonial: number
   cobertura_pct: number
   region_canonica?: string | null
@@ -699,6 +710,8 @@ export interface PersonaSearchParams extends SearchParams {
   tiene_autos?: boolean
   tiene_empresa?: boolean
   tiene_bienes_raices?: boolean
+  uso_propiedad?: string
+  destino_propiedad?: string
   score_min?: number
   score_max?: number
 }
@@ -723,7 +736,23 @@ export const FILTER_FIELDS: FilterField[] = [
   { key: 'tiene_autos', label: 'Tiene autos', type: 'boolean' },
   { key: 'tiene_empresa', label: 'Tiene empresa', type: 'boolean' },
   { key: 'tiene_bienes_raices', label: 'Tiene bienes raíces', type: 'boolean' },
+  {
+    key: 'uso_propiedad_inferido',
+    label: 'Uso propiedad',
+    type: 'select',
+    options: [
+      { value: 'con_residencial', label: 'Residencial' },
+      { value: 'con_comercial', label: 'Comercial' },
+      { value: 'mixto_comercial_residencial', label: 'Mixto comercial/residencial' },
+      { value: 'solo_residencial', label: 'Solo residencial' },
+      { value: 'solo_comercial', label: 'Solo comercial' },
+      { value: 'rural_productivo', label: 'Rural/productivo' },
+      { value: 'indeterminado_o_especial', label: 'Especial/indeterminado' },
+    ],
+  },
   { key: 'n_bienes_raices', label: 'N° Bienes raíces', type: 'number' },
+  { key: 'n_propiedades_residenciales', label: 'N° propiedades residenciales', type: 'number' },
+  { key: 'n_propiedades_comerciales', label: 'N° propiedades comerciales', type: 'number' },
   { key: 'totalavaluos', label: 'Total avalúos ($)', type: 'number' },
   { key: 'score_patrimonial', label: 'Score patrimonial', type: 'number' },
   { key: 'cobertura_pct', label: 'Cobertura datos (%)', type: 'number' },

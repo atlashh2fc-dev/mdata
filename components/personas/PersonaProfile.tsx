@@ -11,6 +11,14 @@ import { formatNumber, formatCurrency, formatRut } from '@/lib/utils/formatters'
 import { formatRut as fmtRut } from '@/lib/utils/rut'
 import { CommercialIntelligencePanel } from '@/components/commercial/CommercialIntelligencePanel'
 
+const USO_LABELS: Record<string, string> = {
+  residencial: 'Residencial',
+  comercial: 'Comercial',
+  mixto_comercial_residencial: 'Mixto comercial/residencial',
+  rural_productivo: 'Rural/productivo',
+  indeterminado_o_especial: 'Especial/indeterminado',
+}
+
 // Re-export since formatters.ts has formatRut too
 function safeDisplayRut(rut: string | null | undefined): string {
   if (!rut) return '—'
@@ -168,6 +176,31 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
             value={formatCurrency(persona.totalavaluos)}
             highlight={persona.totalavaluos > 0}
           />
+          {persona.uso_propiedad_inferido && (
+            <>
+              <DataRow
+                label="Uso propiedad"
+                value={USO_LABELS[persona.uso_propiedad_inferido] ?? persona.uso_propiedad_inferido}
+                icon={Landmark}
+                highlight
+              />
+              <DataRow
+                label="Destinos"
+                value={persona.bbrr_destinos?.join(', ')}
+                highlight={persona.bbrr_destinos?.length > 0}
+              />
+              <DataRow
+                label="Residenciales"
+                value={`${formatNumber(persona.n_propiedades_residenciales)} · ${formatCurrency(persona.avaluo_residencial)}`}
+                highlight={persona.n_propiedades_residenciales > 0}
+              />
+              <DataRow
+                label="Comerciales"
+                value={`${formatNumber(persona.n_propiedades_comerciales)} · ${formatCurrency(persona.avaluo_comercial)}`}
+                highlight={persona.n_propiedades_comerciales > 0}
+              />
+            </>
+          )}
           {persona.razon_social_empresa && (
             <DataRow
               label="Empresa"
