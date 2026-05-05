@@ -52,7 +52,6 @@ const NAV_ITEMS = [
       { href: '/segmentos', label: 'Segmentador Visual', icon: Users },
       { href: '/poblar', label: 'Poblar Base', icon: WandSparkles },
       { href: '/equifax-bdd', label: 'Armado BDD Equifax', icon: Building2 },
-      { href: '/equifax-crm', label: 'CRM Equifax (roles)', icon: Users },
       { href: '/exportar', label: 'Exportar Base', icon: Download },
     ],
   },
@@ -109,8 +108,6 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
                   ? pathname.startsWith('/poblar') || pathname.startsWith('/exportar')
                   : item.href === '/equifax-bdd'
                     ? pathname.startsWith('/equifax-bdd')
-                  : item.href === '/equifax-crm'
-                    ? pathname.startsWith('/equifax-crm')
                   : item.href === '/hh'
                     ? pathname.startsWith('/hh')
                   : item.href === '/inteligencia-comercial'

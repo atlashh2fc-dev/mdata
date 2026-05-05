@@ -30,7 +30,6 @@ type EquifaxRunItemRow = {
   best_email: string | null
   phone_count: number | null
   email_count: number | null
-  equifax_fit_score: number | null
   contact_probability: number | null
   interest_probability: number | null
   purchase_probability: number | null
@@ -170,9 +169,7 @@ function subtractDays(days: number) {
 const DEFAULT_PUSH_FILTERS: EquifaxCrmPushFilters = {
   allowed_temperatures: ['green', 'yellow'],
   min_lead_score: 35,
-  min_equifax_fit_score: 0,
   min_contact_probability: 35,
-  min_interest_probability: 0,
   min_purchase_probability: 10,
   exclude_existing_customers: false,
   exclude_active_crm_targets: true,
@@ -188,9 +185,7 @@ function normalizePushFilters(filters?: Partial<EquifaxCrmPushFilters>): Equifax
   return {
     allowed_temperatures: temperatures.length ? temperatures : DEFAULT_PUSH_FILTERS.allowed_temperatures,
     min_lead_score: Math.max(0, Number(filters?.min_lead_score ?? DEFAULT_PUSH_FILTERS.min_lead_score)),
-    min_equifax_fit_score: Math.max(0, Number(filters?.min_equifax_fit_score ?? DEFAULT_PUSH_FILTERS.min_equifax_fit_score)),
     min_contact_probability: Math.max(0, Number(filters?.min_contact_probability ?? DEFAULT_PUSH_FILTERS.min_contact_probability)),
-    min_interest_probability: Math.max(0, Number(filters?.min_interest_probability ?? DEFAULT_PUSH_FILTERS.min_interest_probability)),
     min_purchase_probability: Math.max(0, Number(filters?.min_purchase_probability ?? DEFAULT_PUSH_FILTERS.min_purchase_probability)),
     exclude_existing_customers: filters?.exclude_existing_customers === true,
     exclude_active_crm_targets: filters?.exclude_active_crm_targets !== false,
@@ -321,7 +316,6 @@ async function fetchRunItems(runId: string): Promise<EquifaxRunItemRow[]> {
         best_email,
         phone_count,
         email_count,
-        equifax_fit_score,
         contact_probability,
         interest_probability,
         purchase_probability,
@@ -612,21 +606,19 @@ async function filterRowsForCrmPush(
       : Promise.resolve(new Map<string, CrmRecentPushRow>()),
   ])
 
-    const filtered = rows.filter(row => {
-      if (detectEquifaxNonTargetCompany(row.company_name)) {
-        skippedNonTargetEntities += 1
-        return false
-      }
-      if (!normalizedFilters.allowed_temperatures.includes(row.lead_temperature ?? 'red')) return false
-      if (Number(row.lead_score ?? 0) < normalizedFilters.min_lead_score) return false
-      if (Number(row.equifax_fit_score ?? 0) < normalizedFilters.min_equifax_fit_score) return false
-      if (Number(row.contact_probability ?? 0) < normalizedFilters.min_contact_probability) return false
-      if (Number(row.interest_probability ?? 0) < normalizedFilters.min_interest_probability) return false
-      if (Number(row.purchase_probability ?? 0) < normalizedFilters.min_purchase_probability) return false
-      if (normalizedFilters.exclude_existing_customers && row.is_existing_customer) return false
+  const filtered = rows.filter(row => {
+    if (detectEquifaxNonTargetCompany(row.company_name)) {
+      skippedNonTargetEntities += 1
+      return false
+    }
+    if (!normalizedFilters.allowed_temperatures.includes(row.lead_temperature ?? 'red')) return false
+    if (Number(row.lead_score ?? 0) < normalizedFilters.min_lead_score) return false
+    if (Number(row.contact_probability ?? 0) < normalizedFilters.min_contact_probability) return false
+    if (Number(row.purchase_probability ?? 0) < normalizedFilters.min_purchase_probability) return false
+    if (normalizedFilters.exclude_existing_customers && row.is_existing_customer) return false
 
-      const normalizedRutid = normalizeRutid(row.rutid)
-      if (normalizedRutid && activeTargets.has(normalizedRutid)) {
+    const normalizedRutid = normalizeRutid(row.rutid)
+    if (normalizedRutid && activeTargets.has(normalizedRutid)) {
       skippedActiveTargets += 1
       return false
     }
