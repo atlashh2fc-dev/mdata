@@ -107,7 +107,9 @@ Puede:
 - calcular score de fit Equifax, probabilidad de contacto, interes y compra
 - exportar leads para contact center o CRM
 - empujar runs seleccionados hacia CRM
+- gobernar el push al CRM con filtros (lead score, fit Equifax, contacto/interés/compra, semáforo, anti-duplicados)
 - ejecutar pipeline de scoring en modo safe, dry-run o force
+- monitorear operación CRM Equifax por roles en `/equifax-crm` (metas opcionales con `EQUIFAX_CRM_GOALS_JSON`)
 
 ### 8. Inteligencia Comercial Viva
 
@@ -223,6 +225,7 @@ La solucion esta preparada para consolidar y operar sobre:
 | `/segmentos` | Segmentador visual |
 | `/poblar` | Enriquecimiento de bases cargadas |
 | `/equifax-bdd` | Armado BDD Equifax |
+| `/equifax-crm` | CRM Equifax por roles |
 | `/exportar` | Exportacion de bases |
 | `/logs` | Actividad y trazabilidad |
 
@@ -359,4 +362,3 @@ Para operacion y despliegue, revisar [DEPLOY.md](DEPLOY.md).
 - El service role de Supabase solo debe usarse en backend/scripts.
 - Los flujos Equifax y CRM requieren variables productivas correctas.
 - El puente MiroFish no envia bases crudas completas; envia dossiers y contexto resumido.
-

@@ -217,7 +217,9 @@ export function EquifaxLeadBuilderPage() {
   const [crmPushFilters, setCrmPushFilters] = useState<EquifaxCrmPushFilters>({
     allowed_temperatures: ['green', 'yellow'],
     min_lead_score: 35,
+    min_equifax_fit_score: 0,
     min_contact_probability: 35,
+    min_interest_probability: 0,
     min_purchase_probability: 10,
     exclude_existing_customers: false,
     exclude_active_crm_targets: true,
@@ -537,7 +539,9 @@ export function EquifaxLeadBuilderPage() {
           run_id: result.run_id,
           allowed_temperatures: crmPushFilters.allowed_temperatures,
           min_lead_score: crmPushFilters.min_lead_score,
+          min_equifax_fit_score: crmPushFilters.min_equifax_fit_score,
           min_contact_probability: crmPushFilters.min_contact_probability,
+          min_interest_probability: crmPushFilters.min_interest_probability,
           min_purchase_probability: crmPushFilters.min_purchase_probability,
           exclude_existing_customers: crmPushFilters.exclude_existing_customers,
           exclude_active_crm_targets: crmPushFilters.exclude_active_crm_targets,
@@ -1453,7 +1457,7 @@ export function EquifaxLeadBuilderPage() {
                 Gobierno de push al CRM
               </div>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                 <label className="block">
                   <span className="text-xs font-medium text-slate-400">Mínimo lead score</span>
                   <input
@@ -1466,6 +1470,17 @@ export function EquifaxLeadBuilderPage() {
                   />
                 </label>
                 <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Mínimo fit Equifax</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={crmPushFilters.min_equifax_fit_score}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, min_equifax_fit_score: Number(event.target.value) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+                <label className="block">
                   <span className="text-xs font-medium text-slate-400">Mínimo contacto</span>
                   <input
                     type="number"
@@ -1473,6 +1488,17 @@ export function EquifaxLeadBuilderPage() {
                     max={100}
                     value={crmPushFilters.min_contact_probability}
                     onChange={event => setCrmPushFilters(prev => ({ ...prev, min_contact_probability: Number(event.target.value) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-400">Mínimo interés</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={crmPushFilters.min_interest_probability}
+                    onChange={event => setCrmPushFilters(prev => ({ ...prev, min_interest_probability: Number(event.target.value) }))}
                     className="mt-2 w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
                   />
                 </label>

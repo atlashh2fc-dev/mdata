@@ -181,7 +181,9 @@ export interface EquifaxCrmPushResult {
 export interface EquifaxCrmPushFilters {
   allowed_temperatures: Array<'green' | 'yellow' | 'red'>
   min_lead_score: number
+  min_equifax_fit_score: number
   min_contact_probability: number
+  min_interest_probability: number
   min_purchase_probability: number
   exclude_existing_customers: boolean
   exclude_active_crm_targets: boolean
