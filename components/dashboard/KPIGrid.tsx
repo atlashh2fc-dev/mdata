@@ -11,59 +11,128 @@ interface KPIItem {
   label: string
   value: string | number
   sub?: string
-  detail?: React.ReactNode
   icon: React.ElementType
   color: string
   bg: string
 }
 
-function PropertyUsageDetail({ stats }: { stats: DashboardStats }) {
+function PropertyUniverseCard({ stats }: { stats: DashboardStats }) {
+  const totalRutOwners = stats.con_bienes_raices || 1
+  const totalProperties = stats.total_propiedades_cargadas || 1
   const rows = [
     {
       label: 'Residencial',
       ruts: stats.bbrr_ruts_residencial,
       properties: stats.bbrr_propiedades_residenciales,
       color: 'text-emerald-300',
+      bar: 'bg-emerald-400',
     },
     {
       label: 'Comercial',
       ruts: stats.bbrr_ruts_comercial + stats.bbrr_ruts_mixto,
       properties: stats.bbrr_propiedades_comerciales,
       color: 'text-cyan-300',
+      bar: 'bg-cyan-400',
     },
     {
       label: 'Mixto',
       ruts: stats.bbrr_ruts_mixto,
       properties: 0,
       color: 'text-violet-300',
+      bar: 'bg-violet-400',
     },
     {
       label: 'Rural',
       ruts: stats.bbrr_ruts_rural,
       properties: stats.bbrr_propiedades_rurales,
       color: 'text-lime-300',
+      bar: 'bg-lime-400',
     },
     {
       label: 'Especial',
       ruts: stats.bbrr_ruts_especial,
       properties: stats.bbrr_propiedades_especiales,
       color: 'text-slate-300',
+      bar: 'bg-slate-400',
     },
   ]
 
+  const commercialRutPct = ((stats.bbrr_ruts_comercial + stats.bbrr_ruts_mixto) / totalRutOwners) * 100
+  const residentialRutPct = (stats.bbrr_ruts_residencial / totalRutOwners) * 100
+
   return (
-    <div className="mt-3 border-t border-slate-700/60 pt-3 space-y-1.5">
-      {rows.map(row => (
-        <div key={row.label} className="flex items-center justify-between gap-3 text-[11px] leading-tight">
-          <span className={`${row.color} font-medium`}>{row.label}</span>
-          <span className="text-right text-slate-500">
-            <span className="text-slate-200">{formatNumber(row.ruts)}</span> RUTs
-            {row.properties > 0 && (
-              <span className="hidden 2xl:inline"> · {formatNumber(row.properties)} props.</span>
-            )}
-          </span>
+    <div className="stat-card animate-fade-in col-span-2 lg:col-span-3 xl:col-span-3 min-h-[194px]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+            <Landmark className="w-5 h-5 text-amber-300" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-3xl font-bold text-white leading-none">
+              {formatNumber(stats.total_propiedades_cargadas)}
+            </p>
+            <p className="text-sm text-slate-400 mt-1">Propiedades cargadas</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {formatNumber(stats.con_bienes_raices)} RUTs propietarios
+            </p>
+          </div>
         </div>
-      ))}
+
+        <div className="text-right shrink-0">
+          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Avalúo fiscal</p>
+          <p className="text-sm font-semibold text-white">{formatCurrency(stats.total_avaluos)}</p>
+          <p className="text-[11px] text-slate-600 mt-1">
+            Com. {commercialRutPct.toFixed(1)}% · Res. {residentialRutPct.toFixed(1)}%
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="rounded-lg border border-slate-700/60 bg-slate-900/25 px-3 py-2">
+          <p className="text-[11px] text-slate-500">Residenciales</p>
+          <p className="text-sm font-semibold text-emerald-200">{formatNumber(stats.bbrr_propiedades_residenciales)}</p>
+        </div>
+        <div className="rounded-lg border border-slate-700/60 bg-slate-900/25 px-3 py-2">
+          <p className="text-[11px] text-slate-500">Comerciales</p>
+          <p className="text-sm font-semibold text-cyan-200">{formatNumber(stats.bbrr_propiedades_comerciales)}</p>
+        </div>
+        <div className="rounded-lg border border-slate-700/60 bg-slate-900/25 px-3 py-2">
+          <p className="text-[11px] text-slate-500">Rurales</p>
+          <p className="text-sm font-semibold text-lime-200">{formatNumber(stats.bbrr_propiedades_rurales)}</p>
+        </div>
+        <div className="rounded-lg border border-slate-700/60 bg-slate-900/25 px-3 py-2">
+          <p className="text-[11px] text-slate-500">Especiales</p>
+          <p className="text-sm font-semibold text-slate-200">{formatNumber(stats.bbrr_propiedades_especiales)}</p>
+        </div>
+      </div>
+
+      <div className="space-y-2 border-t border-slate-700/60 pt-3">
+        {rows.map(row => {
+          const rutPct = totalRutOwners > 0 ? (row.ruts / totalRutOwners) * 100 : 0
+          const propertyPct = row.properties > 0 && totalProperties > 0 ? (row.properties / totalProperties) * 100 : 0
+
+          return (
+            <div key={row.label} className="grid grid-cols-[88px_1fr_auto] items-center gap-3">
+              <span className={`text-xs font-medium ${row.color}`}>{row.label}</span>
+              <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${row.bar}`}
+                  style={{ width: `${Math.min(Math.max(rutPct, 1), 100)}%` }}
+                />
+              </div>
+              <div className="min-w-[170px] text-right text-[11px] text-slate-500">
+                <span className="text-slate-200">{formatNumber(row.ruts)}</span> RUTs
+                {row.properties > 0 && (
+                  <span> · {formatNumber(row.properties)} props.</span>
+                )}
+                {row.properties > 0 && (
+                  <span className="text-slate-600"> · {propertyPct.toFixed(1)}%</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -118,15 +187,6 @@ function buildKPIs(stats: DashboardStats): KPIItem[] {
       icon: Home,
       color: 'text-pink-400',
       bg: 'bg-pink-500/10',
-    },
-    {
-      label: 'Propiedades cargadas',
-      value: formatNumber(stats.total_propiedades_cargadas),
-      sub: `${formatNumber(stats.con_bienes_raices)} RUTs · ${formatCurrency(stats.total_avaluos)}`,
-      detail: <PropertyUsageDetail stats={stats} />,
-      icon: Landmark,
-      color: 'text-amber-400',
-      bg: 'bg-amber-500/10',
     },
     {
       label: 'Jobs completados',
@@ -268,6 +328,7 @@ export function KPIGrid({ stats }: KPIGridProps) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
       <CompanyUniverseCard stats={stats} />
+      <PropertyUniverseCard stats={stats} />
       {kpis.map(kpi => {
         const Icon = kpi.icon
         return (
@@ -283,7 +344,6 @@ export function KPIGrid({ stats }: KPIGridProps) {
               {kpi.sub && (
                 <p className="text-xs text-slate-600 mt-0.5">{kpi.sub}</p>
               )}
-              {kpi.detail}
             </div>
           </div>
         )
