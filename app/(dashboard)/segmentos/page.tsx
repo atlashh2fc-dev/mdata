@@ -6,7 +6,7 @@ import { LoadingState, EmptyState, Spinner } from '@/components/ui/Spinner'
 import { PersonasTable } from '@/components/personas/PersonasTable'
 import { Pagination } from '@/components/ui/Pagination'
 import type {
-  Segmento, FilterCondition, FilterOperator, FilterLogic, PersonaView,
+  Segmento, FilterCondition, FilterOperator, FilterLogic, PersonaView, DashboardStats,
 } from '@/types'
 import { FILTER_FIELDS } from '@/types'
 import {
@@ -27,6 +27,14 @@ const OPERATORS: { value: FilterOperator; label: string }[] = [
   { value: 'is_not_null', label: 'no está vacío' },
   { value: 'contains', label: 'contiene' },
 ]
+
+function formatCompactCount(value: number | null | undefined): string {
+  if (!value) return 'tus RUTs'
+  return new Intl.NumberFormat('es-CL', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
 
 function ConditionRow({
   condition,
@@ -104,6 +112,7 @@ function ConditionRow({
 
 export default function SegmentosPage() {
   const [segmentos, setSegmentos] = useState<Segmento[]>([])
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [showBuilder, setShowBuilder] = useState(false)
   const [segmentName, setSegmentName] = useState('')
@@ -119,7 +128,20 @@ export default function SegmentosPage() {
   const [segmentPage, setSegmentPage] = useState(1)
   const [executing, setExecuting] = useState(false)
 
-  useEffect(() => { loadSegmentos() }, [])
+  useEffect(() => {
+    loadSegmentos()
+    loadDashboardStats()
+  }, [])
+
+  async function loadDashboardStats() {
+    try {
+      const res = await fetch('/api/dashboard?section=kpis', { cache: 'no-store' })
+      const json = await res.json()
+      if (res.ok && json.data) setDashboardStats(json.data)
+    } catch {
+      setDashboardStats(null)
+    }
+  }
 
   async function loadSegmentos() {
     setLoading(true)
@@ -184,7 +206,7 @@ export default function SegmentosPage() {
     <>
       <Header
         title="Segmentador avanzado"
-        subtitle="Crea y ejecuta segmentos sobre los 9.5M RUTs"
+        subtitle={`Crea y ejecuta segmentos sobre ${formatCompactCount(dashboardStats?.total_ruts)} actualizados`}
         actions={
           <button onClick={() => setShowBuilder(!showBuilder)} className="btn-primary">
             <Plus className="w-4 h-4" />

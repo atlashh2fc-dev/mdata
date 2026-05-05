@@ -22,5 +22,12 @@ REFRESH MATERIALIZED VIEW public.dashboard_stats;
 REFRESH MATERIALIZED VIEW public.stats_por_region;
 REFRESH MATERIALIZED VIEW public.stats_score_dist;
 REFRESH MATERIALIZED VIEW public.stats_universos;
+DO $$
+BEGIN
+  IF to_regclass('public.stats_universos_empresas') IS NOT NULL THEN
+    REFRESH MATERIALIZED VIEW public.stats_universos_empresas;
+  END IF;
+END;
+$$;
 SELECT NOW() AS refreshed_at;
 SQL

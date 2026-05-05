@@ -7,7 +7,7 @@ import { ScoreDonutChart } from '@/components/dashboard/ScoreDonutChart'
 import { RegionChart } from '@/components/dashboard/RegionChart'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
 import { LoadingState } from '@/components/ui/Spinner'
-import { formatDatetime } from '@/lib/utils/formatters'
+import { formatDatetime, formatNumber } from '@/lib/utils/formatters'
 import { RefreshCw, Database } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +27,7 @@ async function DashboardContent() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Database className="w-3.5 h-3.5" />
-          <span>Base de datos: ~9.5M RUTs únicos</span>
+          <span>Base de datos: {formatNumber(stats.total_ruts)} RUTs únicos</span>
           <span className="text-slate-700">·</span>
           <span>Actualizado: {formatDatetime(stats.last_refreshed)}</span>
         </div>

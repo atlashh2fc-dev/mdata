@@ -80,6 +80,7 @@ const DIM_SHORT: Record<string, string> = {
 export default function UniversosPage() {
   const [data, setData] = useState<UniverseRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [entityFilter, setEntityFilter] = useState<EntityFilter>('persona_natural')
 
   // Filters state (null = ANY, true = REQUIRED, false = EXCLUDED)
@@ -94,14 +95,33 @@ export default function UniversosPage() {
   })
 
   useEffect(() => {
-    fetch('/api/universos')
-      .then(r => r.json())
-      .then(res => {
-        setData(res.data || [])
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+    loadUniversos()
   }, [])
+
+  async function loadUniversos() {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/universos', { cache: 'no-store' })
+      const json = await res.json()
+      setData(json.data || [])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function refreshUniversos() {
+    setRefreshing(true)
+    try {
+      const res = await fetch('/api/universos', {
+        method: 'POST',
+        cache: 'no-store',
+      })
+      const json = await res.json()
+      if (res.ok) setData(json.data || [])
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const entityTotals = useMemo(() => {
     const totals: Record<EntityFilter, number> = {
@@ -207,10 +227,20 @@ export default function UniversosPage() {
               <h3 className="text-sm font-semibold text-slate-300">Dimensiones de Datos</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">Primero elige el universo base; luego incluye ✓ o excluye ✗ cada dimensión</p>
             </div>
-            <button onClick={resetFilters} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
-              <RefreshCcw className="w-3 h-3" />
-              Restablecer
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={refreshUniversos}
+                disabled={refreshing}
+                className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 disabled:opacity-60 disabled:cursor-wait transition-all"
+              >
+                <RefreshCcw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Actualizando' : 'Actualizar matriz'}
+              </button>
+              <button onClick={resetFilters} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
+                <RefreshCcw className="w-3 h-3" />
+                Restablecer
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">

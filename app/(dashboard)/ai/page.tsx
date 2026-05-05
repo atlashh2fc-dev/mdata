@@ -3,16 +3,35 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
 import { BrainCircuit, Send, Sparkles, Globe, Target, Building2, ChevronRight, UserCircle2, Bot, Database } from 'lucide-react'
+import { formatNumber } from '@/lib/utils/formatters'
+import type { DashboardStats } from '@/types'
 
 type Message = {
   role: 'user' | 'assistant' | 'tool'
   content: string
 }
 
+function formatCompactCount(value: number | null | undefined): string {
+  if (!value) return 'datos actualizados'
+  return new Intl.NumberFormat('es-CL', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+function buildWelcomeMessage(stats: DashboardStats | null): string {
+  if (!stats) {
+    return `¡Hola! Soy InceptionLabs, tu **Cerebro Inteligente de Negocios**.\n\nEstoy leyendo los KPIs actualizados del maestro de datos para trabajar con las últimas cargas realizadas.\n\n¿En qué industria te gustaría que encontremos tu próximo segmento de alto valor hoy?`
+  }
+
+  return `¡Hola! Soy InceptionLabs, tu **Cerebro Inteligente de Negocios**.\n\nTengo acceso en tiempo real a ${formatNumber(stats.total_ruts)} perfiles, ${formatNumber(stats.total_autos)} vehículos y ${formatNumber(stats.empresas_universo_total)} empresas activas en tu maestro de datos actualizado.\n\n¿En qué industria te gustaría que encontremos tu próximo segmento de alto valor hoy?`
+}
+
 export default function CerebroDeNegociosPage() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: `¡Hola! Soy InceptionLabs, tu **Cerebro Inteligente de Negocios**. \n\nTengo acceso en tiempo real a los 9.5 millones de perfiles, 5.2M de vehículos y 315K empresas en tu maestro de datos.\n\n¿En qué industria te gustaría que encontremos tu próximo segmento de alto valor hoy?` }
+    { role: 'assistant', content: buildWelcomeMessage(null) }
   ])
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -24,6 +43,32 @@ export default function CerebroDeNegociosPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages, loading])
+
+  useEffect(() => {
+    let mounted = true
+
+    async function loadDashboardStats() {
+      try {
+        const res = await fetch('/api/dashboard?section=kpis', { cache: 'no-store' })
+        const json = await res.json()
+        if (!mounted || !res.ok || !json.data) return
+
+        setDashboardStats(json.data)
+        setMessages(prev => {
+          if (prev.length !== 1 || prev[0].role !== 'assistant') return prev
+          return [{ ...prev[0], content: buildWelcomeMessage(json.data) }]
+        })
+      } catch {
+        // Mantener el mensaje de carga si la sesión aún no pudo leer KPIs.
+      }
+    }
+
+    loadDashboardStats()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
@@ -232,7 +277,7 @@ export default function CerebroDeNegociosPage() {
             <div className="flex justify-center gap-6 mt-3 text-[10px] text-slate-500 font-medium">
               <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-amber-400" /> IA Contextual</span>
               <span className="flex items-center gap-1"><Globe className="w-3 h-3 text-blue-400" /> Búsqueda Web</span>
-              <span className="flex items-center gap-1"><Database className="w-3 h-3 text-purple-400" /> 9.5M Registros</span>
+              <span className="flex items-center gap-1"><Database className="w-3 h-3 text-purple-400" /> {formatCompactCount(dashboardStats?.total_ruts)} registros</span>
             </div>
           </form>
         </div>

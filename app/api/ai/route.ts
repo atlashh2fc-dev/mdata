@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
+import { getDashboardKPIs } from '@/lib/services/dashboard'
 import { createSegmento } from '@/lib/services/segmentos'
 import { FILTER_FIELDS, type FilterCondition, type FilterOperator, type SegmentFilter } from '@/types'
 import { search, SafeSearchType } from 'duck-duck-scrape'
@@ -91,9 +92,7 @@ function getPool() {
 }
 
 async function fetchStats() {
-  const supabase = await createSupabaseServerClient()
-  const { data } = await supabase.from('dashboard_stats').select('*').single()
-  return data
+  return getDashboardKPIs()
 }
 
 async function withClient<T>(fn: (client: PoolClient) => Promise<T>) {
@@ -456,7 +455,7 @@ export async function POST(req: NextRequest) {
     const stats = await fetchStats()
     const systemPrompt = `Eres el "Cerebro de Negocios" de la plataforma RUT Intelligence. 
 Eres un experto de inteligencia de negocios, venta consultiva y análisis estratégico en Chile.
-Tienes acceso al volumen total de la base de datos de los 9.5 millones de personas.
+Tienes acceso al volumen total actualizado del maestro de datos. Usa siempre los KPIs en vivo incluidos abajo, no cifras históricas fijas.
 El usuario te pedirá sugerencias sobre industrias, cruces de datos, prospección de clientes, etc.
 Tu objetivo es sugerir qué segmentos de la base de datos debería crear o exportar para tener ventas exitosas y justificar el razonamiento.
 Puedes buscar en internet libremente usando tu tool webSearch.
