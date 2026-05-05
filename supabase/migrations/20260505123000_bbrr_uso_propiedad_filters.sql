@@ -184,7 +184,37 @@ as $$
   order by count(*) desc;
 $$;
 
+create or replace function public.get_bbrr_dashboard_usage_stats()
+returns table(
+  bbrr_ruts_residencial bigint,
+  bbrr_ruts_comercial bigint,
+  bbrr_ruts_mixto bigint,
+  bbrr_ruts_rural bigint,
+  bbrr_ruts_especial bigint,
+  bbrr_propiedades_residenciales bigint,
+  bbrr_propiedades_comerciales bigint,
+  bbrr_propiedades_rurales bigint,
+  bbrr_propiedades_especiales bigint
+)
+language sql
+stable
+security definer
+as $$
+  select
+    count(*) filter (where uso_propiedad_inferido = 'residencial')::bigint as bbrr_ruts_residencial,
+    count(*) filter (where uso_propiedad_inferido = 'comercial')::bigint as bbrr_ruts_comercial,
+    count(*) filter (where uso_propiedad_inferido = 'mixto_comercial_residencial')::bigint as bbrr_ruts_mixto,
+    count(*) filter (where uso_propiedad_inferido = 'rural_productivo')::bigint as bbrr_ruts_rural,
+    count(*) filter (where uso_propiedad_inferido = 'indeterminado_o_especial')::bigint as bbrr_ruts_especial,
+    coalesce(sum(n_propiedades_residenciales), 0)::bigint as bbrr_propiedades_residenciales,
+    coalesce(sum(n_propiedades_comerciales), 0)::bigint as bbrr_propiedades_comerciales,
+    coalesce(sum(n_propiedades_rurales), 0)::bigint as bbrr_propiedades_rurales,
+    coalesce(sum(n_propiedades_indeterminadas), 0)::bigint as bbrr_propiedades_especiales
+  from public.bbrr_uso_propiedad_por_rut;
+$$;
+
 grant select on public.bbrr_uso_propiedad_por_rut to authenticated, anon, service_role;
 grant execute on function public.refresh_bbrr_uso_propiedad_por_rut() to authenticated, anon, service_role;
 grant execute on function public.get_bbrr_uso_counts() to authenticated, anon, service_role;
 grant execute on function public.get_bbrr_destino_counts() to authenticated, anon, service_role;
+grant execute on function public.get_bbrr_dashboard_usage_stats() to authenticated, anon, service_role;

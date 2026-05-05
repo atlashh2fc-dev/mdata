@@ -363,6 +363,15 @@ export interface DashboardStats {
   con_bienes_raices: number
   total_avaluos: number
   total_propiedades_cargadas: number
+  bbrr_ruts_residencial: number
+  bbrr_ruts_comercial: number
+  bbrr_ruts_mixto: number
+  bbrr_ruts_rural: number
+  bbrr_ruts_especial: number
+  bbrr_propiedades_residenciales: number
+  bbrr_propiedades_comerciales: number
+  bbrr_propiedades_rurales: number
+  bbrr_propiedades_especiales: number
   empresas_universo_total: number
   empresas_base_pyme: number
   empresas_base_tendencia: number

@@ -41,6 +41,18 @@ const emptyEmpresaStats = {
   empresas_tendencia_sin_datos: 0,
 }
 
+const emptyBbrrUsageStats = {
+  bbrr_ruts_residencial: 0,
+  bbrr_ruts_comercial: 0,
+  bbrr_ruts_mixto: 0,
+  bbrr_ruts_rural: 0,
+  bbrr_ruts_especial: 0,
+  bbrr_propiedades_residenciales: 0,
+  bbrr_propiedades_comerciales: 0,
+  bbrr_propiedades_rurales: 0,
+  bbrr_propiedades_especiales: 0,
+}
+
 function emptyDashboardStats(): DashboardStats {
   return {
     total_ruts: 0,
@@ -54,11 +66,41 @@ function emptyDashboardStats(): DashboardStats {
     con_bienes_raices: 0,
     total_avaluos: 0,
     total_propiedades_cargadas: 0,
+    ...emptyBbrrUsageStats,
     ...emptyEmpresaStats,
     jobs_completados: 0,
     jobs_fallidos: 0,
     total_segmentos: 0,
     last_refreshed: new Date().toISOString(),
+  }
+}
+
+async function getBbrrUsageStats() {
+  if (!hasSupabaseAdminEnv) {
+    return emptyBbrrUsageStats
+  }
+
+  const { data, error } = await db
+    .rpc('get_bbrr_dashboard_usage_stats')
+
+  if (error || !data) {
+    console.error('[getBbrrUsageStats]', error)
+    return emptyBbrrUsageStats
+  }
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) return emptyBbrrUsageStats
+
+  return {
+    bbrr_ruts_residencial: Number(row.bbrr_ruts_residencial ?? 0),
+    bbrr_ruts_comercial: Number(row.bbrr_ruts_comercial ?? 0),
+    bbrr_ruts_mixto: Number(row.bbrr_ruts_mixto ?? 0),
+    bbrr_ruts_rural: Number(row.bbrr_ruts_rural ?? 0),
+    bbrr_ruts_especial: Number(row.bbrr_ruts_especial ?? 0),
+    bbrr_propiedades_residenciales: Number(row.bbrr_propiedades_residenciales ?? 0),
+    bbrr_propiedades_comerciales: Number(row.bbrr_propiedades_comerciales ?? 0),
+    bbrr_propiedades_rurales: Number(row.bbrr_propiedades_rurales ?? 0),
+    bbrr_propiedades_especiales: Number(row.bbrr_propiedades_especiales ?? 0),
   }
 }
 
@@ -164,10 +206,13 @@ async function getEmpresasStats() {
  * Obtiene los KPIs principales del dashboard desde la vista materializada
  */
 export async function getDashboardKPIs(): Promise<DashboardStats> {
-  const empresaStats = await getEmpresasStats()
+  const [empresaStats, bbrrUsageStats] = await Promise.all([
+    getEmpresasStats(),
+    getBbrrUsageStats(),
+  ])
 
   if (!hasSupabaseAdminEnv) {
-    return { ...emptyDashboardStats(), ...empresaStats }
+    return { ...emptyDashboardStats(), ...empresaStats, ...bbrrUsageStats }
   }
 
   const { data, error } = await db
@@ -192,6 +237,7 @@ export async function getDashboardKPIs(): Promise<DashboardStats> {
     con_bienes_raices: data.con_bienes_raices ?? 0,
     total_avaluos: data.total_avaluos ?? 0,
     total_propiedades_cargadas: data.total_propiedades_cargadas ?? 0,
+    ...bbrrUsageStats,
     ...empresaStats,
     jobs_completados: data.jobs_completados ?? 0,
     jobs_fallidos: data.jobs_fallidos ?? 0,

@@ -11,9 +11,61 @@ interface KPIItem {
   label: string
   value: string | number
   sub?: string
+  detail?: React.ReactNode
   icon: React.ElementType
   color: string
   bg: string
+}
+
+function PropertyUsageDetail({ stats }: { stats: DashboardStats }) {
+  const rows = [
+    {
+      label: 'Residencial',
+      ruts: stats.bbrr_ruts_residencial,
+      properties: stats.bbrr_propiedades_residenciales,
+      color: 'text-emerald-300',
+    },
+    {
+      label: 'Comercial',
+      ruts: stats.bbrr_ruts_comercial + stats.bbrr_ruts_mixto,
+      properties: stats.bbrr_propiedades_comerciales,
+      color: 'text-cyan-300',
+    },
+    {
+      label: 'Mixto',
+      ruts: stats.bbrr_ruts_mixto,
+      properties: 0,
+      color: 'text-violet-300',
+    },
+    {
+      label: 'Rural',
+      ruts: stats.bbrr_ruts_rural,
+      properties: stats.bbrr_propiedades_rurales,
+      color: 'text-lime-300',
+    },
+    {
+      label: 'Especial',
+      ruts: stats.bbrr_ruts_especial,
+      properties: stats.bbrr_propiedades_especiales,
+      color: 'text-slate-300',
+    },
+  ]
+
+  return (
+    <div className="mt-3 border-t border-slate-700/60 pt-3 space-y-1.5">
+      {rows.map(row => (
+        <div key={row.label} className="flex items-center justify-between gap-3 text-[11px] leading-tight">
+          <span className={`${row.color} font-medium`}>{row.label}</span>
+          <span className="text-right text-slate-500">
+            <span className="text-slate-200">{formatNumber(row.ruts)}</span> RUTs
+            {row.properties > 0 && (
+              <span className="hidden 2xl:inline"> · {formatNumber(row.properties)} props.</span>
+            )}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function buildKPIs(stats: DashboardStats): KPIItem[] {
@@ -71,6 +123,7 @@ function buildKPIs(stats: DashboardStats): KPIItem[] {
       label: 'Propiedades cargadas',
       value: formatNumber(stats.total_propiedades_cargadas),
       sub: `${formatNumber(stats.con_bienes_raices)} RUTs · ${formatCurrency(stats.total_avaluos)}`,
+      detail: <PropertyUsageDetail stats={stats} />,
       icon: Landmark,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
@@ -230,6 +283,7 @@ export function KPIGrid({ stats }: KPIGridProps) {
               {kpi.sub && (
                 <p className="text-xs text-slate-600 mt-0.5">{kpi.sub}</p>
               )}
+              {kpi.detail}
             </div>
           </div>
         )
