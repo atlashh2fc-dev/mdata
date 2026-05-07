@@ -95,6 +95,78 @@ export interface PersonaView {
   updated_at: string
 }
 
+export interface PersonaVehicleDetail {
+  id: number
+  ppu: string | null
+  ppu_dv: string | null
+  marca: string | null
+  modelo: string | null
+  tipo_vehiculo: string | null
+  anio_fabricacion: number | null
+  fecha_transferencia: string | null
+  color: string | null
+  clasificacion: string | null
+  avaluo_fiscal: number
+  avaluo_comercial: number
+}
+
+export interface PersonaPropertyDetail {
+  id: string
+  rol: string | null
+  direccion: string | null
+  comuna: string | null
+  tipo_propiedad: string | null
+  destino: string | null
+  avaluo_fiscal: number
+  fono_comercial: string | null
+  fono_particular: string | null
+  fono_celular: string | null
+  email: string | null
+}
+
+export interface PersonaAddressDetail {
+  source: string
+  direccion: string | null
+  comuna: string | null
+  region: string | null
+  seen_at: string | null
+}
+
+export interface PersonaContactDetail {
+  id: string
+  contact_type: 'phone' | 'email'
+  contact_value: string
+  source_name: string | null
+  quality_score: number | null
+  is_primary: boolean | null
+  is_verified: boolean | null
+  last_seen_at: string | null
+  metadata: Record<string, unknown> | null
+}
+
+export interface PersonaExecutiveContactDetail {
+  rutid: string
+  razon_social: string | null
+  rutid_ejecutivo: string | null
+  nombre_ejecutivo: string | null
+  area: string | null
+  cargo: string | null
+  email: string | null
+  celular: string | null
+  telefono_comercial: string | null
+  mejor_telefono: string | null
+  contact_priority: number | null
+}
+
+export interface PersonaDetail360 {
+  rutid: string
+  addresses: PersonaAddressDetail[]
+  vehicles: PersonaVehicleDetail[]
+  properties: PersonaPropertyDetail[]
+  contact_points: PersonaContactDetail[]
+  executive_contact: PersonaExecutiveContactDetail | null
+}
+
 export interface CommercialDashboardSnapshot {
   total_personas_scored: number
   personas_with_feedback: number

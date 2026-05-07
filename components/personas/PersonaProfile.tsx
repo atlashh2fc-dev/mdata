@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import type { PersonaView } from '@/types'
+import { useEffect, useState } from 'react'
+import type { PersonaDetail360, PersonaView } from '@/types'
 import {
   User, Mail, Phone, MapPin, Car, Building2,
-  Home, Landmark, Zap, BarChart3, Shield,
-  ChevronDown, ChevronUp,
+  Home, Landmark, BarChart3, Shield,
+  ChevronDown, ChevronUp, CalendarDays,
 } from 'lucide-react'
-import { formatNumber, formatCurrency, formatRut } from '@/lib/utils/formatters'
+import { formatNumber, formatCurrency, formatDate } from '@/lib/utils/formatters'
 import { formatRut as fmtRut } from '@/lib/utils/rut'
 import { CommercialIntelligencePanel } from '@/components/commercial/CommercialIntelligencePanel'
 
@@ -64,13 +64,215 @@ interface DataRowProps {
 function DataRow({ label, value, icon: Icon, highlight }: DataRowProps) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-[#334155]/50 last:border-0">
-      <div className="flex items-center gap-2.5">
+      <div className="flex min-w-0 items-center gap-2.5">
         {Icon && <Icon className="w-3.5 h-3.5 text-slate-500" />}
         <span className="text-xs text-slate-400">{label}</span>
       </div>
-      <span className={`text-xs font-medium ${highlight ? 'text-brand-400' : 'text-slate-300'}`}>
+      <span className={`ml-3 max-w-[65%] break-words text-right text-xs font-medium ${highlight ? 'text-brand-400' : 'text-slate-300'}`}>
         {value ?? '—'}
       </span>
+    </div>
+  )
+}
+
+function DetailCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-slate-700/60 bg-slate-950/30 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="mt-1 text-lg font-bold text-white">{formatNumber(value)}</div>
+    </div>
+  )
+}
+
+function DetailItem({
+  title,
+  meta,
+  children,
+}: {
+  title: string
+  meta?: string | null
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/35 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 text-sm font-semibold text-white">{title}</div>
+        {meta && <div className="flex-shrink-0 text-right text-xs text-brand-400">{meta}</div>}
+      </div>
+      <div className="mt-2 space-y-1 text-xs text-slate-400">{children}</div>
+    </div>
+  )
+}
+
+function PersonaDetail360Panel({ rut }: { rut: string }) {
+  const [detail, setDetail] = useState<PersonaDetail360 | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+
+    async function load() {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const response = await fetch(`/api/personas/detail?rut=${encodeURIComponent(rut)}`)
+        const json = await response.json()
+
+        if (!response.ok || !json.success) {
+          throw new Error(json.error ?? 'No fue posible cargar detalle 360')
+        }
+
+        if (mounted) setDetail(json.data)
+      } catch (err) {
+        if (mounted) setError(err instanceof Error ? err.message : 'Error cargando detalle')
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      mounted = false
+    }
+  }, [rut])
+
+  if (loading) {
+    return (
+      <div className="card p-5">
+        <div className="text-sm text-slate-400">Cargando detalle máximo...</div>
+      </div>
+    )
+  }
+
+  if (error || !detail) {
+    return (
+      <div className="card p-5">
+        <div className="text-sm text-slate-400">{error ?? 'Sin detalle adicional para este RUT.'}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+            <Shield className="h-4 w-4 text-cyan-400" />
+            Detalle 360 interno
+          </h3>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-4">
+        <DetailCount label="Direcciones" value={detail.addresses.length} />
+        <DetailCount label="Vehículos" value={detail.vehicles.length} />
+        <DetailCount label="Propiedades" value={detail.properties.length} />
+        <DetailCount label="Contactos" value={detail.contact_points.length} />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div>
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <MapPin className="h-3.5 w-3.5" />
+            Direcciones
+          </h4>
+          <div className="space-y-2">
+            {detail.addresses.length === 0 && <div className="text-sm text-slate-500">Sin dirección granular.</div>}
+            {detail.addresses.map((address, index) => (
+              <DetailItem
+                key={`${address.source}-${index}`}
+                title={address.direccion || address.comuna || 'Dirección sin calle'}
+                meta={address.source}
+              >
+                <div>{[address.comuna, address.region].filter(Boolean).join(', ') || 'Sin comuna/región'}</div>
+                {address.seen_at && <div>Actualizado: {formatDate(address.seen_at)}</div>}
+              </DetailItem>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <Car className="h-3.5 w-3.5" />
+            Vehículos
+          </h4>
+          <div className="space-y-2">
+            {detail.vehicles.length === 0 && <div className="text-sm text-slate-500">Sin vehículos detallados.</div>}
+            {detail.vehicles.map(vehicle => (
+              <DetailItem
+                key={vehicle.id}
+                title={[vehicle.marca, vehicle.modelo].filter(Boolean).join(' ') || 'Vehículo sin modelo'}
+                meta={vehicle.ppu ? `${vehicle.ppu}${vehicle.ppu_dv ? `-${vehicle.ppu_dv}` : ''}` : null}
+              >
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-3.5 w-3.5 text-slate-600" />
+                  <span>{vehicle.anio_fabricacion ?? 'Año s/d'} · {vehicle.tipo_vehiculo ?? 'Tipo s/d'} · {vehicle.color ?? 'Color s/d'}</span>
+                </div>
+                <div>Avalúo fiscal: {formatCurrency(vehicle.avaluo_fiscal)}</div>
+                {vehicle.avaluo_comercial > 0 && <div>Avalúo comercial: {formatCurrency(vehicle.avaluo_comercial)}</div>}
+              </DetailItem>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <Landmark className="h-3.5 w-3.5" />
+            Propiedades
+          </h4>
+          <div className="space-y-2">
+            {detail.properties.length === 0 && <div className="text-sm text-slate-500">Sin propiedades detalladas.</div>}
+            {detail.properties.map((property, index) => (
+              <DetailItem
+                key={property.id || property.rol || property.direccion || `property-${index}`}
+                title={property.direccion || property.rol || 'Propiedad sin dirección'}
+                meta={property.rol}
+              >
+                <div>{[property.comuna, property.tipo_propiedad, property.destino].filter(Boolean).join(' · ') || 'Sin clasificación'}</div>
+                <div>Avalúo fiscal: {formatCurrency(property.avaluo_fiscal)}</div>
+                {property.fono_celular && <div>Celular propiedad: {property.fono_celular}</div>}
+                {property.fono_comercial && <div>Teléfono comercial: {property.fono_comercial}</div>}
+                {property.email && <div>Email propiedad: {property.email}</div>}
+              </DetailItem>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <Phone className="h-3.5 w-3.5" />
+            Contactos
+          </h4>
+          <div className="space-y-2">
+            {detail.executive_contact && (
+              <DetailItem
+                title={detail.executive_contact.nombre_ejecutivo || 'Contacto ejecutivo'}
+                meta={detail.executive_contact.cargo}
+              >
+                <div>{detail.executive_contact.razon_social}</div>
+                {detail.executive_contact.mejor_telefono && <div>Teléfono: {detail.executive_contact.mejor_telefono}</div>}
+                {detail.executive_contact.email && <div>Email: {detail.executive_contact.email}</div>}
+              </DetailItem>
+            )}
+            {detail.contact_points.length === 0 && !detail.executive_contact && (
+              <div className="text-sm text-slate-500">Sin contactos adicionales.</div>
+            )}
+            {detail.contact_points.map(point => (
+              <DetailItem
+                key={point.id}
+                title={point.contact_value}
+                meta={point.contact_type === 'email' ? 'Email' : 'Teléfono'}
+              >
+                <div>{point.source_name ?? 'Fuente interna'} · calidad {point.quality_score ?? 's/d'}</div>
+                <div>{point.is_primary ? 'Principal' : 'Alternativo'} · {point.is_verified ? 'verificado' : 'no verificado'}</div>
+                {point.last_seen_at && <div>Visto: {formatDate(point.last_seen_at)}</div>}
+              </DetailItem>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -261,6 +463,8 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
           </div>
         </div>
       </div>
+
+      <PersonaDetail360Panel rut={persona.rutid} />
 
       <CommercialIntelligencePanel rut={persona.rutid} />
 

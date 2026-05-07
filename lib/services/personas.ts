@@ -1,7 +1,17 @@
 'use server'
 
 import { db } from '@/lib/db/supabase'
-import type { PersonaView, PaginatedResponse, PersonaSearchParams } from '@/types'
+import type {
+  PaginatedResponse,
+  PersonaAddressDetail,
+  PersonaContactDetail,
+  PersonaDetail360,
+  PersonaExecutiveContactDetail,
+  PersonaPropertyDetail,
+  PersonaSearchParams,
+  PersonaVehicleDetail,
+  PersonaView,
+} from '@/types'
 import { normalizeRut } from '@/lib/utils/rut'
 import { Pool } from 'pg'
 
@@ -95,6 +105,24 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function normalizeRutForDb(value: string): string | null {
+  const cleaned = value.replace(/[.\-\s]/g, '').toUpperCase()
+  if (cleaned.length < 2) return null
+  return cleaned.padStart(10, '0')
+}
+
+function normalizeRutKey(value: string): string | null {
+  const normalized = normalizeRutForDb(value)
+  if (!normalized) return null
+  return normalized.replace(/^0+/, '') || normalized
+}
+
 function normalizePgPersonaRow(row: Record<string, unknown>): PersonaView {
   return {
     ...row,
@@ -114,6 +142,284 @@ function normalizePgPersonaRow(row: Record<string, unknown>): PersonaView {
     avaluo_indeterminado: toNumber(row.avaluo_indeterminado),
     bbrr_destinos: Array.isArray(row.bbrr_destinos) ? row.bbrr_destinos as string[] : [],
   } as PersonaView
+}
+
+function normalizeVehicleDetail(row: Record<string, unknown>): PersonaVehicleDetail {
+  return {
+    id: toNumber(row.id),
+    ppu: row.ppu as string | null,
+    ppu_dv: row.ppu_dv as string | null,
+    marca: row.marca as string | null,
+    modelo: row.modelo as string | null,
+    tipo_vehiculo: row.tipo_vehiculo as string | null,
+    anio_fabricacion: toNullableNumber(row.anio_fabricacion),
+    fecha_transferencia: row.fecha_transferencia as string | null,
+    color: row.color as string | null,
+    clasificacion: row.clasificacion as string | null,
+    avaluo_fiscal: toNumber(row.avaluo_fiscal),
+    avaluo_comercial: toNumber(row.avaluo_comercial),
+  }
+}
+
+function normalizePropertyDetail(row: Record<string, unknown>): PersonaPropertyDetail {
+  return {
+    id: String(row.id ?? ''),
+    rol: row.rol as string | null,
+    direccion: row.direccion as string | null,
+    comuna: row.comuna as string | null,
+    tipo_propiedad: row.tipo_propiedad as string | null,
+    destino: row.destino as string | null,
+    avaluo_fiscal: toNumber(row.avaluo_fiscal),
+    fono_comercial: row.fono_comercial as string | null,
+    fono_particular: row.fono_particular as string | null,
+    fono_celular: row.fono_celular as string | null,
+    email: row.email as string | null,
+  }
+}
+
+function normalizeAddressDetail(row: Record<string, unknown>): PersonaAddressDetail {
+  return {
+    source: String(row.source ?? 'fuente_interna'),
+    direccion: row.direccion as string | null,
+    comuna: row.comuna as string | null,
+    region: row.region as string | null,
+    seen_at: row.seen_at as string | null,
+  }
+}
+
+function normalizeContactDetail(row: Record<string, unknown>): PersonaContactDetail {
+  return {
+    id: String(row.id ?? ''),
+    contact_type: row.contact_type === 'email' ? 'email' : 'phone',
+    contact_value: String(row.contact_value ?? ''),
+    source_name: row.source_name as string | null,
+    quality_score: toNullableNumber(row.quality_score),
+    is_primary: row.is_primary as boolean | null,
+    is_verified: row.is_verified as boolean | null,
+    last_seen_at: row.last_seen_at as string | null,
+    metadata: (row.metadata ?? null) as Record<string, unknown> | null,
+  }
+}
+
+function normalizeExecutiveContactDetail(
+  row: Record<string, unknown> | null | undefined
+): PersonaExecutiveContactDetail | null {
+  if (!row) return null
+  return {
+    rutid: String(row.rutid ?? ''),
+    razon_social: row.razon_social as string | null,
+    rutid_ejecutivo: row.rutid_ejecutivo as string | null,
+    nombre_ejecutivo: row.nombre_ejecutivo as string | null,
+    area: row.area as string | null,
+    cargo: row.cargo as string | null,
+    email: row.email as string | null,
+    celular: row.celular as string | null,
+    telefono_comercial: row.telefono_comercial as string | null,
+    mejor_telefono: row.mejor_telefono as string | null,
+    contact_priority: toNullableNumber(row.contact_priority),
+  }
+}
+
+async function getPersonaDetailFromPostgres(
+  rutid: string,
+  rutKey: string
+): Promise<PersonaDetail360 | null> {
+  const pgPool = getPool()
+  if (!pgPool) return null
+
+  try {
+    const [
+      addressesResult,
+      vehiclesResult,
+      propertiesResult,
+      contactsResult,
+      executiveResult,
+    ] = await Promise.all([
+      pgPool.query(`
+        select source, direccion, comuna, region, seen_at
+        from (
+          select
+            'domicilio_preferido'::text as source,
+            direccion,
+            comuna,
+            region,
+            source_seen_at as seen_at,
+            120 as rank
+          from public.empresas_direccion_preferida
+          where rutid = $2
+
+          union all
+
+          select
+            'padron_personas_raw'::text as source,
+            nullif(btrim(direccion), '') as direccion,
+            nullif(btrim(comuna), '') as comuna,
+            nullif(btrim(region), '') as region,
+            coalesce(updated_at, loaded_at, created_at) as seen_at,
+            80 as rank
+          from public.padron_personas_raw
+          where nullif(ltrim(regexp_replace(upper(rutid), '[^0-9K]', '', 'g'), '0'), '') = $2
+
+          union all
+
+          select
+            'bbrr_propiedades'::text as source,
+            nullif(btrim(direccion), '') as direccion,
+            nullif(btrim(comuna), '') as comuna,
+            null::text as region,
+            coalesce(updated_at, source_loaded_at, created_at) as seen_at,
+            60 as rank
+          from public.bbrr_propiedades
+          where nullif(ltrim(regexp_replace(upper(rutid), '[^0-9K]', '', 'g'), '0'), '') = $2
+        ) address_candidates
+        where direccion is not null or comuna is not null or region is not null
+        order by (direccion is not null) desc, rank desc, seen_at desc nulls last
+        limit 8
+      `, [rutid, rutKey]),
+      pgPool.query(`
+        select
+          id,
+          nullif(btrim(ppu), '') as ppu,
+          nullif(btrim(ppu_dv), '') as ppu_dv,
+          nullif(btrim(marca), '') as marca,
+          nullif(btrim(modelo), '') as modelo,
+          nullif(btrim(tipo_vehiculo), '') as tipo_vehiculo,
+          anio_fabricacion,
+          fecha_transferencia,
+          nullif(btrim(color), '') as color,
+          nullif(btrim(clasificacion), '') as clasificacion,
+          avaluo_fiscal,
+          avaluo_comercial
+        from public.automoviles2025
+        where rutid = $1
+        order by avaluo_fiscal desc nulls last, anio_fabricacion desc nulls last, id asc
+        limit 50
+      `, [rutid]),
+      pgPool.query(`
+        select
+          id,
+          nullif(btrim(rol), '') as rol,
+          nullif(btrim(direccion), '') as direccion,
+          nullif(btrim(comuna), '') as comuna,
+          nullif(btrim(tipo_propiedad), '') as tipo_propiedad,
+          nullif(btrim(destino), '') as destino,
+          avaluo_fiscal,
+          nullif(btrim(concat_ws('', fono_area_comer, fono_numero_comer)), '') as fono_comercial,
+          nullif(btrim(concat_ws('', fono_area_part, fono_numero_part)), '') as fono_particular,
+          nullif(btrim(concat_ws('', fono_area_cel, fono_numero_cel)), '') as fono_celular,
+          nullif(btrim(email), '') as email
+        from public.bbrr_propiedades
+        where nullif(ltrim(regexp_replace(upper(rutid), '[^0-9K]', '', 'g'), '0'), '') = $2
+        order by avaluo_fiscal desc nulls last, rol asc
+        limit 50
+      `, [rutid, rutKey]),
+      pgPool.query(`
+        select
+          id,
+          contact_type,
+          contact_value,
+          source_name,
+          quality_score,
+          is_primary,
+          is_verified,
+          last_seen_at,
+          metadata
+        from public.persona_contact_points
+        where rutid = $1
+        order by is_primary desc, quality_score desc nulls last, last_seen_at desc nulls last
+        limit 40
+      `, [rutid]),
+      pgPool.query(`
+        select
+          rutid,
+          razon_social,
+          rutid_ejecutivo,
+          nombre_ejecutivo,
+          area,
+          cargo,
+          email,
+          celular,
+          telefono_comercial,
+          mejor_telefono,
+          contact_priority
+        from public.company_best_executive_contact
+        where rutid = $1
+        limit 1
+      `, [rutid]),
+    ])
+
+    return {
+      rutid,
+      addresses: addressesResult.rows.map(normalizeAddressDetail),
+      vehicles: vehiclesResult.rows.map(normalizeVehicleDetail),
+      properties: propertiesResult.rows.map(normalizePropertyDetail),
+      contact_points: contactsResult.rows.map(normalizeContactDetail),
+      executive_contact: normalizeExecutiveContactDetail(executiveResult.rows[0]),
+    }
+  } catch (error) {
+    console.error('[getPersonaDetailFromPostgres]', error)
+    return null
+  }
+}
+
+async function getPersonaDetailFromSupabase(rutid: string): Promise<PersonaDetail360> {
+  const [
+    vehiclesResult,
+    propertiesResult,
+    contactsResult,
+    executiveResult,
+  ] = await Promise.all([
+    db
+      .from('automoviles2025')
+      .select('id,ppu,ppu_dv,marca,modelo,tipo_vehiculo,anio_fabricacion,fecha_transferencia,color,clasificacion,avaluo_fiscal,avaluo_comercial')
+      .eq('rutid', rutid)
+      .order('avaluo_fiscal', { ascending: false })
+      .limit(50),
+    db
+      .from('bbrr_propiedades')
+      .select('id,rol,direccion,comuna,tipo_propiedad,destino,avaluo_fiscal,email,fono_area_comer,fono_numero_comer,fono_area_part,fono_numero_part,fono_area_cel,fono_numero_cel')
+      .eq('rutid', rutid)
+      .order('avaluo_fiscal', { ascending: false })
+      .limit(50),
+    db
+      .from('persona_contact_points')
+      .select('id,contact_type,contact_value,source_name,quality_score,is_primary,is_verified,last_seen_at,metadata')
+      .eq('rutid', rutid)
+      .order('is_primary', { ascending: false })
+      .order('quality_score', { ascending: false })
+      .limit(40),
+    db
+      .from('company_best_executive_contact')
+      .select('rutid,razon_social,rutid_ejecutivo,nombre_ejecutivo,area,cargo,email,celular,telefono_comercial,mejor_telefono,contact_priority')
+      .eq('rutid', rutid)
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  const propertyRows = (propertiesResult.data ?? []) as Array<Record<string, unknown>>
+
+  return {
+    rutid,
+    addresses: propertyRows
+      .filter(row => row.direccion || row.comuna)
+      .slice(0, 8)
+      .map(row => normalizeAddressDetail({
+        source: 'bbrr_propiedades',
+        direccion: row.direccion,
+        comuna: row.comuna,
+        region: null,
+        seen_at: null,
+      })),
+    vehicles: ((vehiclesResult.data ?? []) as Array<Record<string, unknown>>).map(normalizeVehicleDetail),
+    properties: propertyRows.map(row => normalizePropertyDetail({
+      ...row,
+      fono_comercial: `${row.fono_area_comer ?? ''}${row.fono_numero_comer ?? ''}` || null,
+      fono_particular: `${row.fono_area_part ?? ''}${row.fono_numero_part ?? ''}` || null,
+      fono_celular: `${row.fono_area_cel ?? ''}${row.fono_numero_cel ?? ''}` || null,
+    })),
+    contact_points: ((contactsResult.data ?? []) as Array<Record<string, unknown>>).map(normalizeContactDetail),
+    executive_contact: normalizeExecutiveContactDetail(executiveResult.data as Record<string, unknown> | null),
+  }
 }
 
 function shouldUseBbrrFastPath(params: PersonaSearchParams) {
@@ -557,6 +863,21 @@ export async function getPersonaByRut(rut: string): Promise<PersonaView | null> 
 
   if (error || !data) return null
   return data as PersonaView
+}
+
+/**
+ * Obtiene el detalle granular del RUT desde las fuentes internas disponibles.
+ * Mantiene límites altos pero acotados para que la ficha no arrastre tablas completas.
+ */
+export async function getPersonaDetail360(rut: string): Promise<PersonaDetail360 | null> {
+  const rutid = normalizeRutForDb(rut)
+  const rutKey = normalizeRutKey(rut)
+  if (!rutid || !rutKey) return null
+
+  const pgDetail = await getPersonaDetailFromPostgres(rutid, rutKey)
+  if (pgDetail) return pgDetail
+
+  return getPersonaDetailFromSupabase(rutid)
 }
 
 /**
