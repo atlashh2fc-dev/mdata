@@ -93,7 +93,7 @@ export function formatRut(rut: string | null | undefined): string {
   // Format XXXXXXXX-X to XX.XXX.XXX-X
   const clean = rut.replace(/[.\-\s]/g, '').toUpperCase()
   const dv = clean.slice(-1)
-  const digits = clean.slice(0, -1)
+  const digits = clean.slice(0, -1).replace(/^0+/, '') || '0'
   const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
   return `${formatted}-${dv}`
 }

@@ -45,7 +45,7 @@ export function formatRut(rut: string): string {
   if (clean.length < 2) return rut
 
   const dv = clean.slice(-1)
-  const digits = clean.slice(0, -1)
+  const digits = clean.slice(0, -1).replace(/^0+/, '') || '0'
 
   // Agregar puntos de miles
   const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')

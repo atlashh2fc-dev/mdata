@@ -183,7 +183,7 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
             {detail.addresses.map((address, index) => (
               <DetailItem
                 key={`${address.source}-${index}`}
-                title={address.direccion || address.comuna || 'Dirección sin calle'}
+                title={address.direccion || (address.source === 'domicilio_resumen' ? 'Domicilio registrado' : address.comuna) || 'Dirección sin calle'}
                 meta={address.source}
               >
                 <div>{[address.comuna, address.region].filter(Boolean).join(', ') || 'Sin comuna/región'}</div>

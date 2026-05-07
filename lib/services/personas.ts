@@ -220,6 +220,118 @@ function normalizeExecutiveContactDetail(
   }
 }
 
+function normalizeTextValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().replace(/\s+/g, ' ')
+  return normalized || null
+}
+
+function composeFullName(
+  nombres: string | null,
+  paterno: string | null,
+  materno: string | null
+): string | null {
+  return [nombres, paterno, materno]
+    .map(normalizeTextValue)
+    .filter(Boolean)
+    .join(' ') || null
+}
+
+function hasSuspiciousDuplicatedName(persona: PersonaView): boolean {
+  const nombres = normalizeTextValue(persona.nombres)
+  const paterno = normalizeTextValue(persona.paterno)
+  const materno = normalizeTextValue(persona.materno)
+  if (!nombres || (!paterno && !materno)) return false
+
+  const nameTokens = new Set(nombres.toUpperCase().split(/\s+/))
+  const surnameTokens = [paterno, materno]
+    .filter(Boolean)
+    .map(value => value!.toUpperCase())
+
+  return surnameTokens.length > 0 && surnameTokens.every(token => nameTokens.has(token))
+}
+
+function applyIdentityOverride(
+  persona: PersonaView,
+  row: Record<string, unknown> | null | undefined
+): PersonaView {
+  if (!row) return persona
+
+  const nombres = normalizeTextValue(row.nombres)
+  const paterno = normalizeTextValue(row.paterno)
+  const materno = normalizeTextValue(row.materno)
+  const sourceFullName = normalizeTextValue(row.nombre_razon_social)
+  const composed = composeFullName(nombres, paterno, materno)
+  const currentFullName = normalizeTextValue(persona.nombre_completo)
+
+  if (!sourceFullName && !composed) return persona
+  if ((sourceFullName ?? composed) === currentFullName) return persona
+
+  return {
+    ...persona,
+    nombres: nombres ?? persona.nombres,
+    paterno: paterno ?? persona.paterno,
+    materno: materno ?? persona.materno,
+    nombre_completo: sourceFullName ?? composed ?? persona.nombre_completo,
+  }
+}
+
+async function getVehicleOwnerIdentityFromPostgres(
+  rutid: string
+): Promise<Record<string, unknown> | null> {
+  const pgPool = getPool()
+  if (!pgPool) return null
+
+  try {
+    const { rows } = await pgPool.query(`
+      select
+        nullif(btrim(nombres), '') as nombres,
+        nullif(btrim(paterno), '') as paterno,
+        nullif(btrim(materno), '') as materno,
+        nullif(btrim(nombre_razon_social), '') as nombre_razon_social
+      from public.automoviles2025
+      where rutid = $1
+        and tipo_rut ilike '%NATURAL%'
+      order by loaded_at desc nulls last, id asc
+      limit 1
+    `, [rutid])
+
+    return rows[0] ?? null
+  } catch (error) {
+    console.error('[getVehicleOwnerIdentityFromPostgres]', error)
+    return null
+  }
+}
+
+async function getVehicleOwnerIdentityFromSupabase(
+  rutid: string
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await db
+    .from('automoviles2025')
+    .select('nombres,paterno,materno,nombre_razon_social')
+    .eq('rutid', rutid)
+    .ilike('tipo_rut', '%NATURAL%')
+    .order('loaded_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getVehicleOwnerIdentityFromSupabase]', error)
+    return null
+  }
+
+  return data as Record<string, unknown> | null
+}
+
+async function enrichPersonaIdentityFromSources(persona: PersonaView): Promise<PersonaView> {
+  if (!hasSuspiciousDuplicatedName(persona)) return persona
+
+  const sourceIdentity = await getVehicleOwnerIdentityFromPostgres(persona.rutid)
+    ?? await getVehicleOwnerIdentityFromSupabase(persona.rutid)
+
+  return applyIdentityOverride(persona, sourceIdentity)
+}
+
 async function getPersonaDetailFromPostgres(
   rutid: string,
   rutKey: string
@@ -271,6 +383,18 @@ async function getPersonaDetailFromPostgres(
             60 as rank
           from public.bbrr_propiedades
           where nullif(ltrim(regexp_replace(upper(rutid), '[^0-9K]', '', 'g'), '0'), '') = $2
+
+          union all
+
+          select
+            'domicilio_resumen'::text as source,
+            null::text as direccion,
+            nullif(btrim(domicilio_comuna), '') as comuna,
+            nullif(btrim(domicilio_region), '') as region,
+            updated_at as seen_at,
+            20 as rank
+          from public.master_personas_view
+          where rutid = $1
         ) address_candidates
         where direccion is not null or comuna is not null or region is not null
         order by (direccion is not null) desc, rank desc, seen_at desc nulls last
@@ -862,7 +986,7 @@ export async function getPersonaByRut(rut: string): Promise<PersonaView | null> 
     .single()
 
   if (error || !data) return null
-  return data as PersonaView
+  return enrichPersonaIdentityFromSources(data as PersonaView)
 }
 
 /**
