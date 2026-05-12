@@ -925,6 +925,109 @@ async function searchPersonasByNameMatch(
 
   if (tokens.length < 2) return null
 
+  const pgPool = getPool()
+  if (pgPool) {
+    const pageSize = Math.max(to - from + 1, 1)
+    const page = Math.floor(from / pageSize) + 1
+    const orderDirection = sortOrder === 'asc' ? 'asc' : 'desc'
+    const orderExpression = getBbrrSortExpression(sortBy)
+    const nameExpression = `coalesce(pm.nombres, '') || ' ' || coalesce(pm.paterno, '') || ' ' || coalesce(pm.materno, '')`
+    const tokenPatterns = tokens.map(token => `%${token}%`)
+    const tokenWhere = tokenPatterns
+      .map((_, index) => `(${nameExpression}) ilike $${index + 1}`)
+      .join(' and ')
+    const limitParam = tokenPatterns.length + 1
+    const offsetParam = tokenPatterns.length + 2
+
+    const sql = `
+      with filtered as (
+        select
+          pm.rutid,
+          nullif(trim(pm.nombres), '') as nombres,
+          nullif(trim(pm.paterno), '') as paterno,
+          nullif(trim(pm.materno), '') as materno,
+          nullif(trim(
+            coalesce(nullif(trim(pm.nombres),''), '') || ' ' ||
+            coalesce(nullif(trim(pm.paterno),''), '') || ' ' ||
+            coalesce(nullif(trim(pm.materno),''), '')
+          ), '') as nombre_completo,
+          nullif(trim(pm.email), '') as email,
+          nullif(trim(pm.fono_cel), '') as fono_cel,
+          nullif(trim(pm.comuna_part), '') as comuna_part,
+          nullif(trim(pm.region_part), '') as region_part,
+          pm.n_autos,
+          (pm.n_autos > 0) as tiene_autos,
+          pm.razon_social_empresa,
+          (pm.razon_social_empresa is not null) as tiene_empresa,
+          pm.domicilio_comuna,
+          pm.domicilio_region,
+          pm.n_bienes_raices,
+          pm.totalavaluos,
+          (pm.n_bienes_raices > 0) as tiene_bienes_raices,
+          (
+            coalesce(pm.n_autos, 0) * 10 +
+            coalesce(pm.n_bienes_raices, 0) * 20 +
+            case when pm.razon_social_empresa is not null then 15 else 0 end +
+            case when nullif(trim(pm.email), '') is not null then 5 else 0 end +
+            case when nullif(trim(pm.fono_cel), '') is not null then 5 else 0 end
+          )::integer as score_patrimonial,
+          (
+            (case when nullif(trim(pm.nombres), '') is not null then 1 else 0 end +
+             case when nullif(trim(pm.email), '') is not null then 1 else 0 end +
+             case when nullif(trim(pm.fono_cel), '') is not null then 1 else 0 end +
+             case when nullif(trim(pm.region_part), '') is not null then 1 else 0 end +
+             case when pm.n_autos > 0 then 1 else 0 end +
+             case when pm.razon_social_empresa is not null then 1 else 0 end +
+             case when pm.domicilio_region is not null then 1 else 0 end +
+             case when pm.n_bienes_raices > 0 then 1 else 0 end
+            )::float / 8.0 * 100
+          )::integer as cobertura_pct,
+          coalesce(nullif(trim(pm.region_part), ''), pm.domicilio_region) as region_canonica,
+          coalesce(nullif(trim(pm.comuna_part), ''), pm.domicilio_comuna) as comuna_canonica,
+          pm.loaded_at as created_at,
+          pm.loaded_at as updated_at,
+          bu.uso_propiedad_inferido,
+          coalesce(bu.bbrr_destinos, array[]::text[]) as bbrr_destinos,
+          coalesce(bu.n_propiedades_detalle, 0) as n_propiedades_detalle,
+          coalesce(bu.n_propiedades_residenciales, 0) as n_propiedades_residenciales,
+          coalesce(bu.n_propiedades_comerciales, 0) as n_propiedades_comerciales,
+          coalesce(bu.n_propiedades_rurales, 0) as n_propiedades_rurales,
+          coalesce(bu.n_propiedades_indeterminadas, 0) as n_propiedades_indeterminadas,
+          coalesce(bu.avaluo_residencial, 0) as avaluo_residencial,
+          coalesce(bu.avaluo_comercial, 0) as avaluo_comercial,
+          coalesce(bu.avaluo_rural, 0) as avaluo_rural,
+          coalesce(bu.avaluo_indeterminado, 0) as avaluo_indeterminado
+        from public.personas_master pm
+        left join public.bbrr_uso_propiedad_por_rut bu
+          on nullif(ltrim(upper(pm.rutid), '0'), '') = bu.rutid
+        where ${tokenWhere}
+      )
+      select *, count(*) over()::bigint as total_count
+      from filtered
+      order by ${orderExpression} ${orderDirection} nulls last, rutid asc
+      limit $${limitParam}
+      offset $${offsetParam}
+    `
+
+    try {
+      const result = await pgPool.query(sql, [...tokenPatterns, pageSize, from])
+      const total = result.rows.length > 0 ? toNumber(result.rows[0].total_count) : 0
+      return {
+        data: result.rows.map(row => {
+          const persona = { ...row }
+          delete persona.total_count
+          return normalizePgPersonaRow(persona)
+        }),
+        total,
+        page,
+        page_size: pageSize,
+        total_pages: Math.ceil(total / pageSize),
+      }
+    } catch (error) {
+      console.error('[searchPersonasByNameMatch.pg]', error)
+    }
+  }
+
   const { data: matches, error } = await db.rpc('match_person_names', {
     input_names: [normalizedTerm],
   })
