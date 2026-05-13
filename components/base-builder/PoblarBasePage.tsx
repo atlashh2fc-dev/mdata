@@ -143,6 +143,7 @@ type AnalyzeProgress = {
 }
 
 type ExportFormat = 'xlsx' | 'csv' | 'json'
+type ExportTemplate = 'normal' | 'infobusiness'
 type ExportCell = string | number | boolean | null
 
 function emptyProviderMetrics(): NonNullable<BaseBuilderWebEnrichmentResult['providers']> {
@@ -859,6 +860,7 @@ function getCoverageTone(pct: number): string {
 
 export function PoblarBasePage() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx')
+  const [exportTemplate, setExportTemplate] = useState<ExportTemplate>('normal')
   const [selectedMatchMode, setSelectedMatchMode] = useState<BaseBuilderMatchMode>('rut')
   const [enrichMissingContactsWithWeb, setEnrichMissingContactsWithWeb] = useState(false)
   const [selectedFields, setSelectedFields] = useState<BaseBuilderFieldKey[]>(PERSON_DEFAULT_FIELDS)
@@ -910,6 +912,7 @@ export function PoblarBasePage() {
       ? parsedUpload.detectedPersonNameColumn
       : parsedUpload.detectedCompanyColumn
   const webEnrichmentAvailable = selectedMatchMode !== 'nombre_persona'
+  const infobusinessAvailable = exportFormat === 'xlsx' && selectedMatchMode === 'rut'
 
   function getMatchModeLabel(mode: BaseBuilderMatchMode) {
     if (mode === 'rut') return 'RUT'
@@ -968,6 +971,7 @@ export function PoblarBasePage() {
 
   function applyMatchMode(mode: BaseBuilderMatchMode, upload: ParsedUpload = parsedUpload) {
     setSelectedMatchMode(mode)
+    if (mode !== 'rut') setExportTemplate('normal')
     setSelectedMatchColumn(
       mode === 'rut'
         ? upload.detectedRutColumn ?? ''
@@ -1245,6 +1249,52 @@ export function PoblarBasePage() {
   async function handleExport() {
     if (!analysis) return
 
+    const baseName = `${getExportBaseName(uploadedFile?.name)}-poblada`
+
+    if (exportTemplate === 'infobusiness' && infobusinessAvailable) {
+      setExporting(true)
+      setExportStatus('Armando plantilla Infobusiness...')
+      setExportDone(false)
+      setError(null)
+
+      try {
+        const rutids = analysis.rows
+          .filter(row => row.match_status === 'matched' && row.rutid)
+          .map(row => String(row.rutid))
+
+        const res = await fetch('/api/base-builder/infobusiness-export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rutids }),
+        })
+
+        if (!res.ok) {
+          const contentType = res.headers.get('content-type') ?? ''
+          const payload = contentType.includes('application/json')
+            ? await res.json()
+            : await res.text()
+          const message = typeof payload === 'string'
+            ? payload
+            : payload?.error
+          throw new Error(message ?? 'No se pudo exportar la plantilla Infobusiness.')
+        }
+
+        const workbook = await res.arrayBuffer()
+        downloadFile(
+          workbook,
+          `${baseName}-infobusiness.xlsx`,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        setExportDone(true)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo exportar la plantilla Infobusiness.')
+      } finally {
+        setExporting(false)
+        setExportStatus('Exportando...')
+      }
+      return
+    }
+
     const shouldUpdateAgainstCrm = window.confirm(
       '¿Quieres actualizar esta descarga contra el CRM antes de exportarla?'
     )
@@ -1255,7 +1305,6 @@ export function PoblarBasePage() {
     setError(null)
 
     try {
-      const baseName = `${getExportBaseName(uploadedFile?.name)}-poblada`
       let rowsToExport = analysis.rows
       let extraColumns: string[] = []
       let crmExportWarning: string | null = null
@@ -1630,7 +1679,11 @@ export function PoblarBasePage() {
                     return (
                       <button
                         key={option.value}
-                        onClick={() => setExportFormat(option.value as ExportFormat)}
+                        onClick={() => {
+                          const nextFormat = option.value as ExportFormat
+                          setExportFormat(nextFormat)
+                          if (nextFormat !== 'xlsx') setExportTemplate('normal')
+                        }}
                         className={cn(
                           'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
                           exportFormat === option.value
@@ -1645,6 +1698,60 @@ export function PoblarBasePage() {
                         <div className="text-left">
                           <p className="text-sm font-medium text-white">{option.label}</p>
                           <p className="text-xs text-slate-500">{option.desc}</p>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-2">
+                  Plantilla de salida
+                </label>
+                <div className="space-y-2">
+                  {[
+                    {
+                      value: 'normal',
+                      label: 'Normal',
+                      desc: 'Exporta tu base original más las columnas pobladas.',
+                    },
+                    {
+                      value: 'infobusiness',
+                      label: 'Plantilla Infobusiness',
+                      desc: 'Excel dedicado con hojas EMPRESA y EJECUTIVO.',
+                    },
+                  ].map(option => {
+                    const disabled = option.value === 'infobusiness' && !infobusinessAvailable
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return
+                          setExportTemplate(option.value as ExportTemplate)
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left',
+                          exportTemplate === option.value
+                            ? 'border-brand-500/50 bg-brand-500/10'
+                            : 'border-[#253357] hover:border-brand-500/30',
+                          disabled && 'opacity-50 cursor-not-allowed hover:border-[#253357]'
+                        )}
+                      >
+                        <Table2 className={cn(
+                          'w-4 h-4',
+                          exportTemplate === option.value ? 'text-brand-400' : 'text-slate-500'
+                        )} />
+                        <div>
+                          <p className="text-sm font-medium text-white">{option.label}</p>
+                          <p className="text-xs text-slate-500">{option.desc}</p>
+                          {option.value === 'infobusiness' && !infobusinessAvailable && (
+                            <p className="text-xs text-amber-300 mt-1">
+                              Disponible sólo para Excel con cruce por RUT.
+                            </p>
+                          )}
                         </div>
                       </button>
                     )
