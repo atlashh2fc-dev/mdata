@@ -49,6 +49,53 @@ const COMPANY_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
   'region_canonica',
 ]
 
+const USEFUL_NO_DUPLICATES_FIELDS: BaseBuilderFieldKey[] = [
+  'nombre_completo',
+  'email',
+  'fono_cel',
+  'email_fuente',
+  'fono_cel_fuente',
+  'email_verificado',
+  'fono_cel_verificado',
+  'region_canonica',
+  'comuna_canonica',
+  'razon_social_empresa',
+  'rubro',
+  'facturacion_sub_rango',
+  'tamano_empresas',
+  'ejecutivo_nombre',
+  'ejecutivo_cargo',
+  'ejecutivo_email',
+  'ejecutivo_telefono',
+  'n_autos',
+  'n_bienes_raices',
+  'totalavaluos',
+  'uso_propiedad_inferido',
+  'n_propiedades_residenciales',
+  'n_propiedades_comerciales',
+  'avaluo_residencial',
+  'avaluo_comercial',
+  'score_patrimonial',
+  'cobertura_pct',
+  'equifax_lead_temperature',
+  'equifax_lead_score',
+  'equifax_contact_probability',
+  'equifax_purchase_probability',
+  'equifax_recommended_channel',
+  'equifax_recommended_hour',
+  'ventas_resultado_tendencia',
+  'ventas_ultimo_tramo',
+  'ventas_trabajadores_2024',
+  'ventas_rubro_economico',
+  'ventas_actividad_economica',
+  'wom_lineas',
+  'wom_valor',
+  'wom_ciclo',
+  'blacklist_phone_count',
+  'blacklist_email_count',
+  'blacklist_reasons',
+]
+
 const MAX_AUTO_WEB_PASSES = 50
 const CRM_EXPORT_COLUMNS = [
   'CRM - Tiene historial',
@@ -117,6 +164,16 @@ const CATEGORY_LABELS: Record<BaseBuilderFieldDefinition['category'], string> = 
   scoring: 'Scoring',
   riesgo: 'Riesgo',
 }
+
+const FIELD_CATEGORIES: BaseBuilderFieldDefinition['category'][] = [
+  'identidad',
+  'contacto',
+  'ubicacion',
+  'patrimonio',
+  'actividad',
+  'scoring',
+  'riesgo',
+]
 
 type ParsedUpload = {
   headers: string[]
@@ -543,6 +600,13 @@ function buildFieldLabelMap() {
   return new Map(BASE_BUILDER_FIELDS.map(field => [field.key, `Maestro - ${field.label}`]))
 }
 
+function orderFieldKeys(fields: BaseBuilderFieldKey[]): BaseBuilderFieldKey[] {
+  const wanted = new Set(fields)
+  return BASE_BUILDER_FIELDS
+    .filter(field => wanted.has(field.key))
+    .map(field => field.key)
+}
+
 function originalColumnsLookLikeData(columns: string[]): boolean {
   const nonEmpty = columns.filter(column => String(column ?? '').trim().length > 0)
   if (nonEmpty.length === 0) return false
@@ -819,6 +883,7 @@ export function PoblarBasePage() {
   const [error, setError] = useState<string | null>(null)
 
   const fieldLabelMap = useMemo(() => buildFieldLabelMap(), [])
+  const selectedFieldSet = useMemo(() => new Set(selectedFields), [selectedFields])
   const previewOriginalColumns = analysis?.original_columns.slice(0, 4) ?? parsedUpload.headers.slice(0, 4)
   const previewEnrichedColumns = selectedFields.map(field => fieldLabelMap.get(field) ?? field)
   const contactFieldSelected = selectedFields.includes('email') || selectedFields.includes('fono_cel')
@@ -868,6 +933,37 @@ export function PoblarBasePage() {
         ? prev.filter(item => item !== field)
         : [...prev, field]
     ))
+  }
+
+  function applyFieldSelection(fields: BaseBuilderFieldKey[]) {
+    setExportDone(false)
+    setAnalysis(null)
+    setDidCustomizeFields(true)
+    setSelectedFields(orderFieldKeys(fields))
+  }
+
+  function selectCategory(category: BaseBuilderFieldDefinition['category']) {
+    const categoryFields = BASE_BUILDER_FIELDS
+      .filter(field => field.category === category)
+      .map(field => field.key)
+    applyFieldSelection([...selectedFields, ...categoryFields])
+  }
+
+  function clearCategory(category: BaseBuilderFieldDefinition['category']) {
+    const categoryFields = new Set(
+      BASE_BUILDER_FIELDS
+        .filter(field => field.category === category)
+        .map(field => field.key)
+    )
+    applyFieldSelection(selectedFields.filter(field => !categoryFields.has(field)))
+  }
+
+  function applyUsefulTemplate() {
+    applyFieldSelection(USEFUL_NO_DUPLICATES_FIELDS)
+  }
+
+  function restoreRecommendedTemplate() {
+    applyFieldSelection(selectedMatchMode === 'razon_social' ? COMPANY_DEFAULT_FIELDS : PERSON_DEFAULT_FIELDS)
   }
 
   function applyMatchMode(mode: BaseBuilderMatchMode, upload: ParsedUpload = parsedUpload) {
@@ -1371,7 +1467,7 @@ export function PoblarBasePage() {
             </div>
 
             <div className="mt-5">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex flex-col gap-3 mb-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <h4 className="text-sm font-semibold text-slate-200">
                     Campos a poblar desde maestro
@@ -1380,9 +1476,32 @@ export function PoblarBasePage() {
                     Elige qué columnas quieres agregar a tu base al exportar.
                   </p>
                 </div>
-                <span className="text-xs text-brand-400">
-                  {formatNumber(selectedFields.length)} campos seleccionados
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={applyUsefulTemplate}
+                    className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-xs font-medium text-brand-200 transition hover:border-brand-400/60 hover:bg-brand-500/15"
+                  >
+                    Plantilla útil
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restoreRecommendedTemplate}
+                    className="rounded-lg border border-[#253357] px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-brand-500/30 hover:bg-white/[0.03]"
+                  >
+                    Recomendado
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyFieldSelection([])}
+                    className="rounded-lg border border-[#253357] px-3 py-2 text-xs font-medium text-slate-400 transition hover:border-rose-500/30 hover:text-rose-200"
+                  >
+                    Limpiar
+                  </button>
+                  <span className="text-xs text-brand-400">
+                    {formatNumber(selectedFields.length)} campos
+                  </span>
+                </div>
               </div>
 
               <div className="mb-4 rounded-xl border border-[#253357] bg-[#0b1328] p-4">
@@ -1420,11 +1539,34 @@ export function PoblarBasePage() {
               </div>
 
               <div className="space-y-4">
-                {(['identidad', 'contacto', 'ubicacion', 'patrimonio', 'actividad', 'scoring', 'riesgo'] as const).map(category => (
+                {FIELD_CATEGORIES.map(category => (
                   <div key={category}>
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-600 mb-2">
-                      {CATEGORY_LABELS[category]}
-                    </p>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-600">
+                        {CATEGORY_LABELS[category]}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500">
+                          {formatNumber(BASE_BUILDER_FIELDS.filter(field => (
+                            field.category === category && selectedFieldSet.has(field.key)
+                          )).length)} / {formatNumber(BASE_BUILDER_FIELDS.filter(field => field.category === category).length)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => selectCategory(category)}
+                          className="rounded-md border border-[#253357] px-2 py-1 text-[11px] font-medium text-slate-300 transition hover:border-brand-500/40 hover:text-brand-200"
+                        >
+                          Todo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => clearCategory(category)}
+                          className="rounded-md border border-[#253357] px-2 py-1 text-[11px] font-medium text-slate-500 transition hover:border-rose-500/30 hover:text-rose-200"
+                        >
+                          Limpiar
+                        </button>
+                      </div>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {BASE_BUILDER_FIELDS
                         .filter(field => field.category === category)
