@@ -96,6 +96,26 @@ const USEFUL_NO_DUPLICATES_FIELDS: BaseBuilderFieldKey[] = [
   'blacklist_reasons',
 ]
 
+const INFOBUSINESS_STRUCTURE_FIELDS: BaseBuilderFieldKey[] = [
+  'razon_social_empresa',
+  'ventas_trabajadores_2024',
+  'tamano_empresas',
+  'facturacion_sub_rango',
+  'ventas_ultimo_tramo',
+  'ventas_actividad_economica',
+  'rubro',
+  'ventas_rubro_economico',
+  'wom_direccion',
+  'domicilio_comuna',
+  'comuna_canonica',
+  'domicilio_region',
+  'region_canonica',
+  'fono_cel',
+  'ejecutivo_nombre',
+  'ejecutivo_email',
+  'ejecutivo_telefono',
+]
+
 const MAX_AUTO_WEB_PASSES = 50
 const CRM_EXPORT_COLUMNS = [
   'CRM - Tiene historial',
@@ -858,6 +878,22 @@ function getCoverageTone(pct: number): string {
   return 'text-slate-300'
 }
 
+function rowHasValue(row: BaseBuilderExportRow, labelMap: Map<BaseBuilderFieldKey, string>, field: BaseBuilderFieldKey): boolean {
+  const labeled = labelMap.get(field) ?? field
+  const value = row[labeled] ?? row[field]
+  return isPresentForExport(value)
+}
+
+function countRowsWithAnyField(
+  rows: BaseBuilderExportRow[],
+  labelMap: Map<BaseBuilderFieldKey, string>,
+  fields: BaseBuilderFieldKey[]
+): number {
+  return rows.reduce((count, row) => (
+    count + (fields.some(field => rowHasValue(row, labelMap, field)) ? 1 : 0)
+  ), 0)
+}
+
 export function PoblarBasePage() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx')
   const [exportTemplate, setExportTemplate] = useState<ExportTemplate>('normal')
@@ -913,6 +949,64 @@ export function PoblarBasePage() {
       : parsedUpload.detectedCompanyColumn
   const webEnrichmentAvailable = selectedMatchMode !== 'nombre_persona'
   const infobusinessAvailable = exportFormat === 'xlsx' && selectedMatchMode === 'rut'
+  const analysisSelectedFields = useMemo(() => {
+    if (exportTemplate !== 'infobusiness') return selectedFields
+    return orderFieldKeys([...selectedFields, ...INFOBUSINESS_STRUCTURE_FIELDS])
+  }, [exportTemplate, selectedFields])
+  const infobusinessStructure = useMemo(() => {
+    if (!analysis || exportTemplate !== 'infobusiness') return null
+
+    const matchedRows = analysis.rows.filter(row => row.match_status === 'matched')
+    const companyRows = matchedRows.filter(row => rowHasValue(row, fieldLabelMap, 'razon_social_empresa'))
+    const total = companyRows.length
+    const coverage = [
+      {
+        label: 'EMPRESA - filas con empresa',
+        count: total,
+        total: matchedRows.length,
+      },
+      {
+        label: 'EMPRESA - tamaño',
+        count: countRowsWithAnyField(companyRows, fieldLabelMap, ['ventas_trabajadores_2024', 'tamano_empresas']),
+        total,
+      },
+      {
+        label: 'EMPRESA - facturación',
+        count: countRowsWithAnyField(companyRows, fieldLabelMap, ['facturacion_sub_rango', 'ventas_ultimo_tramo']),
+        total,
+      },
+      {
+        label: 'EMPRESA - actividad económica',
+        count: countRowsWithAnyField(companyRows, fieldLabelMap, ['ventas_actividad_economica', 'rubro', 'ventas_rubro_economico']),
+        total,
+      },
+      {
+        label: 'EMPRESA - dirección/comuna/región',
+        count: countRowsWithAnyField(companyRows, fieldLabelMap, ['wom_direccion', 'domicilio_comuna', 'comuna_canonica', 'domicilio_region', 'region_canonica']),
+        total,
+      },
+      {
+        label: 'EMPRESA - teléfono comercial',
+        count: countRowsWithAnyField(companyRows, fieldLabelMap, ['fono_cel', 'ejecutivo_telefono']),
+        total,
+      },
+      {
+        label: 'EJECUTIVO - empresas con ejecutivo',
+        count: countRowsWithAnyField(companyRows, fieldLabelMap, ['ejecutivo_nombre', 'ejecutivo_email', 'ejecutivo_telefono']),
+        total,
+      },
+    ].map(item => ({
+      ...item,
+      pct: item.total > 0 ? (item.count / item.total) * 100 : 0,
+    }))
+
+    return {
+      matchedRows: matchedRows.length,
+      companyRows: total,
+      excludedRows: matchedRows.length - total,
+      coverage,
+    }
+  }, [analysis, exportTemplate, fieldLabelMap])
 
   function getMatchModeLabel(mode: BaseBuilderMatchMode) {
     if (mode === 'rut') return 'RUT'
@@ -1096,7 +1190,7 @@ export function PoblarBasePage() {
             match_column: selectedMatchColumn,
             company_column: companyColumnForPayload,
             enrich_missing_contacts_with_web: false,
-            selected_fields: selectedFields,
+            selected_fields: analysisSelectedFields,
           }),
         })
 
@@ -1682,7 +1776,10 @@ export function PoblarBasePage() {
                         onClick={() => {
                           const nextFormat = option.value as ExportFormat
                           setExportFormat(nextFormat)
-                          if (nextFormat !== 'xlsx') setExportTemplate('normal')
+                          if (nextFormat !== 'xlsx') {
+                            setExportTemplate('normal')
+                            resetAnalysisState()
+                          }
                         }}
                         className={cn(
                           'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
@@ -1730,7 +1827,11 @@ export function PoblarBasePage() {
                         disabled={disabled}
                         onClick={() => {
                           if (disabled) return
-                          setExportTemplate(option.value as ExportTemplate)
+                          const nextTemplate = option.value as ExportTemplate
+                          if (nextTemplate !== exportTemplate) {
+                            setExportTemplate(nextTemplate)
+                            resetAnalysisState()
+                          }
                         }}
                         className={cn(
                           'w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left',
@@ -1881,7 +1982,47 @@ export function PoblarBasePage() {
                     </div>
                   </div>
 
-                  {analysis.coverage.length > 0 && (
+                  {infobusinessStructure ? (
+                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
+                      <p className="text-xs font-medium text-slate-300 mb-2">
+                        Estructura Plantilla Infobusiness
+                      </p>
+                      <div className="mb-3 space-y-1.5 border-b border-[#253357] pb-3 text-xs">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-400">EMPRESA exportables</span>
+                          <span className="text-slate-200">
+                            {formatNumber(infobusinessStructure.companyRows)} de {formatNumber(infobusinessStructure.matchedRows)}
+                          </span>
+                        </div>
+                        {infobusinessStructure.excludedRows > 0 && (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-400">RUTs sin empresa omitidos</span>
+                            <span className="font-medium text-amber-300">
+                              {formatNumber(infobusinessStructure.excludedRows)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        {infobusinessStructure.coverage.map(item => (
+                          <div
+                            key={item.label}
+                            className="flex items-center justify-between gap-3 text-xs"
+                          >
+                            <span className="text-slate-400">{item.label}</span>
+                            <div className="text-right">
+                              <span className={cn('font-medium', getCoverageTone(item.pct))}>
+                                {formatNumber(item.count)}
+                              </span>
+                              <span className="text-slate-500">
+                                {' '}de {formatNumber(item.total)} ({formatPercentage(item.pct)})
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : analysis.coverage.length > 0 && (
                     <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
                       <p className="text-xs font-medium text-slate-300 mb-2">
                         Qué pudimos poblar de lo pedido
@@ -2020,10 +2161,12 @@ export function PoblarBasePage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-200">
-                    Cobertura del poblamiento
+                    {infobusinessStructure ? 'Estructura Plantilla Infobusiness' : 'Cobertura del poblamiento'}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Qué tanto pudimos completar de los campos elegidos sobre tu base.
+                    {infobusinessStructure
+                      ? 'Qué columnas de EMPRESA y EJECUTIVO vienen con información para esta salida.'
+                      : 'Qué tanto pudimos completar de los campos elegidos sobre tu base.'}
                   </p>
                 </div>
                 <p className="text-xs text-slate-400">
@@ -2031,7 +2174,63 @@ export function PoblarBasePage() {
                 </p>
               </div>
 
-              {analysis.coverage.length === 0 ? (
+              {infobusinessStructure ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                      <p className="text-xs text-slate-500">RUTs cruzados</p>
+                      <p className="text-lg font-semibold text-white mt-1">
+                        {formatNumber(infobusinessStructure.matchedRows)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                      <p className="text-xs text-slate-500">EMPRESA exportables</p>
+                      <p className="text-lg font-semibold text-emerald-300 mt-1">
+                        {formatNumber(infobusinessStructure.companyRows)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                      <p className="text-xs text-slate-500">Omitidos sin empresa</p>
+                      <p className={cn(
+                        'text-lg font-semibold mt-1',
+                        infobusinessStructure.excludedRows > 0 ? 'text-amber-300' : 'text-slate-200'
+                      )}>
+                        {formatNumber(infobusinessStructure.excludedRows)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {infobusinessStructure.coverage.map(item => (
+                      <div key={item.label} className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-white">{item.label}</p>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {formatNumber(item.count)} filas con dato
+                            </p>
+                          </div>
+                          <span className={cn('text-sm font-semibold', getCoverageTone(item.pct))}>
+                            {formatPercentage(item.pct)}
+                          </span>
+                        </div>
+                        <div className="mt-3 h-2 rounded-full bg-[#111827] overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-cyan-500 to-brand-500"
+                            style={{ width: `${Math.min(item.pct, 100)}%` }}
+                          />
+                        </div>
+                        <div className="mt-3 text-[11px] text-slate-500">
+                          <div className="flex items-center justify-between">
+                            <span>Sobre plantilla</span>
+                            <span>{formatNumber(item.count)} / {formatNumber(item.total)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : analysis.coverage.length === 0 ? (
                 <EmptyState
                   title="Sin campos extra seleccionados"
                   description="Puedes exportar solo con el estado del match o elegir campos del maestro para poblar."
