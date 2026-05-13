@@ -125,6 +125,12 @@ function firstPresent(...values: Array<CellValue | undefined>): CellValue {
   return null
 }
 
+function hasText(value: CellValue | undefined): boolean {
+  return typeof value === 'string'
+    ? value.trim().length > 0
+    : value !== null && value !== undefined
+}
+
 function normalizeJoinRut(value: string | null | undefined): string {
   return cleanRut(String(value ?? '')).replace(/^0+/, '')
 }
@@ -359,6 +365,7 @@ export async function buildInfobusinessExport(rutids: string[]): Promise<ArrayBu
     fetchExecutives(lookup),
   ])
 
+  const includedRutids = new Set<string>()
   const empresaRows = cleanRutids.flatMap(rutid => {
     const master = masterByRut.get(rutid)
     if (!master) return []
@@ -367,10 +374,15 @@ export async function buildInfobusinessExport(rutids: string[]): Promise<ArrayBu
     const address = addressByRut.get(rutid)
     const wom = womByRut.get(rutid)
     const firstExecutive = executivesByRut.get(rutid)?.[0]
+    const companyName = firstPresent(master.razon_social_empresa, geimser?.razon_social)
+
+    if (!hasText(companyName)) return []
+
+    includedRutids.add(rutid)
 
     return [[
       formatRutInfobusiness(rutid),
-      firstPresent(master.razon_social_empresa, geimser?.razon_social),
+      companyName,
       firstPresent(sales?.trabajadores_2024, geimser?.tamano_empresas, master.tamano_empresas),
       firstPresent(geimser?.facturacion_sub_rango, master.facturacion_sub_rango, sales?.ultimo_tramo_ventas),
       firstPresent(sales?.actividad_economica_ultima, geimser?.rubro, master.rubro, sales?.rubro_economico_ultimo),
@@ -388,8 +400,7 @@ export async function buildInfobusinessExport(rutids: string[]): Promise<ArrayBu
   })
 
   const ejecutivoRows = cleanRutids.flatMap(rutid => {
-    const master = masterByRut.get(rutid)
-    if (!master) return []
+    if (!includedRutids.has(rutid)) return []
     return (executivesByRut.get(rutid) ?? []).map(executive => {
       const name = splitExecutiveName(executive.nombre_ejecutivo)
       return [
