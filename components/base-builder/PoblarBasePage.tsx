@@ -36,6 +36,13 @@ const PERSON_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
 
 const COMPANY_DEFAULT_FIELDS: BaseBuilderFieldKey[] = [
   'razon_social_empresa',
+  'rubro',
+  'facturacion_sub_rango',
+  'tamano_empresas',
+  'ventas_resultado_tendencia',
+  'ventas_ultimo_tramo',
+  'equifax_lead_temperature',
+  'equifax_lead_score',
   'email',
   'fono_cel',
   'comuna_canonica',
@@ -107,6 +114,8 @@ const CATEGORY_LABELS: Record<BaseBuilderFieldDefinition['category'], string> = 
   ubicacion: 'Ubicación',
   patrimonio: 'Patrimonio',
   actividad: 'Actividad',
+  scoring: 'Scoring',
+  riesgo: 'Riesgo',
 }
 
 type ParsedUpload = {
@@ -1411,7 +1420,7 @@ export function PoblarBasePage() {
               </div>
 
               <div className="space-y-4">
-                {(['identidad', 'contacto', 'ubicacion', 'patrimonio', 'actividad'] as const).map(category => (
+                {(['identidad', 'contacto', 'ubicacion', 'patrimonio', 'actividad', 'scoring', 'riesgo'] as const).map(category => (
                   <div key={category}>
                     <p className="text-[11px] uppercase tracking-[0.18em] text-slate-600 mb-2">
                       {CATEGORY_LABELS[category]}

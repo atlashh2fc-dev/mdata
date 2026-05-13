@@ -411,6 +411,27 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
               highlight
             />
           )}
+          {persona.rubro && (
+            <DataRow
+              label="Rubro"
+              value={persona.rubro}
+              highlight
+            />
+          )}
+          {persona.facturacion_sub_rango && (
+            <DataRow
+              label="Facturación"
+              value={persona.facturacion_sub_rango}
+              highlight
+            />
+          )}
+          {persona.tamano_empresas && (
+            <DataRow
+              label="Tamaño"
+              value={persona.tamano_empresas}
+              highlight
+            />
+          )}
 
           <div className="mt-4 pt-4 border-t border-[#334155]/50 space-y-3">
             <ScoreMeter

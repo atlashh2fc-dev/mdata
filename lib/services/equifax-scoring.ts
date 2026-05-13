@@ -778,14 +778,61 @@ async function collectUniverseRutidsForRefresh(options?: RefreshUniverseOptions)
   const orderBy = options?.orderBy ?? 'score_patrimonial'
   const rutids: string[] = []
 
+  if (orderBy === 'rutid') {
+    let lastRutid: string | null = null
+
+    for (; rutids.length < limit;) {
+      let query = db
+        .from('master_personas_view')
+        .select('rutid')
+        .not('razon_social_empresa', 'is', null)
+        .order('rutid', { ascending: true, nullsFirst: true })
+        .limit(FETCH_CHUNK_SIZE)
+
+      if (lastRutid) {
+        query = query.gt('rutid', lastRutid)
+      }
+
+      if (regions.length > 0) {
+        query = query.in('region_canonica', regions)
+      }
+
+      if (requireContact === 'phone') {
+        query = query.not('fono_cel', 'is', null)
+      } else if (requireContact === 'email') {
+        query = query.not('email', 'is', null)
+      } else if (requireContact === 'any') {
+        query = query.or('email.not.is.null,fono_cel.not.is.null')
+      }
+
+      const { data, error } = await query
+      if (error) {
+        console.error('[collectUniverseRutidsForRefresh]', error)
+        throw new Error('No se pudo leer el universo de empresas para scoring masivo.')
+      }
+
+      const chunkRows = (data ?? []) as Array<{ rutid: string | null }>
+      const chunkRutids = uniqueStrings(chunkRows.map(row => row.rutid))
+      rutids.push(...chunkRutids)
+
+      if (chunkRutids.length > 0) {
+        lastRutid = chunkRutids[chunkRutids.length - 1] ?? lastRutid
+      }
+
+      if (chunkRows.length < FETCH_CHUNK_SIZE) break
+    }
+
+    return uniqueStrings(rutids).slice(0, limit)
+  }
+
   for (let from = 0; rutids.length < limit; from += FETCH_CHUNK_SIZE) {
     let query = db
       .from('master_personas_view')
       .select('rutid')
       .not('razon_social_empresa', 'is', null)
       .order(orderBy, {
-        ascending: orderBy === 'rutid',
-        nullsFirst: orderBy === 'rutid',
+        ascending: false,
+        nullsFirst: false,
       })
       .range(from, from + FETCH_CHUNK_SIZE - 1)
 

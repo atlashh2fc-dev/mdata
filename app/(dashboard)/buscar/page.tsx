@@ -216,7 +216,7 @@ export default function BuscarPage() {
           showFiltersToggle
           onToggleFilters={() => setShowFilters(!showFilters)}
           isLoading={loading}
-          placeholder="Buscar por RUT, nombre completo, email o empresa..."
+          placeholder="Buscar por RUT, nombre, email, empresa o rubro..."
         />
 
         {/* Advanced Filters Panel */}
@@ -442,7 +442,7 @@ export default function BuscarPage() {
             <div className="text-center">
               <p className="text-sm font-medium text-slate-300">Comienza una búsqueda</p>
               <p className="text-xs text-slate-500 mt-1">
-                Ingresa un RUT, nombre completo, email o empresa. También puedes usar filtros avanzados.
+                Ingresa un RUT, nombre, email, empresa o rubro. También puedes usar filtros avanzados.
               </p>
             </div>
           </div>

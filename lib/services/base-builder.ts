@@ -22,7 +22,138 @@ const VALID_FIELDS = new Set<BaseBuilderFieldKey>(
   BASE_BUILDER_FIELDS.map(field => field.key)
 )
 
-type PersonaSubset = Pick<PersonaView, 'rutid'> & Partial<PersonaView>
+type BaseBuilderValue = string | number | boolean | null
+type PersonaSubset = { rutid: string } & Partial<Record<BaseBuilderFieldKey, BaseBuilderValue>>
+
+const MASTER_VIEW_FIELDS = new Set<BaseBuilderFieldKey>([
+  'nombre_completo',
+  'nombres',
+  'paterno',
+  'materno',
+  'email',
+  'fono_cel',
+  'region_canonica',
+  'comuna_canonica',
+  'domicilio_region',
+  'domicilio_comuna',
+  'razon_social_empresa',
+  'rubro',
+  'facturacion_sub_rango',
+  'tamano_empresas',
+  'fecha_direccion_comer',
+  'con_cargo_ejecutivo',
+  'con_email_ejecutivo',
+  'con_fono_celular_ejecutivo',
+  'con_fono_comercial_ejecutivo',
+  'n_autos',
+  'n_bienes_raices',
+  'totalavaluos',
+  'uso_propiedad_inferido',
+  'bbrr_destinos',
+  'n_propiedades_detalle',
+  'n_propiedades_residenciales',
+  'n_propiedades_comerciales',
+  'n_propiedades_rurales',
+  'n_propiedades_indeterminadas',
+  'avaluo_residencial',
+  'avaluo_comercial',
+  'avaluo_rural',
+  'avaluo_indeterminado',
+  'score_patrimonial',
+  'cobertura_pct',
+  'tiene_autos',
+  'tiene_empresa',
+  'tiene_bienes_raices',
+])
+
+const CONTACT_META_FIELDS = new Set<BaseBuilderFieldKey>([
+  'email_fuente',
+  'fono_cel_fuente',
+  'email_verificado',
+  'fono_cel_verificado',
+  'email_quality_score',
+  'fono_cel_quality_score',
+])
+
+const EXECUTIVE_FIELDS = new Set<BaseBuilderFieldKey>([
+  'ejecutivo_nombre',
+  'ejecutivo_cargo',
+  'ejecutivo_area',
+  'ejecutivo_email',
+  'ejecutivo_telefono',
+  'ejecutivo_rutid',
+  'ejecutivo_contact_priority',
+])
+
+const EQUIFAX_FIELDS = new Set<BaseBuilderFieldKey>([
+  'equifax_lead_score',
+  'equifax_lead_temperature',
+  'equifax_contact_probability',
+  'equifax_interest_probability',
+  'equifax_purchase_probability',
+  'equifax_fit_score',
+  'equifax_recommended_channel',
+  'equifax_recommended_hour',
+  'equifax_scored_at',
+  'equifax_reason_tags',
+])
+
+const SALES_TREND_FIELDS = new Set<BaseBuilderFieldKey>([
+  'ventas_anio_ultimo',
+  'ventas_resultado_tendencia',
+  'ventas_ultimo_tramo',
+  'ventas_tramo_promedio',
+  'ventas_cambio_promedio_anual',
+  'ventas_pendiente_tendencia',
+  'ventas_movimientos_alza',
+  'ventas_movimientos_baja',
+  'ventas_trabajadores_2024',
+  'ventas_rubro_economico',
+  'ventas_subrubro_economico',
+  'ventas_actividad_economica',
+  'ventas_region',
+  'ventas_comuna',
+])
+
+const WOM_FIELDS = new Set<BaseBuilderFieldKey>([
+  'wom_nombre',
+  'wom_direccion',
+  'wom_comuna',
+  'wom_lineas',
+  'wom_valor',
+  'wom_ciclo',
+])
+
+const BLACKLIST_FIELDS = new Set<BaseBuilderFieldKey>([
+  'blacklist_phone_count',
+  'blacklist_email_count',
+  'blacklist_last_seen_at',
+  'blacklist_reasons',
+])
+
+type ContactPointSubset = {
+  rutid: string
+  contact_type: 'email' | 'phone'
+  contact_value: string | null
+  source_name: string | null
+  quality_score: number | null
+  is_primary: boolean | null
+  is_verified: boolean | null
+  last_seen_at: string | null
+}
+
+type ContactPointFields = Partial<Record<BaseBuilderFieldKey, BaseBuilderValue>>
+
+function hasAnySelected(selectedFields: BaseBuilderFieldKey[], fieldSet: Set<BaseBuilderFieldKey>): boolean {
+  return selectedFields.some(field => fieldSet.has(field))
+}
+
+function toBaseBuilderValue(value: unknown): BaseBuilderValue {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean).join(', ')
+  return JSON.stringify(value)
+}
 
 function normalizeColumnKey(value: string): string {
   return value
@@ -34,6 +165,35 @@ function normalizeColumnKey(value: string): string {
 
 function toPaddedRut(rut: string): string {
   return cleanRut(rut).padStart(10, '0')
+}
+
+function normalizeRutJoinKey(rut: string): string {
+  return cleanRut(rut).replace(/^0+/, '')
+}
+
+function buildRutLookup(rutIds: string[]): {
+  lookupRutIds: string[]
+  canonicalByLookup: Map<string, string>
+} {
+  const canonicalByLookup = new Map<string, string>()
+
+  for (const rutid of rutIds) {
+    const cleaned = cleanRut(rutid)
+    const unpadded = normalizeRutJoinKey(rutid)
+    if (cleaned) canonicalByLookup.set(cleaned, rutid)
+    if (unpadded) canonicalByLookup.set(unpadded, rutid)
+  }
+
+  return {
+    lookupRutIds: [...canonicalByLookup.keys()],
+    canonicalByLookup,
+  }
+}
+
+function canonicalRutFromLookup(rowRutid: unknown, canonicalByLookup: Map<string, string>): string | null {
+  const cleaned = cleanRut(String(rowRutid ?? ''))
+  if (!cleaned) return null
+  return canonicalByLookup.get(cleaned) ?? canonicalByLookup.get(cleaned.replace(/^0+/, '')) ?? null
 }
 
 function normalizePersonName(value: string): string {
@@ -80,7 +240,325 @@ function buildFieldLabelMap() {
 
 function getFieldValue(row: PersonaSubset | undefined, field: BaseBuilderFieldKey) {
   const value = row?.[field]
-  return value === undefined ? null : (value as string | number | boolean | null)
+  return value === undefined ? null : toBaseBuilderValue(value)
+}
+
+function contactRank(row: ContactPointSubset): number {
+  const lastSeenTime = row.last_seen_at ? Date.parse(row.last_seen_at) : 0
+
+  return (
+    (row.is_primary ? 1_000_000 : 0) +
+    (row.is_verified ? 100_000 : 0) +
+    Number(row.quality_score ?? 0) * 1_000 +
+    (Number.isFinite(lastSeenTime) ? Math.floor(lastSeenTime / 1_000_000_000) : 0)
+  )
+}
+
+async function fetchBestContactPointsByRutIds(
+  rutIds: string[],
+  selectedFields: BaseBuilderFieldKey[]
+): Promise<Map<string, ContactPointFields>> {
+  const contactsByRut = new Map<string, ContactPointFields>()
+
+  if (
+    !hasSupabaseAdminEnv ||
+    rutIds.length === 0 ||
+    (
+      !selectedFields.includes('email') &&
+      !selectedFields.includes('fono_cel') &&
+      !hasAnySelected(selectedFields, CONTACT_META_FIELDS)
+    )
+  ) {
+    return contactsByRut
+  }
+
+  const contactTypes: Array<'email' | 'phone'> = []
+  if (
+    selectedFields.includes('email') ||
+    selectedFields.includes('email_fuente') ||
+    selectedFields.includes('email_verificado') ||
+    selectedFields.includes('email_quality_score')
+  ) contactTypes.push('email')
+  if (
+    selectedFields.includes('fono_cel') ||
+    selectedFields.includes('fono_cel_fuente') ||
+    selectedFields.includes('fono_cel_verificado') ||
+    selectedFields.includes('fono_cel_quality_score')
+  ) contactTypes.push('phone')
+
+  const bestByRutAndType = new Map<string, ContactPointSubset>()
+  const { lookupRutIds, canonicalByLookup } = buildRutLookup(rutIds)
+
+  for (let i = 0; i < lookupRutIds.length; i += BATCH_SIZE) {
+    const batch = lookupRutIds.slice(i, i + BATCH_SIZE)
+    const { data, error } = await db
+      .from('persona_contact_points')
+      .select('rutid,contact_type,contact_value,source_name,quality_score,is_primary,is_verified,last_seen_at')
+      .in('rutid', batch)
+      .in('contact_type', contactTypes)
+
+    if (error) {
+      console.error('[fetchBestContactPointsByRutIds]', error)
+      throw new Error('No se pudo consultar los contactos enriquecidos.')
+    }
+
+    for (const row of (data ?? []) as ContactPointSubset[]) {
+      const canonicalRutid = canonicalRutFromLookup(row.rutid, canonicalByLookup)
+      if (!canonicalRutid || !row.contact_value || !row.contact_type) continue
+
+      const normalizedRow = { ...row, rutid: canonicalRutid }
+      const key = `${canonicalRutid}:${row.contact_type}`
+      const current = bestByRutAndType.get(key)
+      if (!current || contactRank(normalizedRow) > contactRank(current)) {
+        bestByRutAndType.set(key, normalizedRow)
+      }
+    }
+  }
+
+  for (const row of bestByRutAndType.values()) {
+    const existing = contactsByRut.get(row.rutid) ?? {}
+    if (row.contact_type === 'email') {
+      existing.email = row.contact_value ?? null
+      existing.email_fuente = row.source_name ?? null
+      existing.email_verificado = row.is_verified ?? null
+      existing.email_quality_score = row.quality_score ?? null
+    }
+    if (row.contact_type === 'phone') {
+      existing.fono_cel = row.contact_value ?? null
+      existing.fono_cel_fuente = row.source_name ?? null
+      existing.fono_cel_verificado = row.is_verified ?? null
+      existing.fono_cel_quality_score = row.quality_score ?? null
+    }
+    contactsByRut.set(row.rutid, existing)
+  }
+
+  return contactsByRut
+}
+
+async function fetchExecutiveFieldsByRutIds(
+  rutIds: string[],
+  selectedFields: BaseBuilderFieldKey[]
+): Promise<Map<string, ContactPointFields>> {
+  const rowsByRut = new Map<string, ContactPointFields>()
+  if (!hasSupabaseAdminEnv || rutIds.length === 0 || !hasAnySelected(selectedFields, EXECUTIVE_FIELDS)) return rowsByRut
+
+  const { lookupRutIds, canonicalByLookup } = buildRutLookup(rutIds)
+  for (let i = 0; i < lookupRutIds.length; i += BATCH_SIZE) {
+    const batch = lookupRutIds.slice(i, i + BATCH_SIZE)
+    const { data, error } = await db
+      .from('company_best_executive_contact')
+      .select('rutid,rutid_ejecutivo,nombre_ejecutivo,area,cargo,email,mejor_telefono,contact_priority')
+      .in('rutid', batch)
+
+    if (error) {
+      console.error('[fetchExecutiveFieldsByRutIds]', error)
+      throw new Error('No se pudo consultar contactos ejecutivos.')
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const rutid = canonicalRutFromLookup(row.rutid, canonicalByLookup)
+      if (!rutid) continue
+      rowsByRut.set(rutid, {
+        ejecutivo_nombre: toBaseBuilderValue(row.nombre_ejecutivo),
+        ejecutivo_cargo: toBaseBuilderValue(row.cargo),
+        ejecutivo_area: toBaseBuilderValue(row.area),
+        ejecutivo_email: toBaseBuilderValue(row.email),
+        ejecutivo_telefono: toBaseBuilderValue(row.mejor_telefono),
+        ejecutivo_rutid: toBaseBuilderValue(row.rutid_ejecutivo),
+        ejecutivo_contact_priority: toBaseBuilderValue(row.contact_priority),
+      })
+    }
+  }
+
+  return rowsByRut
+}
+
+async function fetchEquifaxFieldsByRutIds(
+  rutIds: string[],
+  selectedFields: BaseBuilderFieldKey[]
+): Promise<Map<string, ContactPointFields>> {
+  const rowsByRut = new Map<string, ContactPointFields>()
+  if (!hasSupabaseAdminEnv || rutIds.length === 0 || !hasAnySelected(selectedFields, EQUIFAX_FIELDS)) return rowsByRut
+
+  const { lookupRutIds, canonicalByLookup } = buildRutLookup(rutIds)
+  for (let i = 0; i < lookupRutIds.length; i += BATCH_SIZE) {
+    const batch = lookupRutIds.slice(i, i + BATCH_SIZE)
+    const { data, error } = await db
+      .from('equifax_lead_scores')
+      .select('rutid,contact_probability,interest_probability,purchase_probability,fit_score,lead_score,lead_temperature,recommended_channel,recommended_hour,reason_tags,scored_at')
+      .in('rutid', batch)
+
+    if (error) {
+      console.error('[fetchEquifaxFieldsByRutIds]', error)
+      throw new Error('No se pudo consultar scores Equifax.')
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const rutid = canonicalRutFromLookup(row.rutid, canonicalByLookup)
+      if (!rutid) continue
+      rowsByRut.set(rutid, {
+        equifax_lead_score: toBaseBuilderValue(row.lead_score),
+        equifax_lead_temperature: toBaseBuilderValue(row.lead_temperature),
+        equifax_contact_probability: toBaseBuilderValue(row.contact_probability),
+        equifax_interest_probability: toBaseBuilderValue(row.interest_probability),
+        equifax_purchase_probability: toBaseBuilderValue(row.purchase_probability),
+        equifax_fit_score: toBaseBuilderValue(row.fit_score),
+        equifax_recommended_channel: toBaseBuilderValue(row.recommended_channel),
+        equifax_recommended_hour: toBaseBuilderValue(row.recommended_hour),
+        equifax_scored_at: toBaseBuilderValue(row.scored_at),
+        equifax_reason_tags: toBaseBuilderValue(row.reason_tags),
+      })
+    }
+  }
+
+  return rowsByRut
+}
+
+async function fetchSalesTrendFieldsByRutIds(
+  rutIds: string[],
+  selectedFields: BaseBuilderFieldKey[]
+): Promise<Map<string, ContactPointFields>> {
+  const rowsByRut = new Map<string, ContactPointFields>()
+  if (!hasSupabaseAdminEnv || rutIds.length === 0 || !hasAnySelected(selectedFields, SALES_TREND_FIELDS)) return rowsByRut
+
+  const { lookupRutIds, canonicalByLookup } = buildRutLookup(rutIds)
+  for (let i = 0; i < lookupRutIds.length; i += BATCH_SIZE) {
+    const batch = lookupRutIds.slice(i, i + BATCH_SIZE)
+    const { data, error } = await db
+      .from('empresas_ventas_tendencia')
+      .select('rutid,anio_ultimo,rubro_economico_ultimo,subrubro_economico_ultimo,actividad_economica_ultima,region_ultima,comuna_ultima,trabajadores_2024,ultimo_tramo_ventas,tramo_ventas_promedio_2020_2024,cambio_promedio_anual_tramo,pendiente_tendencia_tramo,movimientos_alza,movimientos_baja,resultado_tendencia')
+      .in('rutid', batch)
+
+    if (error) {
+      console.error('[fetchSalesTrendFieldsByRutIds]', error)
+      throw new Error('No se pudo consultar tendencia de ventas.')
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const rutid = canonicalRutFromLookup(row.rutid, canonicalByLookup)
+      if (!rutid) continue
+      rowsByRut.set(rutid, {
+        ventas_anio_ultimo: toBaseBuilderValue(row.anio_ultimo),
+        ventas_resultado_tendencia: toBaseBuilderValue(row.resultado_tendencia),
+        ventas_ultimo_tramo: toBaseBuilderValue(row.ultimo_tramo_ventas),
+        ventas_tramo_promedio: toBaseBuilderValue(row.tramo_ventas_promedio_2020_2024),
+        ventas_cambio_promedio_anual: toBaseBuilderValue(row.cambio_promedio_anual_tramo),
+        ventas_pendiente_tendencia: toBaseBuilderValue(row.pendiente_tendencia_tramo),
+        ventas_movimientos_alza: toBaseBuilderValue(row.movimientos_alza),
+        ventas_movimientos_baja: toBaseBuilderValue(row.movimientos_baja),
+        ventas_trabajadores_2024: toBaseBuilderValue(row.trabajadores_2024),
+        ventas_rubro_economico: toBaseBuilderValue(row.rubro_economico_ultimo),
+        ventas_subrubro_economico: toBaseBuilderValue(row.subrubro_economico_ultimo),
+        ventas_actividad_economica: toBaseBuilderValue(row.actividad_economica_ultima),
+        ventas_region: toBaseBuilderValue(row.region_ultima),
+        ventas_comuna: toBaseBuilderValue(row.comuna_ultima),
+      })
+    }
+  }
+
+  return rowsByRut
+}
+
+async function fetchWomFieldsByRutIds(
+  rutIds: string[],
+  selectedFields: BaseBuilderFieldKey[]
+): Promise<Map<string, ContactPointFields>> {
+  const rowsByRut = new Map<string, ContactPointFields>()
+  if (!hasSupabaseAdminEnv || rutIds.length === 0 || !hasAnySelected(selectedFields, WOM_FIELDS)) return rowsByRut
+
+  const { lookupRutIds, canonicalByLookup } = buildRutLookup(rutIds)
+  for (let i = 0; i < lookupRutIds.length; i += BATCH_SIZE) {
+    const batch = lookupRutIds.slice(i, i + BATCH_SIZE)
+    const { data, error } = await db
+      .from('wom_customer_signals')
+      .select('rutid,nombre,direccion,comuna,lineas,valor,ciclo_date,updated_at,loaded_at')
+      .in('rutid', batch)
+
+    if (error) {
+      console.error('[fetchWomFieldsByRutIds]', error)
+      throw new Error('No se pudo consultar señales WOM.')
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const rutid = canonicalRutFromLookup(row.rutid, canonicalByLookup)
+      if (!rutid || rowsByRut.has(rutid)) continue
+      rowsByRut.set(rutid, {
+        wom_nombre: toBaseBuilderValue(row.nombre),
+        wom_direccion: toBaseBuilderValue(row.direccion),
+        wom_comuna: toBaseBuilderValue(row.comuna),
+        wom_lineas: toBaseBuilderValue(row.lineas),
+        wom_valor: toBaseBuilderValue(row.valor),
+        wom_ciclo: toBaseBuilderValue(row.ciclo_date),
+      })
+    }
+  }
+
+  return rowsByRut
+}
+
+async function fetchBlacklistFieldsByRutIds(
+  rutIds: string[],
+  selectedFields: BaseBuilderFieldKey[]
+): Promise<Map<string, ContactPointFields>> {
+  const rowsByRut = new Map<string, ContactPointFields>()
+  if (!hasSupabaseAdminEnv || rutIds.length === 0 || !hasAnySelected(selectedFields, BLACKLIST_FIELDS)) return rowsByRut
+
+  const { lookupRutIds, canonicalByLookup } = buildRutLookup(rutIds)
+  for (let i = 0; i < lookupRutIds.length; i += BATCH_SIZE) {
+    const batch = lookupRutIds.slice(i, i + BATCH_SIZE)
+    const { data, error } = await db
+      .from('contact_blacklist')
+      .select('rutid,contact_type,blacklist_reason,event_count,last_seen_at')
+      .in('rutid', batch)
+
+    if (error) {
+      console.error('[fetchBlacklistFieldsByRutIds]', error)
+      throw new Error('No se pudo consultar blacklist de contactos.')
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const rutid = canonicalRutFromLookup(row.rutid, canonicalByLookup)
+      if (!rutid) continue
+
+      const existing = rowsByRut.get(rutid) ?? {
+        blacklist_phone_count: 0,
+        blacklist_email_count: 0,
+        blacklist_last_seen_at: null,
+        blacklist_reasons: null,
+      }
+      const count = Number(row.event_count ?? 0)
+      const contactType = String(row.contact_type ?? '')
+      const reason = String(row.blacklist_reason ?? '').trim()
+      const currentReasons = String(existing.blacklist_reasons ?? '').split(', ').filter(Boolean)
+      if (contactType === 'phone') existing.blacklist_phone_count = Number(existing.blacklist_phone_count ?? 0) + count
+      if (contactType === 'email') existing.blacklist_email_count = Number(existing.blacklist_email_count ?? 0) + count
+      if (reason && !currentReasons.includes(reason)) {
+        existing.blacklist_reasons = [...currentReasons, reason].join(', ')
+      }
+      if (
+        row.last_seen_at &&
+        (!existing.blacklist_last_seen_at || String(row.last_seen_at) > String(existing.blacklist_last_seen_at))
+      ) {
+        existing.blacklist_last_seen_at = toBaseBuilderValue(row.last_seen_at)
+      }
+      rowsByRut.set(rutid, existing)
+    }
+  }
+
+  return rowsByRut
+}
+
+function mergeFieldsIntoRows(
+  rowsByRut: Map<string, PersonaSubset>,
+  fieldsByRut: Map<string, ContactPointFields>
+) {
+  for (const [rutid, fields] of fieldsByRut.entries()) {
+    const row = rowsByRut.get(rutid)
+    if (!row) continue
+    for (const [field, value] of Object.entries(fields) as Array<[BaseBuilderFieldKey, BaseBuilderValue]>) {
+      row[field] = value
+    }
+  }
 }
 
 function buildWebEnrichmentColumns(
@@ -105,7 +583,8 @@ async function fetchMasterRowsByRutIds(
   const internalFields = new Set<BaseBuilderFieldKey>(selectedFields)
   internalFields.add('razon_social_empresa')
 
-  const selectColumns = ['rutid', ...internalFields].join(',')
+  const masterFields = [...internalFields].filter(field => MASTER_VIEW_FIELDS.has(field))
+  const selectColumns = ['rutid', ...masterFields].join(',')
 
   for (let i = 0; i < rutIds.length; i += BATCH_SIZE) {
     const batch = rutIds.slice(i, i + BATCH_SIZE)
@@ -119,10 +598,54 @@ async function fetchMasterRowsByRutIds(
       throw new Error('No se pudo consultar la base maestra.')
     }
 
-    for (const row of (data ?? []) as PersonaSubset[]) {
-      rowsByRut.set(row.rutid, row)
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      if (!row.rutid) continue
+      const typedRow: PersonaSubset = { rutid: String(row.rutid) }
+      for (const [field, value] of Object.entries(row) as Array<[BaseBuilderFieldKey | 'rutid', unknown]>) {
+        if (field === 'rutid') continue
+        typedRow[field] = toBaseBuilderValue(value)
+      }
+      rowsByRut.set(typedRow.rutid, typedRow)
     }
   }
+
+  const contactPointsByRut = await fetchBestContactPointsByRutIds(rutIds, selectedFields)
+  for (const [rutid, contactPointFields] of contactPointsByRut.entries()) {
+    const row = rowsByRut.get(rutid)
+    if (!row) continue
+
+    if (selectedFields.includes('email') && !isPresent(row.email) && isPresent(contactPointFields.email)) {
+      row.email = contactPointFields.email
+    }
+
+    if (selectedFields.includes('fono_cel') && !isPresent(row.fono_cel) && isPresent(contactPointFields.fono_cel)) {
+      row.fono_cel = contactPointFields.fono_cel
+    }
+
+    for (const field of CONTACT_META_FIELDS) {
+      if (selectedFields.includes(field)) row[field] = contactPointFields[field] ?? null
+    }
+  }
+
+  const [
+    executiveFieldsByRut,
+    equifaxFieldsByRut,
+    salesTrendFieldsByRut,
+    womFieldsByRut,
+    blacklistFieldsByRut,
+  ] = await Promise.all([
+    fetchExecutiveFieldsByRutIds(rutIds, selectedFields),
+    fetchEquifaxFieldsByRutIds(rutIds, selectedFields),
+    fetchSalesTrendFieldsByRutIds(rutIds, selectedFields),
+    fetchWomFieldsByRutIds(rutIds, selectedFields),
+    fetchBlacklistFieldsByRutIds(rutIds, selectedFields),
+  ])
+
+  mergeFieldsIntoRows(rowsByRut, executiveFieldsByRut)
+  mergeFieldsIntoRows(rowsByRut, equifaxFieldsByRut)
+  mergeFieldsIntoRows(rowsByRut, salesTrendFieldsByRut)
+  mergeFieldsIntoRows(rowsByRut, womFieldsByRut)
+  mergeFieldsIntoRows(rowsByRut, blacklistFieldsByRut)
 
   return rowsByRut
 }

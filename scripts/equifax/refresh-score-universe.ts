@@ -18,7 +18,7 @@ function parseRegions(value?: string | null) {
 }
 
 function normalizeOrder(value?: string | null): 'score_patrimonial' | 'cobertura_pct' | 'rutid' {
-  const normalized = String(value ?? 'patrimonial-first').trim().toLowerCase()
+  const normalized = String(value ?? 'rutid').trim().toLowerCase()
   if (normalized === 'coverage-first' || normalized === 'cobertura_pct') return 'cobertura_pct'
   if (normalized === 'rutid') return 'rutid'
   return 'score_patrimonial'

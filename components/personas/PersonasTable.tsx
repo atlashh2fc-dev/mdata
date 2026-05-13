@@ -87,9 +87,21 @@ const COLUMNS: Column[] = [
     label: 'Empresa',
     render: row =>
       row.tiene_empresa ? (
-        <div className="flex items-center gap-1 text-xs text-purple-400">
-          <Building2 className="w-3 h-3" />
-          <span className="truncate max-w-[120px]">{row.razon_social_empresa}</span>
+        <div className="flex items-start gap-1 text-xs text-purple-400">
+          <Building2 className="w-3 h-3 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <div className="truncate max-w-[150px]">{row.razon_social_empresa}</div>
+            {(row.rubro || row.tamano_empresas) && (
+              <div className="truncate max-w-[150px] text-[10px] text-slate-500">
+                {[row.tamano_empresas, row.rubro].filter(Boolean).join(' · ')}
+              </div>
+            )}
+            {row.facturacion_sub_rango && (
+              <div className="truncate max-w-[150px] text-[10px] text-slate-500">
+                {row.facturacion_sub_rango}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <span className="text-slate-600">—</span>

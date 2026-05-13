@@ -1178,7 +1178,7 @@ export async function searchPersonas(
         }
       } else {
         query = query.or(
-          `nombre_completo.ilike.%${normalizedTerm}%,nombres.ilike.%${normalizedTerm}%,paterno.ilike.%${normalizedTerm}%,materno.ilike.%${normalizedTerm}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%`
+          `nombre_completo.ilike.%${normalizedTerm}%,nombres.ilike.%${normalizedTerm}%,paterno.ilike.%${normalizedTerm}%,materno.ilike.%${normalizedTerm}%,email.ilike.%${term}%,razon_social_empresa.ilike.%${term}%,rubro.ilike.%${term}%,facturacion_sub_rango.ilike.%${term}%,tamano_empresas.ilike.%${term}%`
         )
       }
     }

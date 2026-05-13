@@ -71,6 +71,14 @@ export interface PersonaView {
   tiene_autos: boolean
   razon_social_empresa: string | null
   tiene_empresa: boolean
+  rubro: string | null
+  facturacion_sub_rango: string | null
+  tamano_empresas: string | null
+  fecha_direccion_comer: string | null
+  con_cargo_ejecutivo: boolean | null
+  con_email_ejecutivo: boolean | null
+  con_fono_celular_ejecutivo: boolean | null
+  con_fono_comercial_ejecutivo: boolean | null
   domicilio_comuna: string | null
   domicilio_region: string | null
   n_bienes_raices: number
