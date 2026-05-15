@@ -5,6 +5,10 @@
       "schedule": "0 11 * * 1-5"
     },
     {
+      "path": "/api/base-contact/refresh",
+      "schedule": "0 16 * * *"
+    },
+    {
       "path": "/api/scenarios/mirofish/sync",
       "schedule": "*/5 * * * *"
     }
