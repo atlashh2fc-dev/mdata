@@ -162,6 +162,14 @@ function downloadCsv(rows: EquifaxLeadGenerationResult['rows']) {
     'purchase_probability',
     'lead_score',
     'lead_temperature',
+    'industry_fit_score',
+    'credit_need_score',
+    'geographic_opportunity_score',
+    'growth_score',
+    'strategic_expansion_score',
+    'commercial_tier',
+    'commercial_vertical',
+    'commercial_explanation',
     'recommended_channel',
     'recommended_hour',
     'is_existing_customer',
@@ -1377,8 +1385,9 @@ export function EquifaxLeadBuilderPage() {
                                 </span>
                               </div>
                               <div className="mt-1 text-xs text-slate-400">
-                                {row.region ?? 'Sin región'} · Score {formatNumber(row.priority_score)} · Contacto {formatNumber(row.contact_probability)}% · Compra {formatNumber(row.purchase_probability)}%
+                                {row.region ?? 'Sin región'} · Tier {row.commercial_tier} · Fit {formatNumber(row.equifax_fit_score)} · Contacto {formatNumber(row.contact_probability)}%
                               </div>
+                              <div className="mt-1 text-xs text-slate-500">{row.commercial_vertical}</div>
                             </div>
                           ))}
                         </div>
@@ -1599,9 +1608,13 @@ export function EquifaxLeadBuilderPage() {
                               <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', getTemperatureStyles(row.lead_temperature))}>
                                 {getTemperatureLabel(row.lead_temperature)}
                               </span>
+                              <span className="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-200">
+                                Tier {row.commercial_tier}
+                              </span>
                             </div>
                             <div className="mt-1 text-xs text-slate-500">{row.rutid}</div>
                             <div className="text-xs text-slate-500">{row.region ?? 'Sin región'} · {row.comuna ?? 'Sin comuna'}</div>
+                            <div className="mt-1 text-xs text-slate-400">{row.commercial_vertical}</div>
                           </td>
                           <td className="py-3 pr-4">
                             <div className="flex items-center gap-2 text-slate-200">
@@ -1624,6 +1637,12 @@ export function EquifaxLeadBuilderPage() {
                             <div className="text-xs text-slate-500">
                               Compra {formatNumber(row.purchase_probability)}% · Fit Equifax {formatNumber(row.equifax_fit_score)}
                             </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              Industria {formatNumber(row.industry_fit_score)} · Crédito {formatNumber(row.credit_need_score)} · Geo {formatNumber(row.geographic_opportunity_score)}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              Crecimiento {formatNumber(row.growth_score)} · Expansión {formatNumber(row.strategic_expansion_score)}
+                            </div>
                             <div className="text-xs text-slate-500">
                               Canal {row.recommended_channel ?? 'sin canal'}{row.recommended_hour !== null ? ` · ${String(row.recommended_hour).padStart(2, '0')}:00` : ''}
                             </div>
@@ -1635,6 +1654,9 @@ export function EquifaxLeadBuilderPage() {
                                   {reason}
                                 </span>
                               ))}
+                            </div>
+                            <div className="mt-2 max-w-xl text-xs text-slate-400">
+                              {row.commercial_explanation}
                             </div>
                             {row.is_existing_customer && (
                               <div className="mt-2 text-xs text-emerald-300">

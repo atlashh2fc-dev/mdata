@@ -101,6 +101,14 @@ export interface EquifaxLeadResultItem {
   purchase_probability: number
   lead_score: number
   lead_temperature: 'green' | 'yellow' | 'red'
+  industry_fit_score: number
+  credit_need_score: number
+  geographic_opportunity_score: number
+  growth_score: number
+  strategic_expansion_score: number
+  commercial_tier: 'A' | 'B' | 'C' | 'D'
+  commercial_vertical: string
+  commercial_explanation: string
   recommended_channel: string | null
   recommended_hour: number | null
   is_existing_customer: boolean

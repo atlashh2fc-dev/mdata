@@ -1,6 +1,7 @@
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import { getEquifaxLeadScoresMap } from '@/lib/services/equifax-scoring'
 import {
+  buildEquifaxCommercialScore,
   detectEquifaxNonTargetCompany,
   normalizeEquifaxKeyword,
 } from '@/lib/services/equifax-targeting'
@@ -82,8 +83,13 @@ type CandidateCompany = {
   tiene_bienes_raices: boolean | null
   n_autos: number | null
   n_bienes_raices: number | null
+  totalavaluos?: number | null
   source_universe?: 'master_personas_view' | 'empresas_comercial_unificada'
   segmento_tamano_empresa?: string | null
+  ultimo_tramo_ventas?: number | null
+  trabajadores_2024?: number | null
+  cambio_promedio_anual_tramo?: number | null
+  pendiente_tendencia_tramo?: number | null
   resultado_tendencia?: string | null
   rubro_economico?: string | null
   actividad_economica?: string | null
@@ -113,6 +119,9 @@ type FreshCompanyTrendRow = {
   resultado_tendencia: string | null
   rubro_economico_ultimo: string | null
   actividad_economica_ultima: string | null
+  trabajadores_2024: number | null
+  cambio_promedio_anual_tramo: number | null
+  pendiente_tendencia_tramo: number | null
 }
 
 type FreshMasterPersonaRow = {
@@ -1135,28 +1144,41 @@ async function fetchCandidateCompaniesOrdered(
 
   for (let start = 0; start < sampleSize; start += FETCH_CHUNK_SIZE) {
     let query = db
-      .from('master_personas_view')
+      .from('empresas_comercial_unificada')
       .select(`
         rutid,
-        razon_social_empresa,
-        region_canonica,
-        comuna_canonica,
+        razon_social_empresa:razon_social,
+        region_canonica:region,
+        comuna_canonica:comuna,
         email,
         fono_cel,
         score_patrimonial,
         cobertura_pct,
-        tiene_empresa,
-        tiene_autos,
-        tiene_bienes_raices,
+        tiene_empresa:en_base_tendencia_ventas,
+        tiene_autos:n_autos,
+        tiene_bienes_raices:n_bienes_raices,
         n_autos,
-        n_bienes_raices
+        n_bienes_raices,
+        totalavaluos,
+        fuente_universo_empresa,
+        segmento_tamano_empresa,
+        ultimo_tramo_ventas,
+        trabajadores_2024,
+        cambio_promedio_anual_tramo,
+        pendiente_tendencia_tramo,
+        resultado_tendencia,
+        rubro_economico:rubro_economico_ultimo,
+        actividad_economica:actividad_economica_ultima,
+        es_pyme,
+        es_corporacion
       `)
-      .not('razon_social_empresa', 'is', null)
+      .not('razon_social', 'is', null)
+      .eq('es_universo_operativo_ventas', true)
       .order(orderBy, { ascending: false, nullsFirst: false })
       .range(start, start + FETCH_CHUNK_SIZE - 1)
 
     if (regions.length > 0) {
-      query = query.in('region_canonica', regions)
+      query = query.in('region', regions)
     }
 
     const { data, error } = await query
@@ -1165,7 +1187,13 @@ async function fetchCandidateCompaniesOrdered(
       throw new Error('No se pudo consultar el universo empresarial.')
     }
 
-    const chunk = (data ?? []) as CandidateCompany[]
+    const chunk = ((data ?? []) as CandidateCompany[]).map(row => ({
+      ...row,
+      tiene_empresa: true,
+      tiene_autos: Number(row.n_autos ?? 0) > 0,
+      tiene_bienes_raices: Number(row.n_bienes_raices ?? 0) > 0 || Number(row.totalavaluos ?? 0) > 0,
+      source_universe: 'empresas_comercial_unificada' as const,
+    }))
     rows.push(...chunk)
     if (chunk.length < FETCH_CHUNK_SIZE) break
   }
@@ -1191,26 +1219,38 @@ async function fetchExistingCustomerCandidates(limit: number, regions: string[])
 
   for (let start = 0; start < rutids.length; start += FETCH_CHUNK_SIZE) {
     let query = db
-      .from('master_personas_view')
+      .from('empresas_comercial_unificada')
       .select(`
         rutid,
-        razon_social_empresa,
-        region_canonica,
-        comuna_canonica,
+        razon_social_empresa:razon_social,
+        region_canonica:region,
+        comuna_canonica:comuna,
         email,
         fono_cel,
         score_patrimonial,
         cobertura_pct,
-        tiene_empresa,
-        tiene_autos,
-        tiene_bienes_raices,
+        tiene_empresa:en_base_tendencia_ventas,
+        tiene_autos:n_autos,
+        tiene_bienes_raices:n_bienes_raices,
         n_autos,
-        n_bienes_raices
+        n_bienes_raices,
+        totalavaluos,
+        fuente_universo_empresa,
+        segmento_tamano_empresa,
+        ultimo_tramo_ventas,
+        trabajadores_2024,
+        cambio_promedio_anual_tramo,
+        pendiente_tendencia_tramo,
+        resultado_tendencia,
+        rubro_economico:rubro_economico_ultimo,
+        actividad_economica:actividad_economica_ultima,
+        es_pyme,
+        es_corporacion
       `)
       .in('rutid', rutids.slice(start, start + FETCH_CHUNK_SIZE))
 
     if (regions.length > 0) {
-      query = query.in('region_canonica', regions)
+      query = query.in('region', regions)
     }
 
     const { data, error } = await query
@@ -1219,7 +1259,13 @@ async function fetchExistingCustomerCandidates(limit: number, regions: string[])
       throw new Error('No se pudo cruzar clientes Equifax con el universo empresarial.')
     }
 
-    rows.push(...((data ?? []) as CandidateCompany[]))
+    rows.push(...((data ?? []) as CandidateCompany[]).map(row => ({
+      ...row,
+      tiene_empresa: true,
+      tiene_autos: Number(row.n_autos ?? 0) > 0,
+      tiene_bienes_raices: Number(row.n_bienes_raices ?? 0) > 0 || Number(row.totalavaluos ?? 0) > 0,
+      source_universe: 'empresas_comercial_unificada' as const,
+    })))
   }
 
   return rows
@@ -1238,20 +1284,48 @@ async function fetchCandidateCompanies(sampleSize: number, regions: string[], pr
     ...coverageRows,
   ])
     .sort((left, right) => {
+      const leftCommercialScore = buildEquifaxCommercialScore({
+        companyName: left.razon_social_empresa,
+        rubro: left.rubro_economico,
+        actividad: left.actividad_economica,
+        region: left.region_canonica,
+        comuna: left.comuna_canonica,
+        trend: left.resultado_tendencia,
+        salesVariationPct: left.cambio_promedio_anual_tramo ?? left.pendiente_tendencia_tramo,
+        salesBand: left.ultimo_tramo_ventas,
+        employees: left.trabajadores_2024,
+        hasCompanySignal: left.tiene_empresa,
+        hasB2BAssetSignal: Boolean(left.tiene_bienes_raices || left.tiene_autos),
+      }).total_score
+      const rightCommercialScore = buildEquifaxCommercialScore({
+        companyName: right.razon_social_empresa,
+        rubro: right.rubro_economico,
+        actividad: right.actividad_economica,
+        region: right.region_canonica,
+        comuna: right.comuna_canonica,
+        trend: right.resultado_tendencia,
+        salesVariationPct: right.cambio_promedio_anual_tramo ?? right.pendiente_tendencia_tramo,
+        salesBand: right.ultimo_tramo_ventas,
+        employees: right.trabajadores_2024,
+        hasCompanySignal: right.tiene_empresa,
+        hasB2BAssetSignal: Boolean(right.tiene_bienes_raices || right.tiene_autos),
+      }).total_score
       const leftScore =
+        leftCommercialScore * 0.9 +
         Number(Boolean(left.email)) * 18 +
         Number(Boolean(left.fono_cel)) * 24 +
-        Number(left.cobertura_pct ?? 0) * 0.4 +
-        Number(left.score_patrimonial ?? 0) * 0.35 +
-        Number(Boolean(left.tiene_empresa)) * 12 -
+        Number(left.resultado_tendencia === 'sube') * 14 +
+        Number(left.cobertura_pct ?? 0) * 0.18 +
+        Number(left.score_patrimonial ?? 0) * 0.12 +
         scoreEnterprisePenalty(left.razon_social_empresa ?? '', profile) * 0.8
 
       const rightScore =
+        rightCommercialScore * 0.9 +
         Number(Boolean(right.email)) * 18 +
         Number(Boolean(right.fono_cel)) * 24 +
-        Number(right.cobertura_pct ?? 0) * 0.4 +
-        Number(right.score_patrimonial ?? 0) * 0.35 +
-        Number(Boolean(right.tiene_empresa)) * 12 -
+        Number(right.resultado_tendencia === 'sube') * 14 +
+        Number(right.cobertura_pct ?? 0) * 0.18 +
+        Number(right.score_patrimonial ?? 0) * 0.12 +
         scoreEnterprisePenalty(right.razon_social_empresa ?? '', profile) * 0.8
 
       return rightScore - leftScore
@@ -1311,6 +1385,10 @@ function mapFreshCompanyCandidate(
     n_autos: nAutos,
     n_bienes_raices: nBienesRaices,
     source_universe: 'empresas_comercial_unificada',
+    ultimo_tramo_ventas: tramoVentas,
+    trabajadores_2024: toNullableNumber(trendRow.trabajadores_2024),
+    cambio_promedio_anual_tramo: toNullableNumber(trendRow.cambio_promedio_anual_tramo),
+    pendiente_tendencia_tramo: toNullableNumber(trendRow.pendiente_tendencia_tramo),
     segmento_tamano_empresa:
       tramoVentas != null && tramoVentas >= 13
         ? 'corporacion'
@@ -1429,12 +1507,21 @@ async function fetchFreshCompanyCandidates(
             evt.ultimo_tramo_ventas,
             evt.resultado_tendencia,
             evt.rubro_economico_ultimo,
-            evt.actividad_economica_ultima
+            evt.actividad_economica_ultima,
+            evt.trabajadores_2024,
+            evt.cambio_promedio_anual_tramo,
+            evt.pendiente_tendencia_tramo
           from public.empresas_ventas_tendencia evt
           where evt.anio_ultimo = 2024
             and evt.fecha_termino_giro_ultima is null
             and (evt.ultimo_tramo_ventas is null or evt.ultimo_tramo_ventas < 13)
+            and (
+              evt.resultado_tendencia in ('sube', 'estable')
+              or coalesce(evt.ultimo_tramo_ventas, 0) >= 5
+              or coalesce(evt.trabajadores_2024, 0) >= 10
+            )
             ${regionClause}
+          order by evt.rutid
           limit $1 offset $2
         `,
         params
@@ -1499,7 +1586,10 @@ async function fetchFreshCompanyCandidates(
         Number(Boolean(left.email)) * 22 +
         Number(Boolean(left.fono_cel)) * 30 +
         Number(left.es_pyme) * 20 +
-        Number(left.resultado_tendencia === 'sube') * 12 +
+        Number(left.resultado_tendencia === 'sube') * 28 +
+        Number(left.resultado_tendencia === 'estable') * 10 +
+        Number(left.trabajadores_2024 ?? 0) * 0.08 +
+        Number(left.ultimo_tramo_ventas ?? 0) * 2.5 +
         Number(left.cobertura_pct ?? 0) * 0.35 +
         Number(left.score_patrimonial ?? 0) * 0.3 -
         scoreEnterprisePenalty(left.razon_social_empresa ?? '', profile) * 0.8
@@ -1508,7 +1598,10 @@ async function fetchFreshCompanyCandidates(
         Number(Boolean(right.email)) * 22 +
         Number(Boolean(right.fono_cel)) * 30 +
         Number(right.es_pyme) * 20 +
-        Number(right.resultado_tendencia === 'sube') * 12 +
+        Number(right.resultado_tendencia === 'sube') * 28 +
+        Number(right.resultado_tendencia === 'estable') * 10 +
+        Number(right.trabajadores_2024 ?? 0) * 0.08 +
+        Number(right.ultimo_tramo_ventas ?? 0) * 2.5 +
         Number(right.cobertura_pct ?? 0) * 0.35 +
         Number(right.score_patrimonial ?? 0) * 0.3 -
         scoreEnterprisePenalty(right.razon_social_empresa ?? '', profile) * 0.8
@@ -1702,7 +1795,24 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
   if (keywordMetrics.excludeHits > 0) return null
   if (aiProfile.size_preference === 'pyme' && enterprisePenalty >= 85) return null
 
-  const equifaxFit = clamp(
+  const commercialScore = buildEquifaxCommercialScore({
+    companyName,
+    rubro: candidate.rubro_economico,
+    actividad: candidate.actividad_economica,
+    region: candidate.region_canonica ?? featureSnapshot?.region ?? null,
+    comuna: candidate.comuna_canonica ?? featureSnapshot?.comuna ?? null,
+    trend: candidate.resultado_tendencia,
+    salesVariationPct: candidate.cambio_promedio_anual_tramo ?? candidate.pendiente_tendencia_tramo,
+    salesBand: candidate.ultimo_tramo_ventas,
+    employees: candidate.trabajadores_2024,
+    hasCompanySignal: candidate.tiene_empresa ?? Boolean(candidate.source_universe),
+    hasB2BAssetSignal: Boolean(candidate.tiene_bienes_raices || candidate.tiene_autos),
+    isExistingCustomer,
+    contactabilityScore: contactProbability,
+    purchaseProbability,
+  })
+
+  const productFit = clamp(
     keywordMetrics.score * aiProfile.weights.keyword_match +
     (isExistingCustomer
       ? (aiProfile.prefer_existing_customers ? 100 : 0) * aiProfile.weights.existing_customer
@@ -1713,14 +1823,18 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
     interestProbability * 0.05 -
     enterprisePenalty * 0.2
   )
+  const equifaxFit = clamp(commercialScore.total_score * 0.75 + productFit * 0.25)
 
   const priorityScore = clamp(
+    commercialScore.total_score * 0.46 +
     contactProbability * aiProfile.weights.contactability +
     purchaseProbability * aiProfile.weights.purchase +
-    Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage +
+    commercialScore.geographic_opportunity_score * 0.08 +
+    commercialScore.growth_score * 0.07 +
+    Number(candidate.cobertura_pct ?? 0) * aiProfile.weights.coverage * 0.6 +
     (isExistingCustomer ? 100 : 20) * aiProfile.weights.existing_customer +
-    keywordMetrics.score * aiProfile.weights.keyword_match +
-    (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence +
+    keywordMetrics.score * aiProfile.weights.keyword_match * 0.55 +
+    (candidate.tiene_empresa ? 100 : 0) * aiProfile.weights.company_presence * 0.5 +
     interestProbability * 0.12 +
     leadScore * 0.18 -
     enterprisePenalty * 0.45
@@ -1744,6 +1858,14 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
     purchase_probability: purchaseProbability,
     lead_score: leadScore,
     lead_temperature: leadTemperature,
+    industry_fit_score: commercialScore.industry_fit_score,
+    credit_need_score: commercialScore.credit_need_score,
+    geographic_opportunity_score: commercialScore.geographic_opportunity_score,
+    growth_score: commercialScore.growth_score,
+    strategic_expansion_score: commercialScore.strategic_expansion_score,
+    commercial_tier: commercialScore.tier,
+    commercial_vertical: commercialScore.vertical,
+    commercial_explanation: commercialScore.explanation,
     recommended_channel: recommendedChannel,
     recommended_hour: recommendedHour,
     base_priority_score: round(priorityScore, 2),
@@ -1757,6 +1879,7 @@ function buildScoredLeadCandidate(params: CandidateSelectionContext): ScoredLead
       candidate.source_universe === 'empresas_comercial_unificada' ? 'sin-gestion-call-previa' : null,
       candidate.segmento_tamano_empresa ? `segmento-${candidate.segmento_tamano_empresa}` : null,
       candidate.resultado_tendencia ? `tendencia-${candidate.resultado_tendencia}` : null,
+      ...commercialScore.reason_tags,
       ...buildLeadReasons({
         phoneCount,
         emailCount,
@@ -2343,7 +2466,7 @@ async function prepareEquifaxCandidates(
     const [scoresMap, customerMap, equifaxScoreMap] = await Promise.all([
       fetchPersonaScoresMap(candidateRutids),
       fetchCustomerSummaryMap(candidateRutids),
-      getEquifaxLeadScoresMap(candidateRutids),
+      getEquifaxLeadScoresMap(candidateRutids, { refreshIfMissing: false }),
     ])
 
     universeAnalyzed = candidates.length
@@ -2382,7 +2505,7 @@ export async function previewEquifaxLeadScenarios(
   const prepared = await prepareEquifaxCandidates(params)
   let greenPrepared = prepared
 
-  if (params.scenario_key !== 'solo_verdes') {
+  if (params.scenario_key !== 'solo_verdes' && params.universe_source !== 'fresh_companies') {
     try {
       greenPrepared = await prepareEquifaxCandidates({
         ...params,

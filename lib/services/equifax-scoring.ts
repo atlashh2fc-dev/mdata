@@ -1,4 +1,5 @@
 import { db } from '@/lib/db/supabase'
+import { buildEquifaxCommercialScore } from '@/lib/services/equifax-targeting'
 import { cleanRut } from '@/lib/utils/rut'
 import type {
   EquifaxLeadFeatureSnapshot,
@@ -7,13 +8,13 @@ import type {
 
 const FETCH_CHUNK_SIZE = 1000
 const UPSERT_CHUNK_SIZE = 500
-const FEATURE_VERSION = 'v3'
-const HEURISTIC_MODEL_VERSION = 'heuristic-v3'
+const FEATURE_VERSION = 'v4-commercial-fit'
+const HEURISTIC_MODEL_VERSION = 'heuristic-v4-commercial-fit'
 const MODEL_KEY = 'equifax-lead'
 const SCORE_STALE_HOURS = 24
 const PYME_LEGAL_SIGNAL_PATTERN = /\b(SPA|S P A|LTDA|LIMITADA|EIRL|E I R L)\b/
 const LARGE_COMPANY_LEGAL_PATTERN = /\b(SA|S A|SOCIEDAD ANONIMA|CONCESIONARIA)\b/
-const NON_TARGET_COMPANY_PATTERN = /\b(MUNICIPALIDAD|GOBIERNO|MINISTERIO|SERVICIO DE SALUD|HOSPITAL|UNIVERSIDAD|COLEGIO|ESCUELA|LICEO|BANCO|BANCARIA|FINANCIERA|SEGUROS|HOLDING|CORPORACION|FUNDACION|IGLESIA|PARROQUIA|DIOCESIS|RELIGIOSA|SINDICATO|ASOCIACION GREMIAL|COOPERATIVA|CAJA DE COMPENSACION)\b/
+const NON_TARGET_COMPANY_PATTERN = /\b(MUNICIPALIDAD|GOBIERNO|MINISTERIO|SERVICIO DE SALUD|HOSPITAL|CORPORACION MUNICIPAL|FUNDACION|IGLESIA|PARROQUIA|DIOCESIS|RELIGIOSA|SINDICATO|ASOCIACION|ASOC|CAMARA DE COMERCIO|CORP|SUC|SUCESION|BANCO|BANK|SOCIETE GENERALE|OFICINA DE REPRESENTACION)\b/
 const PERSON_NAME_START_PATTERN = /^(JUAN|JOSE|MARIA|LUIS|CARLOS|PEDRO|SERGIO|MIGUEL|JORGE|CLAUDIO|RODRIGO|PATRICIO|FRANCISCO|FERNANDO|ANDRES|DANIEL|RAUL|RICARDO|VICTOR|GLADYS|MARCELA|PAOLA|ANA|ROSA|ELENA|HUGO|OSCAR|ALEJANDRO|MAURICIO|CRISTIAN|SEBASTIAN)\b/
 
 function normalizeRutForScoreLookup(value: string | null | undefined) {
@@ -1963,6 +1964,19 @@ export async function refreshEquifaxLeadScoresForRutids(rutids: string[]) {
     const combined = combineScores(feature, heuristic, models)
     const recommendedChannel = feature.best_channel
       ?? (feature.known_phone_count > 0 ? 'phone' : feature.known_email_count > 0 ? 'email' : null)
+    const commercialScore = buildEquifaxCommercialScore({
+      companyName: feature.company_name,
+      region: feature.region,
+      comuna: feature.comuna,
+      hasCompanySignal: Boolean(feature.company_name),
+      hasB2BAssetSignal:
+        toNumber(feature.feature_payload.n_autos) > 0 ||
+        toNumber(feature.feature_payload.n_bienes_raices) > 0 ||
+        toNumber(feature.feature_payload.totalavaluos) > 0,
+      isExistingCustomer: feature.is_existing_customer,
+      contactabilityScore: combined.contact_probability,
+      purchaseProbability: combined.purchase_probability,
+    })
 
     return {
       rutid: feature.rutid,
@@ -1973,12 +1987,16 @@ export async function refreshEquifaxLeadScoresForRutids(rutids: string[]) {
       purchase_probability: combined.purchase_probability,
       lead_score: combined.lead_score,
       lead_temperature: combined.lead_temperature,
-      fit_score: round(feature.is_existing_customer ? 70 + Math.min(feature.equifax_sales_count * 4, 20) : 45, 2),
+      fit_score: round(commercialScore.total_score, 2),
       recommended_channel: recommendedChannel,
       recommended_hour: feature.best_contact_hour,
-      reason_tags: combined.reason_tags,
+      reason_tags: uniqueStrings([
+        ...combined.reason_tags,
+        ...commercialScore.reason_tags,
+      ]).slice(0, 14),
       score_breakdown: {
         ...combined.score_breakdown,
+        commercial_fit: commercialScore,
         company_name: feature.company_name,
         feature_snapshot: feature,
       },
