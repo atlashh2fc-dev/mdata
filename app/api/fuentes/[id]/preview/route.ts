@@ -178,11 +178,16 @@ async function tableExists(client: PoolClient, tableName: string) {
 
 async function fetchColumns(client: PoolClient, tableName: string) {
   const result = await client.query(
-    `SELECT column_name
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-       AND table_name = $1
-     ORDER BY ordinal_position ASC`,
+    `SELECT a.attname AS column_name
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.relname = $1
+       AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+       AND a.attnum > 0
+       AND NOT a.attisdropped
+     ORDER BY a.attnum ASC`,
     [tableName]
   )
 
