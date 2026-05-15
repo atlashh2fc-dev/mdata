@@ -176,6 +176,7 @@ left join phone_choice
   on phone_choice.rutid = r.entity_rutid
 left join email_choice
   on email_choice.rutid = r.entity_rutid
+where r.contact_rank = 1
 with data;
 
 create unique index if not exists idx_base_contact_event_id
