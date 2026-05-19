@@ -957,13 +957,30 @@ export function PoblarBasePage() {
     if (!analysis || exportTemplate !== 'infobusiness') return null
 
     const matchedRows = analysis.rows.filter(row => row.match_status === 'matched')
-    const companyRows = matchedRows.filter(row => rowHasValue(row, fieldLabelMap, 'razon_social_empresa'))
+    const rowsByRut = new Map<string, BaseBuilderExportRow[]>()
+    for (const row of matchedRows) {
+      if (!row.rutid) continue
+      const rutid = String(row.rutid)
+      rowsByRut.set(rutid, [...(rowsByRut.get(rutid) ?? []), row])
+    }
+    const duplicateGroups = [...rowsByRut.entries()]
+      .map(([rutid, rows]) => ({
+        rutid,
+        rows,
+        count: rows.length,
+      }))
+      .filter(group => group.count > 1)
+      .sort((a, b) => b.count - a.count || a.rutid.localeCompare(b.rutid))
+    const uniqueMatchedRows = matchedRows.filter((row, index, rows) => (
+      !row.rutid || rows.findIndex(item => item.rutid === row.rutid) === index
+    ))
+    const companyRows = uniqueMatchedRows.filter(row => rowHasValue(row, fieldLabelMap, 'razon_social_empresa'))
     const total = companyRows.length
     const coverage = [
       {
         label: 'EMPRESA - filas con empresa',
         count: total,
-        total: matchedRows.length,
+        total: uniqueMatchedRows.length,
       },
       {
         label: 'EMPRESA - tamaño',
@@ -1002,8 +1019,11 @@ export function PoblarBasePage() {
 
     return {
       matchedRows: matchedRows.length,
+      uniqueMatchedRows: uniqueMatchedRows.length,
+      duplicateRows: matchedRows.length - uniqueMatchedRows.length,
+      duplicateGroups,
       companyRows: total,
-      excludedRows: matchedRows.length - total,
+      excludedRows: uniqueMatchedRows.length - total,
       coverage,
     }
   }, [analysis, exportTemplate, fieldLabelMap])
@@ -1991,9 +2011,35 @@ export function PoblarBasePage() {
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-slate-400">EMPRESA exportables</span>
                           <span className="text-slate-200">
-                            {formatNumber(infobusinessStructure.companyRows)} de {formatNumber(infobusinessStructure.matchedRows)}
+                            {formatNumber(infobusinessStructure.companyRows)} de {formatNumber(infobusinessStructure.uniqueMatchedRows)}
                           </span>
                         </div>
+                        {infobusinessStructure.duplicateRows > 0 && (
+                          <>
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-slate-400">RUTs duplicados omitidos</span>
+                              <span className="font-medium text-amber-300">
+                                {formatNumber(infobusinessStructure.duplicateRows)}
+                              </span>
+                            </div>
+                            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] text-slate-300">
+                              <p className="mb-1 font-medium text-amber-200">Duplicados detectados</p>
+                              <div className="max-h-28 space-y-1 overflow-y-auto pr-1">
+                                {infobusinessStructure.duplicateGroups.slice(0, 20).map(group => (
+                                  <div key={group.rutid} className="flex items-center justify-between gap-3">
+                                    <span>{group.rutid}</span>
+                                    <span className="text-slate-400">{formatNumber(group.count)} veces</span>
+                                  </div>
+                                ))}
+                                {infobusinessStructure.duplicateGroups.length > 20 && (
+                                  <p className="text-slate-500">
+                                    +{formatNumber(infobusinessStructure.duplicateGroups.length - 20)} RUTs repetidos más
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        )}
                         {infobusinessStructure.excludedRows > 0 && (
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-slate-400">RUTs sin empresa omitidos</span>
