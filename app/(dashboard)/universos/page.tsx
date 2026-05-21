@@ -11,6 +11,10 @@ import {
   Building2,
   Mail,
   Phone,
+  Database,
+  ShieldX,
+  BriefcaseBusiness,
+  TrendingUp,
   RefreshCcw,
   Check,
   X,
@@ -28,7 +32,19 @@ interface UniverseRow {
   con_empresa: boolean
   con_domicilio: boolean
   con_bienes_raices: boolean
+  dataset_flags?: Record<string, boolean>
   total: number
+  refreshed_at?: string | null
+}
+
+interface UniverseDimension {
+  key: string
+  label: string
+  description?: string | null
+  source?: 'master' | 'dataset' | string
+  slug?: string
+  record_count?: number
+  last_loaded_at?: string | null
 }
 
 type FilterState = true | false | null
@@ -50,14 +66,14 @@ const ENTITY_GROUPS: Array<{
   { key: 'basura', label: 'Basura', description: 'RUTs vacíos, cero o no recuperables', tone: 'text-rose-300', border: 'border-rose-500/50', bg: 'bg-rose-500/10' },
 ]
 
-const DIMENSIONS = [
-  { key: 'con_nombre', label: 'Nombre Completo', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', borderActive: 'border-blue-400', glowActive: 'shadow-[0_0_18px_rgba(96,165,250,0.15)]' },
-  { key: 'con_fono', label: 'Teléfono Celular', icon: Phone, color: 'text-green-400', bg: 'bg-green-400/10', borderActive: 'border-green-400', glowActive: 'shadow-[0_0_18px_rgba(74,222,128,0.15)]' },
-  { key: 'con_email', label: 'Correo Electrónico', icon: Mail, color: 'text-yellow-400', bg: 'bg-yellow-400/10', borderActive: 'border-yellow-400', glowActive: 'shadow-[0_0_18px_rgba(250,204,21,0.15)]' },
-  { key: 'con_domicilio', label: 'Domicilio Conocido', icon: Home, color: 'text-orange-400', bg: 'bg-orange-400/10', borderActive: 'border-orange-400', glowActive: 'shadow-[0_0_18px_rgba(251,146,60,0.15)]' },
-  { key: 'con_autos', label: 'Tiene Vehículos', icon: Car, color: 'text-cyan-400', bg: 'bg-cyan-400/10', borderActive: 'border-cyan-400', glowActive: 'shadow-[0_0_18px_rgba(34,211,238,0.15)]' },
-  { key: 'con_bienes_raices', label: 'Bienes Raíces', icon: Building2, color: 'text-indigo-400', bg: 'bg-indigo-400/10', borderActive: 'border-indigo-400', glowActive: 'shadow-[0_0_18px_rgba(129,140,248,0.15)]' },
-  { key: 'con_empresa', label: 'Dueño de Empresa', icon: Dna, color: 'text-purple-400', bg: 'bg-purple-400/10', borderActive: 'border-purple-400', glowActive: 'shadow-[0_0_18px_rgba(192,132,252,0.15)]' },
+const DEFAULT_DIMENSIONS: UniverseDimension[] = [
+  { key: 'con_nombre', label: 'Nombre Completo', source: 'master' },
+  { key: 'con_fono', label: 'Teléfono Celular', source: 'master' },
+  { key: 'con_email', label: 'Correo Electrónico', source: 'master' },
+  { key: 'con_domicilio', label: 'Domicilio Conocido', source: 'master' },
+  { key: 'con_autos', label: 'Tiene Vehículos', source: 'master' },
+  { key: 'con_bienes_raices', label: 'Bienes Raíces', source: 'master' },
+  { key: 'con_empresa', label: 'Dueño de Empresa', source: 'master' },
 ]
 
 // Render a compact boolean badge for the breakdown table
@@ -77,22 +93,42 @@ const DIM_SHORT: Record<string, string> = {
   con_empresa: 'Empresa',
 }
 
+const DIM_STYLES = [
+  { icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', borderActive: 'border-blue-400', glowActive: 'shadow-[0_0_18px_rgba(96,165,250,0.15)]' },
+  { icon: Phone, color: 'text-green-400', bg: 'bg-green-400/10', borderActive: 'border-green-400', glowActive: 'shadow-[0_0_18px_rgba(74,222,128,0.15)]' },
+  { icon: Mail, color: 'text-yellow-400', bg: 'bg-yellow-400/10', borderActive: 'border-yellow-400', glowActive: 'shadow-[0_0_18px_rgba(250,204,21,0.15)]' },
+  { icon: Home, color: 'text-orange-400', bg: 'bg-orange-400/10', borderActive: 'border-orange-400', glowActive: 'shadow-[0_0_18px_rgba(251,146,60,0.15)]' },
+  { icon: Car, color: 'text-cyan-400', bg: 'bg-cyan-400/10', borderActive: 'border-cyan-400', glowActive: 'shadow-[0_0_18px_rgba(34,211,238,0.15)]' },
+  { icon: Building2, color: 'text-indigo-400', bg: 'bg-indigo-400/10', borderActive: 'border-indigo-400', glowActive: 'shadow-[0_0_18px_rgba(129,140,248,0.15)]' },
+  { icon: Dna, color: 'text-purple-400', bg: 'bg-purple-400/10', borderActive: 'border-purple-400', glowActive: 'shadow-[0_0_18px_rgba(192,132,252,0.15)]' },
+  { icon: Database, color: 'text-teal-300', bg: 'bg-teal-400/10', borderActive: 'border-teal-300', glowActive: 'shadow-[0_0_18px_rgba(45,212,191,0.15)]' },
+  { icon: ShieldX, color: 'text-rose-300', bg: 'bg-rose-400/10', borderActive: 'border-rose-300', glowActive: 'shadow-[0_0_18px_rgba(253,164,175,0.15)]' },
+  { icon: BriefcaseBusiness, color: 'text-sky-300', bg: 'bg-sky-400/10', borderActive: 'border-sky-300', glowActive: 'shadow-[0_0_18px_rgba(125,211,252,0.15)]' },
+  { icon: TrendingUp, color: 'text-lime-300', bg: 'bg-lime-400/10', borderActive: 'border-lime-300', glowActive: 'shadow-[0_0_18px_rgba(190,242,100,0.15)]' },
+]
+
+function shortLabel(dim: UniverseDimension) {
+  return DIM_SHORT[dim.key] ?? dim.label.split(/\s+/).slice(0, 2).join(' ')
+}
+
+function getDimensionStyle(index: number) {
+  return DIM_STYLES[index % DIM_STYLES.length]
+}
+
+function getRowFlag(row: UniverseRow, key: string) {
+  if (key in row) return Boolean(row[key as keyof UniverseRow])
+  return Boolean(row.dataset_flags?.[key])
+}
+
 export default function UniversosPage() {
   const [data, setData] = useState<UniverseRow[]>([])
+  const [dimensions, setDimensions] = useState<UniverseDimension[]>(DEFAULT_DIMENSIONS)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [entityFilter, setEntityFilter] = useState<EntityFilter>('persona_natural')
 
   // Filters state (null = ANY, true = REQUIRED, false = EXCLUDED)
-  const [filters, setFilters] = useState<Record<string, FilterState>>({
-    con_nombre: null,
-    con_email: null,
-    con_fono: null,
-    con_autos: null,
-    con_empresa: null,
-    con_domicilio: null,
-    con_bienes_raices: null
-  })
+  const [filters, setFilters] = useState<Record<string, FilterState>>({})
 
   useEffect(() => {
     loadUniversos()
@@ -104,6 +140,7 @@ export default function UniversosPage() {
       const res = await fetch('/api/universos', { cache: 'no-store' })
       const json = await res.json()
       setData(json.data || [])
+      if (json.dimensions?.length) setDimensions(json.dimensions)
     } finally {
       setLoading(false)
     }
@@ -117,7 +154,10 @@ export default function UniversosPage() {
         cache: 'no-store',
       })
       const json = await res.json()
-      if (res.ok) setData(json.data || [])
+      if (res.ok) {
+        setData(json.data || [])
+        if (json.dimensions?.length) setDimensions(json.dimensions)
+      }
     } finally {
       setRefreshing(false)
     }
@@ -152,11 +192,11 @@ export default function UniversosPage() {
   // Individual total per dimension (con_X = true, independiente de otros filtros)
   const dimTotals = useMemo(() => {
     const out: Record<string, number> = {}
-    for (const dim of DIMENSIONS) {
-      out[dim.key] = scopedData.filter(r => r[dim.key as keyof UniverseRow] === true).reduce((s, r) => s + r.total, 0)
+    for (const dim of dimensions) {
+      out[dim.key] = scopedData.filter(r => getRowFlag(r, dim.key)).reduce((s, r) => s + r.total, 0)
     }
     return out
-  }, [scopedData])
+  }, [dimensions, scopedData])
 
   // Calculamos el volumen instantáneamente cruzando la matriz precomputada
   const result = useMemo(() => {
@@ -166,7 +206,7 @@ export default function UniversosPage() {
     for (const row of scopedData) {
       let isMatch = true
       for (const [key, val] of Object.entries(filters)) {
-        if (val !== null && row[key as keyof UniverseRow] !== val) {
+        if (val !== null && getRowFlag(row, key) !== val) {
           isMatch = false
           break
         }
@@ -195,21 +235,12 @@ export default function UniversosPage() {
     })
   }
 
-  const resetFilters = () => {
-    setFilters({
-      con_nombre: null,
-      con_email: null,
-      con_fono: null,
-      con_autos: null,
-      con_empresa: null,
-      con_domicilio: null,
-      con_bienes_raices: null
-    })
-  }
+  const resetFilters = () => setFilters({})
 
   // Active filters count
   const activeCount = Object.values(filters).filter(v => v !== null).length
   const activeFilters = Object.entries(filters).filter(([, v]) => v !== null)
+  const datasetDimensionCount = dimensions.filter(dim => dim.source === 'dataset').length
 
   return (
     <>
@@ -225,7 +256,10 @@ export default function UniversosPage() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold text-slate-300">Dimensiones de Datos</h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">Primero elige el universo base; luego incluye ✓ o excluye ✗ cada dimensión</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Primero elige el universo base; luego incluye ✓ o excluye ✗ cada dimensión
+                {datasetDimensionCount > 0 ? ` · ${datasetDimensionCount} filtros sincronizados desde datasets` : ''}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -268,9 +302,10 @@ export default function UniversosPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-             {DIMENSIONS.map(dim => {
+             {dimensions.map((dim, index) => {
                const state = filters[dim.key]
-               const Icon = dim.icon
+               const dimStyle = getDimensionStyle(index)
+               const Icon = dimStyle.icon
                const dimTotal = dimTotals[dim.key] || 0
                const dimPct = totalBase > 0 ? (dimTotal / totalBase) * 100 : 0
                
@@ -280,9 +315,9 @@ export default function UniversosPage() {
                let stateLabel = 'Cualquiera'
                
                if (state === true) {
-                 stateClass = `${dim.borderActive} border bg-[#1e293b]/80 ${dim.glowActive}`
+                 stateClass = `${dimStyle.borderActive} border bg-[#1e293b]/80 ${dimStyle.glowActive}`
                  StateIcon = Check
-                 stateColor = dim.color
+                 stateColor = dimStyle.color
                  stateLabel = 'Requerido'
                } else if (state === false) {
                  stateClass = "border-red-500/40 bg-red-950/30"
@@ -299,13 +334,13 @@ export default function UniversosPage() {
                  >
                    <div className="flex items-start justify-between w-full">
                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${dim.bg}`}>
-                          <Icon className={`w-4.5 h-4.5 ${dim.color}`} />
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${dimStyle.bg}`}>
+                          <Icon className={`w-4.5 h-4.5 ${dimStyle.color}`} />
                         </div>
                         <div>
                           <h4 className="text-sm font-semibold text-white leading-tight">{dim.label}</h4>
                           <p className={`text-[10px] mt-0.5 uppercase tracking-wider font-medium ${stateColor}`}>
-                            {stateLabel}
+                            {stateLabel}{dim.source === 'dataset' ? ' · Dataset' : ''}
                           </p>
                         </div>
                      </div>
@@ -318,13 +353,13 @@ export default function UniversosPage() {
                    <div className="w-full">
                      <div className="flex items-center justify-between mb-1">
                        <span className="text-[10px] text-slate-500">Universo propio</span>
-                       <span className={`text-[11px] font-mono font-semibold ${dim.color}`}>
+                       <span className={`text-[11px] font-mono font-semibold ${dimStyle.color}`}>
                          {loading ? '…' : formatNumber(dimTotal)} ({dimPct.toFixed(1)}%)
                        </span>
                      </div>
                      <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
                        <div
-                         className={`h-full rounded-full transition-all duration-500 ${dim.bg.replace('/10', '/60')}`}
+                         className={`h-full rounded-full transition-all duration-500 ${dimStyle.bg.replace('/10', '/60')}`}
                          style={{ width: `${Math.min(dimPct, 100)}%` }}
                        />
                      </div>
@@ -348,9 +383,9 @@ export default function UniversosPage() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-slate-800/80 border-b border-slate-700/50">
-                        {DIMENSIONS.map(d => (
+                        {dimensions.map(d => (
                           <th key={d.key} className="px-2 py-2 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                            {DIM_SHORT[d.key]}
+                            {shortLabel(d)}
                           </th>
                         ))}
                         <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Registros</th>
@@ -363,9 +398,9 @@ export default function UniversosPage() {
                           key={i}
                           className={`border-b border-slate-800/50 ${i % 2 === 0 ? 'bg-[#1e293b]/30' : 'bg-transparent'} hover:bg-slate-800/30 transition-colors`}
                         >
-                          {DIMENSIONS.map(d => (
+                          {dimensions.map(d => (
                             <td key={d.key} className="px-2 py-2 text-center">
-                              <BoolBadge val={row[d.key as keyof UniverseRow] as boolean} />
+                              <BoolBadge val={getRowFlag(row, d.key)} />
                             </td>
                           ))}
                           <td className="px-3 py-2 text-right font-mono font-semibold text-white">
@@ -379,7 +414,7 @@ export default function UniversosPage() {
                     </tbody>
                     <tfoot>
                       <tr className="bg-slate-800/60 border-t border-slate-600/50">
-                        <td colSpan={DIMENSIONS.length} className="px-3 py-2 text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        <td colSpan={dimensions.length} className="px-3 py-2 text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
                           Total
                         </td>
                         <td className="px-3 py-2 text-right font-mono font-bold text-cyan-400">
@@ -428,14 +463,16 @@ export default function UniversosPage() {
                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Filtros aplicados</p>
                      <div className="flex flex-wrap gap-1.5">
                        {activeFilters.map(([key, val]) => {
-                         const dim = DIMENSIONS.find(d => d.key === key)
+                         const dim = dimensions.find(d => d.key === key)
+                         const dimIndex = dimensions.findIndex(d => d.key === key)
+                         const dimStyle = getDimensionStyle(dimIndex >= 0 ? dimIndex : 0)
                          return (
                            <span
                              key={key}
-                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${val === true ? `${dim?.color} border-current bg-current/10` : 'text-red-400 border-red-500/40 bg-red-950/30'}`}
+                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${val === true ? `${dimStyle.color} border-current bg-current/10` : 'text-red-400 border-red-500/40 bg-red-950/30'}`}
                            >
                              {val === true ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
-                             {DIM_SHORT[key]}
+                             {dim ? shortLabel(dim) : key}
                            </span>
                          )
                        })}
@@ -468,6 +505,9 @@ export default function UniversosPage() {
               <p>Primero eliges el <span className="text-white">tipo de entidad</span>: naturales, jurídicas, indeterminados, recuperables o basura. Luego cada dimensión muestra su universo propio dentro de ese grupo.</p>
               <p>Al combinar dos dimensiones, el resultado es la <span className="text-cyan-400">intersección</span> (personas que tienen ambas), por lo que el número puede bajar respecto a cada dimensión individual.</p>
               <p className="text-slate-500">Base activa: <span className="font-mono text-white">{formatNumber(totalBase)}</span> registros en {scopedData.length} combinaciones únicas.</p>
+              {datasetDimensionCount > 0 && (
+                <p className="text-slate-500">Datasets sincronizados como filtros: <span className="font-mono text-white">{datasetDimensionCount}</span>.</p>
+              )}
             </div>
           )}
         </div>

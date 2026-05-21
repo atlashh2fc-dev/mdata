@@ -4,8 +4,46 @@ import { refreshStats } from '@/lib/services/dashboard'
 import { Pool } from 'pg'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 let pool: Pool | null = null
+
+const STATIC_DIMENSIONS = [
+  { key: 'con_nombre', label: 'Nombre Completo', description: 'Nombre o razón social disponible', source: 'master' },
+  { key: 'con_fono', label: 'Teléfono Celular', description: 'Teléfono disponible en el universo base', source: 'master' },
+  { key: 'con_email', label: 'Correo Electrónico', description: 'Correo disponible en el universo base', source: 'master' },
+  { key: 'con_domicilio', label: 'Domicilio Conocido', description: 'Región, comuna o dirección disponible', source: 'master' },
+  { key: 'con_autos', label: 'Tiene Vehículos', description: 'Cruce con automóviles consolidado', source: 'master' },
+  { key: 'con_bienes_raices', label: 'Bienes Raíces', description: 'Cruce con propiedades o avalúos', source: 'master' },
+  { key: 'con_empresa', label: 'Dueño de Empresa', description: 'Cruce con razón social o empresa', source: 'master' },
+] as const
+
+const DATASET_DIMENSION_LIMIT = 6
+const DATASET_DIMENSION_MAX_ROWS = 500_000
+const SKIPPED_DATASET_SLUGS = new Set([
+  'master_personas',
+  'padron_2024',
+  'automoviles2025',
+  'bbrr_propiedades',
+  'empresas_comercial_unificada',
+  'domicilio_resumen',
+  'empresa_resumen',
+  'pernat_resumen',
+  'acumulado_resumen',
+  'autos_resumen',
+])
+
+type DatasetDimension = {
+  key: string
+  label: string
+  description: string | null
+  source: 'dataset'
+  slug: string
+  table_name: string
+  record_count: number
+  last_loaded_at: string | null
+}
 
 function getPostgresConnectionString() {
   const connectionString = process.env.POSTGRES_URL_NON_POOLING
@@ -31,9 +69,154 @@ function getPool() {
   return pool
 }
 
+function quoteIdentifier(identifier: string) {
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function normalizeRutExpression(alias: string) {
+  return `lpad(regexp_replace(upper(coalesce(${alias}.rutid::text, '')), '[^0-9K]', '', 'g'), 10, '0')`
+}
+
+function toDimensionKey(slug: string) {
+  return `dataset_${slug
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')}`
+}
+
+async function ensureUniverseSyncTables(pgPool: Pool) {
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS public.universe_dataset_dimensions (
+      key text PRIMARY KEY,
+      slug text NOT NULL,
+      label text NOT NULL,
+      description text,
+      table_name text NOT NULL,
+      record_count bigint NOT NULL DEFAULT 0,
+      last_loaded_at timestamptz,
+      is_active boolean NOT NULL DEFAULT true,
+      refreshed_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.stats_universos_dynamic (
+      entidad_tipo text NOT NULL,
+      con_nombre boolean NOT NULL,
+      con_email boolean NOT NULL,
+      con_fono boolean NOT NULL,
+      con_autos boolean NOT NULL,
+      con_empresa boolean NOT NULL,
+      con_domicilio boolean NOT NULL,
+      con_bienes_raices boolean NOT NULL,
+      dataset_flags jsonb NOT NULL DEFAULT '{}'::jsonb,
+      total bigint NOT NULL,
+      refreshed_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stats_universos_dynamic_entity
+      ON public.stats_universos_dynamic (entidad_tipo);
+
+    ALTER TABLE public.universe_dataset_dimensions ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.stats_universos_dynamic ENABLE ROW LEVEL SECURITY;
+  `)
+}
+
+async function discoverDatasetDimensions(pgPool: Pool): Promise<DatasetDimension[]> {
+  const { rows } = await pgPool.query(`
+    SELECT
+      ds.slug,
+      ds.name,
+      ds.description,
+      ds.canonical_table,
+      ds.record_count,
+      COALESCE(ds.latest_version_completed_at, ds.last_loaded_at, ds.updated_at, ds.created_at) AS last_loaded_at
+    FROM public.dataset_overview ds
+    JOIN pg_catalog.pg_class cls
+      ON cls.relname = ds.canonical_table
+     AND cls.relkind IN ('r', 'p', 'v', 'm')
+    JOIN pg_catalog.pg_namespace ns
+      ON ns.oid = cls.relnamespace
+     AND ns.nspname = 'public'
+    JOIN pg_catalog.pg_attribute attr
+      ON attr.attrelid = cls.oid
+     AND attr.attname = 'rutid'
+     AND attr.attnum > 0
+     AND NOT attr.attisdropped
+    WHERE ds.is_active = true
+      AND ds.canonical_table IS NOT NULL
+      AND COALESCE(ds.last_job_status, ds.latest_version_status, 'completed') <> 'failed'
+      AND COALESCE(ds.record_count, ds.latest_loaded_row_count, 0) > 0
+      AND COALESCE(ds.record_count, ds.latest_loaded_row_count, 0) <= $1
+    ORDER BY COALESCE(ds.latest_version_completed_at, ds.last_loaded_at, ds.updated_at, ds.created_at) DESC NULLS LAST
+  `, [DATASET_DIMENSION_MAX_ROWS])
+
+  return rows
+    .filter(row => row.slug && row.canonical_table && !SKIPPED_DATASET_SLUGS.has(row.slug))
+    .slice(0, DATASET_DIMENSION_LIMIT)
+    .map(row => ({
+      key: toDimensionKey(row.slug),
+      label: row.name,
+      description: row.description,
+      source: 'dataset',
+      slug: row.slug,
+      table_name: row.canonical_table,
+      record_count: Number(row.record_count ?? 0),
+      last_loaded_at: row.last_loaded_at ? new Date(row.last_loaded_at).toISOString() : null,
+    }))
+}
+
+async function getDatasetDimensions(pgPool: Pool) {
+  await ensureUniverseSyncTables(pgPool)
+  const { rows } = await pgPool.query(`
+    SELECT key, slug, label, description, table_name, record_count, last_loaded_at
+    FROM public.universe_dataset_dimensions
+    WHERE is_active = true
+    ORDER BY last_loaded_at DESC NULLS LAST, label ASC
+  `)
+
+  return rows.map(row => ({
+    key: row.key,
+    label: row.label,
+    description: row.description,
+    source: 'dataset',
+    slug: row.slug,
+    table_name: row.table_name,
+    record_count: Number(row.record_count ?? 0),
+    last_loaded_at: row.last_loaded_at ? new Date(row.last_loaded_at).toISOString() : null,
+  }))
+}
+
 async function getUpdatedUniversos() {
   const pgPool = getPool()
   if (!pgPool) return null
+
+  await ensureUniverseSyncTables(pgPool)
+
+  const { rows: dynamicRows } = await pgPool.query(`
+    SELECT
+      entidad_tipo,
+      con_nombre,
+      con_email,
+      con_fono,
+      con_autos,
+      con_empresa,
+      con_domicilio,
+      con_bienes_raices,
+      dataset_flags,
+      total::bigint,
+      refreshed_at
+    FROM public.stats_universos_dynamic
+  `)
+
+  if (dynamicRows.length > 0) {
+    return dynamicRows.map(row => ({
+      ...row,
+      dataset_flags: row.dataset_flags ?? {},
+      total: Number(row.total ?? 0),
+      refreshed_at: row.refreshed_at ? new Date(row.refreshed_at).toISOString() : null,
+    }))
+  }
 
   const { rows } = await pgPool.query(`
     WITH persona_rows AS (
@@ -72,8 +255,144 @@ async function getUpdatedUniversos() {
 
   return rows.map(row => ({
     ...row,
+    dataset_flags: {},
     total: Number(row.total ?? 0),
   }))
+}
+
+async function refreshDynamicUniverseMatrix() {
+  const pgPool = getPool()
+  if (!pgPool) return null
+
+  await ensureUniverseSyncTables(pgPool)
+  const dimensions = await discoverDatasetDimensions(pgPool)
+
+  const datasetCtes = dimensions.map(dim => {
+    const tableName = quoteIdentifier(dim.table_name)
+    return `${quoteIdentifier(dim.key)} AS (
+      SELECT DISTINCT ${normalizeRutExpression('d')} AS rut_key
+      FROM public.${tableName} d
+      WHERE d.rutid IS NOT NULL
+        AND ${normalizeRutExpression('d')} <> '0000000000'
+    )`
+  })
+
+  const joins = dimensions.map(dim =>
+    `LEFT JOIN ${quoteIdentifier(dim.key)} ${quoteIdentifier(`${dim.key}_m`)}
+      ON ${quoteIdentifier(`${dim.key}_m`)}.rut_key = b.rut_key`
+  )
+
+  const flagPairs = dimensions.flatMap(dim => [
+    `'${dim.key}'`,
+    `${quoteIdentifier(`${dim.key}_m`)}.rut_key IS NOT NULL`,
+  ])
+
+  const flagGroupings = dimensions.map(dim => `${quoteIdentifier(`${dim.key}_m`)}.rut_key IS NOT NULL`)
+
+  await pgPool.query('BEGIN')
+  try {
+    await pgPool.query('SET LOCAL statement_timeout = 0')
+    await pgPool.query('TRUNCATE public.universe_dataset_dimensions')
+
+    for (const dim of dimensions) {
+      await pgPool.query(
+        `INSERT INTO public.universe_dataset_dimensions
+          (key, slug, label, description, table_name, record_count, last_loaded_at, is_active, refreshed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, now())`,
+        [dim.key, dim.slug, dim.label, dim.description, dim.table_name, dim.record_count, dim.last_loaded_at]
+      )
+    }
+
+    await pgPool.query('TRUNCATE public.stats_universos_dynamic')
+    await pgPool.query(`
+      INSERT INTO public.stats_universos_dynamic (
+        entidad_tipo,
+        con_nombre,
+        con_email,
+        con_fono,
+        con_autos,
+        con_empresa,
+        con_domicilio,
+        con_bienes_raices,
+        dataset_flags,
+        total,
+        refreshed_at
+      )
+      WITH base AS (
+        SELECT
+          ${normalizeRutExpression('p')} AS rut_key,
+          p.entidad_tipo::text,
+          p.con_nombre_real AS con_nombre,
+          (NULLIF(BTRIM(p.email), '') IS NOT NULL) AS con_email,
+          (NULLIF(BTRIM(p.fono_cel), '') IS NOT NULL) AS con_fono,
+          (p.n_autos > 0) AS con_autos,
+          (NULLIF(BTRIM(p.razon_social_empresa), '') IS NOT NULL) AS con_empresa,
+          (
+            COALESCE(
+              NULLIF(BTRIM(p.region_part), ''),
+              NULLIF(BTRIM(p.comuna_part), ''),
+              NULLIF(BTRIM(p.domicilio_region), ''),
+              NULLIF(BTRIM(p.domicilio_comuna), '')
+            ) IS NOT NULL
+          ) AS con_domicilio,
+          (COALESCE(p.n_bienes_raices, 0) > 0 OR COALESCE(p.totalavaluos, 0) > 0) AS con_bienes_raices
+        FROM public.personas_master_clasificada p
+        WHERE p.entidad_tipo <> 'persona_juridica'
+
+        UNION ALL
+
+        SELECT
+          ${normalizeRutExpression('e')} AS rut_key,
+          'persona_juridica'::text AS entidad_tipo,
+          (NULLIF(BTRIM(e.razon_social), '') IS NOT NULL) AS con_nombre,
+          (NULLIF(BTRIM(e.email), '') IS NOT NULL) AS con_email,
+          (NULLIF(BTRIM(e.fono_cel), '') IS NOT NULL) AS con_fono,
+          (COALESCE(e.n_autos, 0) > 0) AS con_autos,
+          true AS con_empresa,
+          (
+            COALESCE(
+              NULLIF(BTRIM(e.domicilio_direccion), ''),
+              NULLIF(BTRIM(e.region), ''),
+              NULLIF(BTRIM(e.comuna), '')
+            ) IS NOT NULL
+          ) AS con_domicilio,
+          (COALESCE(e.n_bienes_raices, 0) > 0 OR COALESCE(e.totalavaluos, 0) > 0) AS con_bienes_raices
+        FROM public.empresas_comercial_unificada e
+        WHERE COALESCE(e.es_universo_operativo_ventas, true) = true
+      )
+      ${datasetCtes.length > 0 ? `, ${datasetCtes.join(',\n')}` : ''}
+      SELECT
+        b.entidad_tipo,
+        b.con_nombre,
+        b.con_email,
+        b.con_fono,
+        b.con_autos,
+        b.con_empresa,
+        b.con_domicilio,
+        b.con_bienes_raices,
+        ${flagPairs.length > 0 ? `jsonb_build_object(${flagPairs.join(', ')})` : `'{}'::jsonb`} AS dataset_flags,
+        COUNT(*)::bigint AS total,
+        now() AS refreshed_at
+      FROM base b
+      ${joins.join('\n')}
+      GROUP BY
+        b.entidad_tipo,
+        b.con_nombre,
+        b.con_email,
+        b.con_fono,
+        b.con_autos,
+        b.con_empresa,
+        b.con_domicilio,
+        b.con_bienes_raices
+        ${flagGroupings.length > 0 ? `,\n        ${flagGroupings.join(',\n        ')}` : ''}
+    `)
+
+    await pgPool.query('COMMIT')
+    return dimensions
+  } catch (error) {
+    await pgPool.query('ROLLBACK')
+    throw error
+  }
 }
 
 async function getStoredUniversos(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>) {
@@ -82,7 +401,7 @@ async function getStoredUniversos(supabase: Awaited<ReturnType<typeof createSupa
     .select('*')
 
   if (error) throw error
-  return data
+  return (data as Record<string, unknown>[] | null)?.map(row => ({ ...row, dataset_flags: {} }))
 }
 
 export async function GET(req: NextRequest) {
@@ -91,9 +410,16 @@ export async function GET(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     // if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
+    const pgPool = getPool()
     const data = await getUpdatedUniversos() ?? await getStoredUniversos(supabase)
+    const datasetDimensions = pgPool ? await getDatasetDimensions(pgPool) : []
 
-    return NextResponse.json({ success: true, data })
+    return NextResponse.json({
+      success: true,
+      data,
+      dimensions: [...STATIC_DIMENSIONS, ...datasetDimensions],
+      synced_at: data?.[0]?.refreshed_at ?? null,
+    })
   } catch (error) {
     console.error('[API/Universos]', error)
     return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 })
@@ -107,10 +433,16 @@ export async function POST() {
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     await refreshStats()
+    const datasetDimensions = await refreshDynamicUniverseMatrix()
 
     const data = await getUpdatedUniversos() ?? await getStoredUniversos(supabase)
 
-    return NextResponse.json({ success: true, data })
+    return NextResponse.json({
+      success: true,
+      data,
+      dimensions: [...STATIC_DIMENSIONS, ...(datasetDimensions ?? [])],
+      synced_at: data?.[0]?.refreshed_at ?? null,
+    })
   } catch (error) {
     console.error('[API/Universos refresh]', error)
     return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 })
