@@ -52,6 +52,10 @@
     "ops:crm:dedupe-active-leads": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/dedupe-active-leads.mjs",
     "ops:push:crm-actions": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/push-registro-intel.mjs",
     "ops:sync:crm-loop": "npm run ops:sync:crm-feedback && npm run ops:crm:dedupe-active-leads && npm run ops:push:crm-actions",
+    "ops:company-web:enqueue": "npx --yes tsx scripts/company-web-enrichment/run-company-web-enrichment.ts --enqueue",
+    "ops:company-web:process": "npx --yes tsx scripts/company-web-enrichment/run-company-web-enrichment.ts --process",
+    "ops:company-web:progress": "npx --yes tsx scripts/company-web-enrichment/run-company-web-enrichment.ts --progress",
+    "ops:books:web-probe": "npx --yes tsx scripts/books/probe-book-web-enrichment.ts",
     "ops:hh:pipeline": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-pipeline.mjs",
     "ops:hh:week": "node --env-file=${ENV_FILE:-.env.production} scripts/hh/run-hh-week.mjs",
     "ops:equifax:sync:sales-crm": "node --env-file=${ENV_FILE:-.env.production} scripts/equifax/sync-sales-from-crm-feedback.mjs"
@@ -67,6 +71,7 @@
     "lucide-react": "^0.453.0",
     "mysql2": "^3.12.0",
     "next": "15.0.7",
+    "open-websearch": "^2.1.11",
     "papaparse": "^5.4.1",
     "pdf-parse": "^2.4.5",
     "pg": "^8.13.1",

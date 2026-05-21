@@ -2,6 +2,7 @@
 
 import { search, SafeSearchType } from 'duck-duck-scrape'
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
+import { searchWithOpenWebSearch } from '@/lib/services/open-websearch'
 import { normalizeCompanyName } from '@/lib/utils/company-match'
 
 const INCEPTION_API_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
@@ -41,7 +42,7 @@ export type CompanyContactEnrichment = {
   phones: string[]
   sourceUrls: string[]
   source: 'cache' | 'web' | 'web_ai' | 'none' | 'error'
-  searchProvider?: 'brave' | 'duckduckgo' | 'bing' | 'none' | 'error'
+  searchProvider?: 'open-websearch' | 'brave' | 'duckduckgo' | 'bing' | 'none' | 'error'
 }
 
 type SearchResultItem = {
@@ -154,6 +155,18 @@ function normalizeSearchUrl(url: string): string | null {
   try {
     const parsed = new URL(trimmed)
     if (!['http:', 'https:'].includes(parsed.protocol)) return null
+
+    if (parsed.hostname.replace(/^www\./, '').toLowerCase() === 'bing.com' && parsed.pathname.startsWith('/ck/')) {
+      const encodedTarget = parsed.searchParams.get('u')
+      if (encodedTarget) {
+        try {
+          const normalizedEncoded = encodedTarget.replace(/^a1/i, '').replace(/-/g, '+').replace(/_/g, '/')
+          const decodedTarget = Buffer.from(normalizedEncoded, 'base64').toString('utf8')
+          return normalizeSearchUrl(decodedTarget)
+        } catch {}
+      }
+    }
+
     parsed.hash = ''
     return parsed.toString()
   } catch {
@@ -263,7 +276,7 @@ async function searchWithBing(query: string): Promise<SearchResultItem[]> {
   }
 
   const html = await response.text()
-  const matches = [...html.matchAll(/<li class="b_algo"[\s\S]*?<a href="([^"]+)"[\s\S]*?>([\s\S]*?)<\/a>[\s\S]*?(?:<p>([\s\S]*?)<\/p>)?/gi)]
+  const matches = [...html.matchAll(/<li class="b_algo"[^>]*>[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[\s\S]*?>([\s\S]*?)<\/a>[\s\S]*?(?:<p[^>]*>([\s\S]*?)<\/p>)?/gi)]
 
   return matches
     .map(match => ({
@@ -274,9 +287,23 @@ async function searchWithBing(query: string): Promise<SearchResultItem[]> {
     .filter(item => item.url && !isBlockedDomain(item.url))
 }
 
+async function searchWithOpenWebSearchProvider(query: string): Promise<SearchResultItem[]> {
+  const results = await searchWithOpenWebSearch(query, {
+    limit: Math.max(SEARCH_RESULTS_PER_COMPANY, 10),
+  })
+
+  return results
+    .map(item => ({
+      title: item.title,
+      url: item.url,
+      description: item.description,
+    }))
+    .filter(item => item.url && !isBlockedDomain(item.url))
+}
+
 async function searchCompanyResults(companyName: string): Promise<{
   results: SearchResultItem[]
-  provider: 'brave' | 'duckduckgo' | 'bing' | 'none'
+  provider: 'open-websearch' | 'brave' | 'duckduckgo' | 'bing' | 'none'
 }> {
   const queries = [
     `"${companyName}" sitio oficial contacto`,
@@ -287,16 +314,16 @@ async function searchCompanyResults(companyName: string): Promise<{
   const collected: SearchResultItem[] = []
   const seen = new Set<string>()
 
-  let winningProvider: 'brave' | 'duckduckgo' | 'bing' | 'none' = 'none'
+  let winningProvider: 'open-websearch' | 'brave' | 'duckduckgo' | 'bing' | 'none' = 'none'
 
   for (const query of queries) {
     let results: SearchResultItem[] = []
 
     try {
-      results = await searchWithBrave(query)
-      if (results.length > 0) winningProvider = 'brave'
+      results = await searchWithOpenWebSearchProvider(query)
+      if (results.length > 0) winningProvider = 'open-websearch'
     } catch (error) {
-      console.error('[company-contact-enrichment:brave]', {
+      console.error('[company-contact-enrichment:open-websearch]', {
         companyName,
         query,
         error: error instanceof Error ? error.message : String(error),
@@ -305,15 +332,10 @@ async function searchCompanyResults(companyName: string): Promise<{
 
     if (results.length === 0) {
       try {
-        const ddg = await search(query, { safeSearch: SafeSearchType.OFF })
-        results = ddg.results.map(item => ({
-          title: item.title,
-          url: item.url,
-          description: item.description,
-        }))
-        if (results.length > 0) winningProvider = 'duckduckgo'
+        results = await searchWithBrave(query)
+        if (results.length > 0) winningProvider = 'brave'
       } catch (error) {
-        console.error('[company-contact-enrichment:duckduckgo]', {
+        console.error('[company-contact-enrichment:brave]', {
           companyName,
           query,
           error: error instanceof Error ? error.message : String(error),
@@ -327,6 +349,24 @@ async function searchCompanyResults(companyName: string): Promise<{
         if (results.length > 0) winningProvider = 'bing'
       } catch (error) {
         console.error('[company-contact-enrichment:bing]', {
+          companyName,
+          query,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    if (results.length === 0) {
+      try {
+        const ddg = await search(query, { safeSearch: SafeSearchType.OFF })
+        results = ddg.results.map(item => ({
+          title: item.title,
+          url: item.url,
+          description: item.description,
+        }))
+        if (results.length > 0) winningProvider = 'duckduckgo'
+      } catch (error) {
+        console.error('[company-contact-enrichment:duckduckgo]', {
           companyName,
           query,
           error: error instanceof Error ? error.message : String(error),
@@ -470,6 +510,7 @@ async function chooseBestWithAI(
 async function readCache(matchKeys: string[]): Promise<Map<string, CompanyContactEnrichment>> {
   const byKey = new Map<string, CompanyContactEnrichment>()
   if (!hasSupabaseAdminEnv || matchKeys.length === 0) return byKey
+  if (process.env.COMPANY_CONTACT_ENRICH_FORCE_REFRESH === 'true') return byKey
 
   const { data, error } = await db
     .from('company_contact_enrichment_cache')
@@ -686,6 +727,7 @@ export async function enrichCompanyContacts(
   limited: boolean
   withoutResult: number
   providers: {
+    open_websearch: number
     brave: number
     duckduckgo: number
     bing: number
@@ -738,6 +780,7 @@ export async function enrichCompanyContacts(
   await persistIntoMaster(resolvedItems)
 
   const providers = {
+    open_websearch: fetched.filter(item => item.searchProvider === 'open-websearch').length,
     brave: fetched.filter(item => item.searchProvider === 'brave').length,
     duckduckgo: fetched.filter(item => item.searchProvider === 'duckduckgo').length,
     bing: fetched.filter(item => item.searchProvider === 'bing').length,

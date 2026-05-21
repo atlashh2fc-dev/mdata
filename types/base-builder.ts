@@ -140,6 +140,7 @@ export interface BaseBuilderAnalysisResult {
     email_found: number
     phone_found: number
     providers?: {
+      open_websearch?: number
       brave: number
       duckduckgo: number
       bing: number

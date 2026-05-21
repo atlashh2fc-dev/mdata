@@ -1,10 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import {
-  Check, CircleAlert, Download, FileText, ScanSearch, Table2, Upload,
+  Check, CircleAlert, Clock, Download, FileText, Play, RefreshCw, ScanSearch, Table2, Upload,
 } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { EmptyState, Spinner } from '@/components/ui/Spinner'
@@ -165,15 +165,52 @@ type AnalyzeProgress = {
 type ExportFormat = 'xlsx' | 'csv' | 'json'
 type ExportTemplate = 'normal' | 'infobusiness'
 type ExportCell = string | number | boolean | null
+type WebOpsAction = 'progress' | 'enqueue' | 'process' | 'run'
+
+type WebOpsProgress = {
+  queue?: {
+    queued_total?: number | string | null
+    queued?: number | string | null
+    processing?: number | string | null
+    completed?: number | string | null
+    no_result?: number | string | null
+    failed?: number | string | null
+    last_queue_update?: string | null
+  } | null
+  results?: {
+    result_total?: number | string | null
+    found?: number | string | null
+    with_email?: number | string | null
+    with_phone?: number | string | null
+    last_search?: string | null
+  } | null
+}
 
 function emptyProviderMetrics(): NonNullable<BaseBuilderWebEnrichmentResult['providers']> {
   return {
+    open_websearch: 0,
     brave: 0,
     duckduckgo: 0,
     bing: 0,
     none: 0,
     error: 0,
   }
+}
+
+function toCount(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function extractWebOpsProgress(payload: unknown): WebOpsProgress | null {
+  if (!payload || typeof payload !== 'object') return null
+  const data = payload as {
+    progress?: WebOpsProgress
+    payload?: { progress?: WebOpsProgress }
+    current?: { payload?: { progress?: WebOpsProgress } }
+  }
+
+  return data.progress ?? data.payload?.progress ?? data.current?.payload?.progress ?? null
 }
 
 const CATEGORY_LABELS: Record<BaseBuilderFieldDefinition['category'], string> = {
@@ -919,6 +956,9 @@ export function PoblarBasePage() {
   const [exportDone, setExportDone] = useState(false)
   const [analysis, setAnalysis] = useState<BaseBuilderAnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [webOpsRunning, setWebOpsRunning] = useState(false)
+  const [webOpsStatus, setWebOpsStatus] = useState<string | null>(null)
+  const [webOpsProgress, setWebOpsProgress] = useState<WebOpsProgress | null>(null)
 
   const fieldLabelMap = useMemo(() => buildFieldLabelMap(), [])
   const selectedFieldSet = useMemo(() => new Set(selectedFields), [selectedFields])
@@ -1028,6 +1068,11 @@ export function PoblarBasePage() {
     }
   }, [analysis, exportTemplate, fieldLabelMap])
 
+  useEffect(() => {
+    handleWebOps('progress', { silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function getMatchModeLabel(mode: BaseBuilderMatchMode) {
     if (mode === 'rut') return 'RUT'
     if (mode === 'nombre_persona') return 'nombre'
@@ -1039,6 +1084,62 @@ export function PoblarBasePage() {
     setExportDone(false)
     setError(null)
     setAnalyzeProgress(null)
+  }
+
+  async function handleWebOps(
+    action: WebOpsAction,
+    options: { silent?: boolean } = {}
+  ) {
+    if (!options.silent) {
+      setWebOpsRunning(true)
+      setWebOpsStatus(
+        action === 'enqueue'
+          ? 'Encolando empresas candidatas...'
+          : action === 'process'
+            ? 'Procesando lote de enriquecimiento...'
+            : action === 'run'
+              ? 'Encolando y procesando lote...'
+              : 'Actualizando estado...'
+      )
+    }
+
+    try {
+      const res = await fetch('/api/company-web-enrichment/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          limit: action === 'run' ? 1000 : 5000,
+          batch_size: 25,
+          need: 'any',
+        }),
+      })
+      const payload = await res.json().catch(() => null)
+
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error ?? 'No se pudo ejecutar el poblamiento web masivo.')
+      }
+
+      const progress = extractWebOpsProgress(payload.data)
+      if (progress) setWebOpsProgress(progress)
+      if (!options.silent) {
+        setWebOpsStatus(
+          action === 'progress'
+            ? 'Estado actualizado.'
+            : payload.data?.already_running
+              ? 'Ya había una corrida activa; se actualizó el estado.'
+              : 'Corrida terminada. Estado actualizado.'
+        )
+      }
+    } catch (err) {
+      if (!options.silent) {
+        setWebOpsStatus(err instanceof Error ? err.message : 'No se pudo ejecutar el poblamiento web masivo.')
+      }
+    } finally {
+      if (!options.silent) {
+        setWebOpsRunning(false)
+      }
+    }
   }
 
   function toggleField(field: BaseBuilderFieldKey) {
@@ -1301,6 +1402,7 @@ export function PoblarBasePage() {
                 email_found: aggregateWeb.email_found + webPassResult.email_found,
                 phone_found: aggregateWeb.phone_found + webPassResult.phone_found,
                 providers: {
+                  open_websearch: (aggregateWeb.providers?.open_websearch ?? 0) + (webPassResult.providers?.open_websearch ?? 0),
                   brave: (aggregateWeb.providers?.brave ?? 0) + (webPassResult.providers?.brave ?? 0),
                   duckduckgo: (aggregateWeb.providers?.duckduckgo ?? 0) + (webPassResult.providers?.duckduckgo ?? 0),
                   bing: (aggregateWeb.providers?.bing ?? 0) + (webPassResult.providers?.bing ?? 0),
@@ -1779,6 +1881,76 @@ export function PoblarBasePage() {
                 </p>
               </div>
 
+              <div className="p-3 bg-[#111827] rounded-lg border border-[#253357]">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-slate-300">Poblamiento web masivo</p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Motor principal: Open WebSearch con Startpage primero. Cron semanal habilitado.
+                    </p>
+                  </div>
+                  <Clock className="h-4 w-4 flex-shrink-0 text-brand-400" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
+                    <p className="text-slate-500">En cola</p>
+                    <p className="mt-1 text-base font-semibold text-white">
+                      {formatNumber(toCount(webOpsProgress?.queue?.queued))}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
+                    <p className="text-slate-500">Completadas</p>
+                    <p className="mt-1 text-base font-semibold text-white">
+                      {formatNumber(toCount(webOpsProgress?.queue?.completed))}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
+                    <p className="text-slate-500">Con email</p>
+                    <p className="mt-1 text-base font-semibold text-white">
+                      {formatNumber(toCount(webOpsProgress?.results?.with_email))}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
+                    <p className="text-slate-500">Con teléfono</p>
+                    <p className="mt-1 text-base font-semibold text-white">
+                      {formatNumber(toCount(webOpsProgress?.results?.with_phone))}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleWebOps('progress')}
+                    disabled={webOpsRunning}
+                    className="rounded-lg border border-[#253357] px-2 py-2 text-xs font-medium text-slate-300 transition hover:border-brand-500/40 disabled:opacity-50"
+                  >
+                    <RefreshCw className="mx-auto h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleWebOps('enqueue')}
+                    disabled={webOpsRunning}
+                    className="rounded-lg border border-[#253357] px-2 py-2 text-xs font-medium text-slate-300 transition hover:border-brand-500/40 disabled:opacity-50"
+                  >
+                    Encolar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleWebOps('run')}
+                    disabled={webOpsRunning}
+                    className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-2 py-2 text-xs font-medium text-brand-200 transition hover:border-brand-400/60 disabled:opacity-50"
+                  >
+                    {webOpsRunning ? <Spinner size="sm" /> : <Play className="mx-auto h-4 w-4" />}
+                  </button>
+                </div>
+
+                {webOpsStatus && (
+                  <p className="mt-2 text-[11px] text-slate-400">{webOpsStatus}</p>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-2">
                   Formato de salida
@@ -2114,6 +2286,10 @@ export function PoblarBasePage() {
                       </div>
                       {analysis.web_enrichment.providers && (
                         <>
+                          <div className="flex items-center justify-between">
+                            <span>Motor gratis Open WebSearch</span>
+                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.open_websearch ?? 0)}</span>
+                          </div>
                           <div className="flex items-center justify-between">
                             <span>Busquedas con Brave</span>
                             <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.brave)}</span>

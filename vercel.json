@@ -9,6 +9,14 @@
       "schedule": "0 16 * * *"
     },
     {
+      "path": "/api/hh/week",
+      "schedule": "30 10 * * *"
+    },
+    {
+      "path": "/api/company-web-enrichment/run",
+      "schedule": "0 10 * * 1"
+    },
+    {
       "path": "/api/scenarios/mirofish/sync",
       "schedule": "*/5 * * * *"
     }
