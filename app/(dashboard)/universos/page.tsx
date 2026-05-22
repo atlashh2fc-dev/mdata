@@ -193,10 +193,14 @@ export default function UniversosPage() {
   const dimTotals = useMemo(() => {
     const out: Record<string, number> = {}
     for (const dim of dimensions) {
-      out[dim.key] = scopedData.filter(r => getRowFlag(r, dim.key)).reduce((s, r) => s + r.total, 0)
+      if (entityFilter === 'todos' && dim.source === 'dataset' && typeof dim.record_count === 'number') {
+        out[dim.key] = dim.record_count
+      } else {
+        out[dim.key] = scopedData.filter(r => getRowFlag(r, dim.key)).reduce((s, r) => s + r.total, 0)
+      }
     }
     return out
-  }, [dimensions, scopedData])
+  }, [dimensions, scopedData, entityFilter])
 
   // Calculamos el volumen instantáneamente cruzando la matriz precomputada
   const result = useMemo(() => {
