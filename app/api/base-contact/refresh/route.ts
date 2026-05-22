@@ -88,7 +88,29 @@ async function refreshBaseContact() {
       maxBuffer: SYNC_MAX_BUFFER,
       timeout: 240000,
     }
-  )
+  ).catch(async error => {
+    const message = error instanceof Error ? error.message : String(error)
+    const stderr =
+      typeof error === 'object' && error && 'stderr' in error
+        ? String((error as { stderr?: unknown }).stderr ?? '')
+        : ''
+    const detail = `${message}\n${stderr}`
+
+    if (!/statement timeout|canceling statement due to statement timeout|57014/i.test(detail)) {
+      throw error
+    }
+
+    return execFileAsync(
+      'npm',
+      ['run', 'ops:sync:crm-feedback:direct'],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        maxBuffer: SYNC_MAX_BUFFER,
+        timeout: 600000,
+      }
+    )
+  })
 
   const dataset = await refreshBaseContactDataset()
 
