@@ -5,7 +5,7 @@ import { Header } from '@/components/layout/Header'
 import { LoadingState, EmptyState } from '@/components/ui/Spinner'
 import type { DataSource } from '@/types'
 import {
-  AlertCircle, Database, Download, Eye, FileText, Globe, Loader2, Plus, Table2, X,
+  AlertCircle, BarChart3, Database, Download, Eye, FileText, Globe, Loader2, Plus, ShieldCheck, Table2, X,
 } from 'lucide-react'
 import { formatDatetime, formatNumber, formatRelativeTime } from '@/lib/utils/formatters'
 
@@ -27,6 +27,16 @@ function SourceTypeLabel({ type }: { type: string }) {
     </div>
   )
 }
+
+const GSE_OPTIONS = [
+  { value: 'ALL', label: 'Todos los grupos' },
+  { value: 'AB', label: 'AB' },
+  { value: 'C1A', label: 'C1a' },
+  { value: 'C1B', label: 'C1b' },
+  { value: 'C2', label: 'C2' },
+  { value: 'C3', label: 'C3' },
+  { value: 'DE', label: 'D/E' },
+]
 
 function getExportHref(fuente: DataSource) {
   if (!fuente.canonical_table && !fuente.source_table_name) return null
@@ -76,6 +86,9 @@ export default function DatasetsPage() {
   const [preview, setPreview] = useState<DatasetPreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [gseGroup, setGseGroup] = useState('ALL')
+  const [gseGeoMode, setGseGeoMode] = useState<'geolocated' | 'all'>('geolocated')
+  const [gseMinCount, setGseMinCount] = useState('50')
 
   useEffect(() => {
     loadFuentes()
@@ -138,6 +151,16 @@ export default function DatasetsPage() {
     setPreviewLoading(false)
   }
 
+  function getGseExportHref() {
+    const params = new URLSearchParams({
+      group: gseGroup,
+      geo: gseGeoMode === 'geolocated' ? 'geolocated' : 'all',
+      min_count: gseMinCount || '50',
+      limit: '10000',
+    })
+    return `/api/personas/gse?${params.toString()}`
+  }
+
   return (
     <>
       <Header
@@ -154,7 +177,97 @@ export default function DatasetsPage() {
         }
       />
 
-      <div className="p-6">
+      <div className="p-6 space-y-5">
+        <section className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-4">
+          <div className="card p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-xs text-cyan-300 mb-2">
+                  <BarChart3 className="w-4 h-4" />
+                  Personas naturales
+                </div>
+                <h2 className="text-base font-semibold text-white">
+                  Subconjuntos por grupo socioeconómico proxy
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+                  Descarga cohortes agregadas por región, comuna, grupo, autos, bienes raíces, avalúos y score. El archivo no incluye RUT, nombre, contacto ni dirección exacta.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+                <ShieldCheck className="w-4 h-4" />
+                k-anónimo
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Grupo
+                </label>
+                <select
+                  value={gseGroup}
+                  onChange={event => setGseGroup(event.target.value)}
+                  className="input-base"
+                >
+                  {GSE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Cobertura territorial
+                </label>
+                <select
+                  value={gseGeoMode}
+                  onChange={event => setGseGeoMode(event.target.value === 'all' ? 'all' : 'geolocated')}
+                  className="input-base"
+                >
+                  <option value="geolocated">Solo con región y comuna</option>
+                  <option value="all">Incluir sin zona</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Mínimo por cohorte
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="1000"
+                  value={gseMinCount}
+                  onChange={event => setGseMinCount(event.target.value)}
+                  className="input-base"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-5 pt-4 border-t border-[#253357]/80">
+              <p className="text-xs text-slate-500">
+                Se genera en vivo desde la vista maestra de personas y devuelve hasta 10.000 cohortes.
+              </p>
+              <a
+                href={getGseExportHref()}
+                className="btn-primary justify-center"
+              >
+                <Download className="w-4 h-4" />
+                Descargar subconjunto
+              </a>
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <h3 className="text-sm font-semibold text-white mb-3">Criterio de grupos</h3>
+            <div className="space-y-2 text-xs text-slate-400">
+              <p><span className="font-semibold text-slate-200">AB/C1a/C1b</span> se infiere con señales patrimoniales altas: avalúos, cantidad de bienes raíces, autos y score interno.</p>
+              <p><span className="font-semibold text-slate-200">C2/C3/D-E</span> agrupa el resto por bandas de score patrimonial y señales disponibles.</p>
+              <p>La salida está pensada para priorización territorial y análisis comercial, no para identificar individuos.</p>
+            </div>
+          </div>
+        </section>
+
         {loading ? (
           <LoadingState />
         ) : fuentes.length === 0 ? (
