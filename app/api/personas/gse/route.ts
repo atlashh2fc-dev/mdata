@@ -8,8 +8,21 @@ export const maxDuration = 300
 
 type GseGroup = 'ALL' | 'AB' | 'C1A' | 'C1B' | 'C2' | 'C3' | 'DE'
 
-type GseCohortRow = {
+type GsePersonRow = {
   ranking: string
+  rut: string
+  rutid: string
+  nombre_completo: string | null
+  nombres: string | null
+  paterno: string | null
+  materno: string | null
+  email: string | null
+  email_propiedad: string | null
+  fono_cel: string | null
+  telefono_propiedad_celular: string | null
+  telefono_propiedad_particular: string | null
+  telefono_propiedad_comercial: string | null
+  direccion: string | null
   region: string
   comuna: string
   grupo_socioeconomico_proxy: string
@@ -24,13 +37,31 @@ type GseCohortRow = {
   personas_con_bienes_raices: number
   avaluo_total_clp: string
   avaluo_promedio_clp: string
+  n_autos: number
+  n_bienes_raices: number
+  totalavaluos: string
+  score_patrimonial: number
+  cobertura_pct: number
   score_patrimonial_promedio: string
   cobertura_promedio_pct: string
-  privacidad: string
+  tipo_descarga: string
 }
 
-const CSV_HEADERS: Array<keyof GseCohortRow> = [
+const CSV_HEADERS: Array<keyof GsePersonRow> = [
   'ranking',
+  'rut',
+  'rutid',
+  'nombre_completo',
+  'nombres',
+  'paterno',
+  'materno',
+  'email',
+  'email_propiedad',
+  'fono_cel',
+  'telefono_propiedad_celular',
+  'telefono_propiedad_particular',
+  'telefono_propiedad_comercial',
+  'direccion',
   'region',
   'comuna',
   'grupo_socioeconomico_proxy',
@@ -45,9 +76,14 @@ const CSV_HEADERS: Array<keyof GseCohortRow> = [
   'personas_con_bienes_raices',
   'avaluo_total_clp',
   'avaluo_promedio_clp',
+  'n_autos',
+  'n_bienes_raices',
+  'totalavaluos',
+  'score_patrimonial',
+  'cobertura_pct',
   'score_patrimonial_promedio',
   'cobertura_promedio_pct',
-  'privacidad',
+  'tipo_descarga',
 ]
 
 const GROUP_LABELS: Record<GseGroup, string> = {
@@ -90,7 +126,7 @@ function getPositiveInt(value: string | null, fallback: number, max: number) {
   return Math.min(Math.floor(parsed), max)
 }
 
-async function queryCohorts({
+async function queryPeople({
   group,
   geolocatedOnly,
   minCount,
@@ -119,10 +155,26 @@ async function queryCohorts({
   await client.connect()
   try {
     await client.query(`set statement_timeout = '240s'`)
-    const { rows } = await client.query<GseCohortRow>(
+    const { rows } = await client.query<GsePersonRow>(
       `
       with naturales as (
         select
+          rutid,
+          nullif(ltrim(regexp_replace(upper(rutid::text), '[^0-9K]', '', 'g'), '0'), '') as rut_key,
+          case
+            when length(nullif(ltrim(regexp_replace(upper(rutid::text), '[^0-9K]', '', 'g'), '0'), '')) >= 2
+              then left(
+                nullif(ltrim(regexp_replace(upper(rutid::text), '[^0-9K]', '', 'g'), '0'), ''),
+                length(nullif(ltrim(regexp_replace(upper(rutid::text), '[^0-9K]', '', 'g'), '0'), '')) - 1
+              ) || '-' || right(nullif(ltrim(regexp_replace(upper(rutid::text), '[^0-9K]', '', 'g'), '0'), ''), 1)
+            else rutid::text
+          end as rut,
+          nombre_completo,
+          nombres,
+          paterno,
+          materno,
+          email,
+          fono_cel,
           coalesce(
             nullif(region_canonica, ''),
             nullif(region_part, ''),
@@ -204,31 +256,104 @@ async function queryCohorts({
         where ($1::text is null or grupo_socioeconomico_proxy = $1::text)
         group by 1, 2, 3, 4
         having count(*) >= $2::int
+      ),
+      seleccion as (
+        select
+          n.*,
+          c.cantidad_personas,
+          c.total_autos,
+          c.promedio_autos,
+          c.personas_con_autos,
+          c.total_bienes_raices,
+          c.promedio_bienes_raices,
+          c.personas_con_bienes_raices,
+          c.avaluo_total_clp,
+          c.avaluo_promedio_clp,
+          c.score_patrimonial_promedio,
+          c.cobertura_promedio_pct,
+          c.indice_oportunidad_zona
+        from naturales n
+        join cohortes c
+          on c.region = n.region
+         and c.comuna = n.comuna
+         and c.grupo_socioeconomico_proxy = n.grupo_socioeconomico_proxy
+         and c.tramo_score_patrimonial = n.tramo_score_patrimonial
+        order by
+          c.indice_oportunidad_zona desc,
+          c.cantidad_personas desc,
+          c.avaluo_total_clp desc,
+          n.score_patrimonial desc,
+          n.totalavaluos desc,
+          n.rutid asc
+        limit $6::int
+      ),
+      bbrr_contactos as (
+        select distinct on (s.rutid)
+          s.rutid,
+          nullif(btrim(bp.direccion), '') as direccion,
+          nullif(btrim(bp.email), '') as email_propiedad,
+          nullif(btrim(concat(coalesce(bp.fono_area_cel, ''), coalesce(bp.fono_numero_cel, ''))), '') as telefono_propiedad_celular,
+          nullif(btrim(concat(coalesce(bp.fono_area_part, ''), coalesce(bp.fono_numero_part, ''))), '') as telefono_propiedad_particular,
+          nullif(btrim(concat(coalesce(bp.fono_area_comer, ''), coalesce(bp.fono_numero_comer, ''))), '') as telefono_propiedad_comercial
+        from seleccion s
+        join public.bbrr_propiedades bp
+          on bp.rutid = s.rutid
+          or bp.rutid = s.rut_key
+          or nullif(ltrim(regexp_replace(upper(bp.rutid::text), '[^0-9K]', '', 'g'), '0'), '') = s.rut_key
+        where nullif(btrim(bp.direccion), '') is not null
+          or nullif(btrim(bp.email), '') is not null
+          or nullif(btrim(concat(coalesce(bp.fono_area_cel, ''), coalesce(bp.fono_numero_cel, ''))), '') is not null
+          or nullif(btrim(concat(coalesce(bp.fono_area_part, ''), coalesce(bp.fono_numero_part, ''))), '') is not null
+          or nullif(btrim(concat(coalesce(bp.fono_area_comer, ''), coalesce(bp.fono_numero_comer, ''))), '') is not null
+        order by
+          s.rutid,
+          (nullif(btrim(bp.direccion), '') is not null) desc,
+          bp.avaluo_fiscal desc nulls last,
+          bp.updated_at desc nulls last,
+          bp.id asc
       )
       select
         row_number() over (
-          order by indice_oportunidad_zona desc, cantidad_personas desc, avaluo_total_clp desc
+          order by s.indice_oportunidad_zona desc, s.cantidad_personas desc, s.avaluo_total_clp desc, s.score_patrimonial desc, s.totalavaluos desc, s.rutid asc
         )::text as ranking,
-        region,
-        comuna,
-        grupo_socioeconomico_proxy,
-        tramo_score_patrimonial,
-        cantidad_personas,
-        indice_oportunidad_zona::text,
-        total_autos,
-        promedio_autos::text,
-        personas_con_autos,
-        total_bienes_raices,
-        promedio_bienes_raices::text,
-        personas_con_bienes_raices,
-        avaluo_total_clp::text,
-        avaluo_promedio_clp::text,
-        score_patrimonial_promedio::text,
-        cobertura_promedio_pct::text,
-        'cohorte_anonima_k_min_' || $2::text || '_sin_rut_nombre_contacto_direccion' as privacidad
-      from cohortes
-      order by indice_oportunidad_zona desc, cantidad_personas desc, avaluo_total_clp desc
-      limit $6::int
+        s.rut,
+        s.rutid,
+        s.nombre_completo,
+        s.nombres,
+        s.paterno,
+        s.materno,
+        coalesce(s.email, bc.email_propiedad) as email,
+        bc.email_propiedad,
+        s.fono_cel,
+        bc.telefono_propiedad_celular,
+        bc.telefono_propiedad_particular,
+        bc.telefono_propiedad_comercial,
+        bc.direccion,
+        s.region,
+        s.comuna,
+        s.grupo_socioeconomico_proxy,
+        s.tramo_score_patrimonial,
+        s.cantidad_personas,
+        s.indice_oportunidad_zona::text,
+        s.total_autos,
+        s.promedio_autos::text,
+        s.personas_con_autos,
+        s.total_bienes_raices,
+        s.promedio_bienes_raices::text,
+        s.personas_con_bienes_raices,
+        s.avaluo_total_clp::text,
+        s.avaluo_promedio_clp::text,
+        s.n_autos,
+        s.n_bienes_raices,
+        s.totalavaluos::text,
+        s.score_patrimonial,
+        s.cobertura_pct,
+        s.score_patrimonial_promedio::text,
+        s.cobertura_promedio_pct::text,
+        'personas_identificadas_con_contacto_y_segmentacion' as tipo_descarga
+      from seleccion s
+      left join bbrr_contactos bc on bc.rutid = s.rutid
+      order by s.indice_oportunidad_zona desc, s.cantidad_personas desc, s.avaluo_total_clp desc, s.score_patrimonial desc, s.totalavaluos desc, s.rutid asc
       `,
       [groupFilter, minCount, geolocatedOnly, missingRegion, missingComuna, limit]
     )
@@ -239,7 +364,7 @@ async function queryCohorts({
   }
 }
 
-function toCsv(rows: GseCohortRow[]) {
+function toCsv(rows: GsePersonRow[]) {
   return [
     CSV_HEADERS.join(','),
     ...rows.map(row => CSV_HEADERS.map(header => csvEscape(row[header])).join(',')),
@@ -261,7 +386,7 @@ export async function GET(req: NextRequest) {
   const format = searchParams.get('format') === 'json' ? 'json' : 'csv'
 
   try {
-    const rows = await queryCohorts({ group, geolocatedOnly, minCount, limit })
+    const rows = await queryPeople({ group, geolocatedOnly, minCount, limit })
 
     if (format === 'json') {
       return NextResponse.json({

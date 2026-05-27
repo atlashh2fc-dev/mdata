@@ -190,12 +190,12 @@ export default function DatasetsPage() {
                   Subconjuntos por grupo socioeconómico proxy
                 </h2>
                 <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-                  Descarga cohortes agregadas por región, comuna, grupo, autos, bienes raíces, avalúos y score. El archivo no incluye RUT, nombre, contacto ni dirección exacta.
+                  Descarga personas filtradas por región, comuna, grupo, autos, bienes raíces, avalúos y score. El archivo incluye RUT, nombre, mail, teléfono y dirección disponible.
                 </p>
               </div>
               <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
                 <ShieldCheck className="w-4 h-4" />
-                k-anónimo
+                identificado
               </div>
             </div>
 
@@ -231,7 +231,7 @@ export default function DatasetsPage() {
 
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Mínimo por cohorte
+                  Mínimo por segmento
                 </label>
                 <input
                   type="number"
@@ -246,7 +246,7 @@ export default function DatasetsPage() {
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-5 pt-4 border-t border-[#253357]/80">
               <p className="text-xs text-slate-500">
-                Se genera en vivo desde la vista maestra de personas y devuelve hasta 10.000 cohortes.
+                Se genera en vivo desde la vista maestra de personas y devuelve hasta 10.000 registros.
               </p>
               <a
                 href={getGseExportHref()}
