@@ -90,7 +90,9 @@ export default function DatasetsPage() {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [gseGroups, setGseGroups] = useState<GseGroupValue[]>(['ALL'])
   const [gseGeoMode, setGseGeoMode] = useState<'geolocated' | 'all'>('geolocated')
-  const [gseMinCount, setGseMinCount] = useState('50')
+  const [gseLimit, setGseLimit] = useState('1000')
+  const [gseExporting, setGseExporting] = useState(false)
+  const [gseExportError, setGseExportError] = useState<string | null>(null)
 
   useEffect(() => {
     loadFuentes()
@@ -170,10 +172,38 @@ export default function DatasetsPage() {
     const params = new URLSearchParams({
       group: gseGroups.includes('ALL') ? 'ALL' : gseGroups.join(','),
       geo: gseGeoMode === 'geolocated' ? 'geolocated' : 'all',
-      min_count: gseMinCount || '50',
-      limit: '10000',
+      limit: gseLimit || '10000',
     })
     return `/api/personas/gse?${params.toString()}`
+  }
+
+  async function downloadGseExport() {
+    setGseExporting(true)
+    setGseExportError(null)
+
+    try {
+      const res = await fetch(getGseExportHref())
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error ?? 'No se pudo generar la descarga.')
+      }
+
+      const blob = await res.blob()
+      const disposition = res.headers.get('Content-Disposition') ?? ''
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'personas-gse.csv'
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setGseExportError(error instanceof Error ? error.message : 'No se pudo generar la descarga.')
+    } finally {
+      setGseExporting(false)
+    }
   }
 
   return (
@@ -258,14 +288,14 @@ export default function DatasetsPage() {
 
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                    Mínimo por segmento
+                    Máximo registros
                   </label>
                   <input
                     type="number"
-                    min="50"
-                    max="1000"
-                    value={gseMinCount}
-                    onChange={event => setGseMinCount(event.target.value)}
+                    min="100"
+                    max="10000"
+                    value={gseLimit}
+                    onChange={event => setGseLimit(event.target.value)}
                     className="input-base"
                   />
                 </div>
@@ -274,16 +304,27 @@ export default function DatasetsPage() {
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-5 pt-4 border-t border-[#253357]/80">
               <p className="text-xs text-slate-500">
-                Se genera en vivo desde la vista maestra de personas y devuelve hasta 10.000 registros.
+                Se genera en vivo desde la vista maestra de personas. Para archivos grandes, sube el máximo hasta 10.000.
               </p>
-              <a
-                href={getGseExportHref()}
-                className="btn-primary justify-center"
+              <button
+                type="button"
+                onClick={downloadGseExport}
+                disabled={gseExporting}
+                className="btn-primary justify-center disabled:cursor-wait disabled:opacity-70"
               >
-                <Download className="w-4 h-4" />
-                Descargar subconjunto
-              </a>
+                {gseExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {gseExporting ? 'Generando...' : 'Descargar subconjunto'}
+              </button>
             </div>
+            {gseExportError && (
+              <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {gseExportError}
+              </div>
+            )}
           </div>
 
           <div className="card p-5">

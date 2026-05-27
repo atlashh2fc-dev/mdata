@@ -141,12 +141,10 @@ function getPositiveInt(value: string | null, fallback: number, max: number) {
 async function queryPeople({
   groups,
   geolocatedOnly,
-  minCount,
   limit,
 }: {
   groups: GseGroup[]
   geolocatedOnly: boolean
-  minCount: number
   limit: number
 }) {
   const connectionString = getPgConnectionString()
@@ -168,7 +166,62 @@ async function queryPeople({
     await client.query(`set statement_timeout = '240s'`)
     const { rows } = await client.query<GsePersonRow>(
       `
-      with naturales as (
+      with base as (
+        select
+          pm.rutid,
+          nullif(trim(pm.nombres), '') as nombres,
+          nullif(trim(pm.paterno), '') as paterno,
+          nullif(trim(pm.materno), '') as materno,
+          nullif(trim(
+            coalesce(nullif(trim(pm.nombres), ''), '') || ' ' ||
+            coalesce(nullif(trim(pm.paterno), ''), '') || ' ' ||
+            coalesce(nullif(trim(pm.materno), ''), '')
+          ), '') as nombre_completo,
+          nullif(trim(pm.email), '') as email,
+          nullif(trim(pm.fono_cel), '') as fono_cel,
+          coalesce(
+            nullif(trim(pm.region_part), ''),
+            nullif(trim(pm.domicilio_region), ''),
+            $3::text
+          ) as region,
+          coalesce(
+            nullif(trim(pm.comuna_part), ''),
+            nullif(trim(pm.domicilio_comuna), ''),
+            $4::text
+          ) as comuna,
+          pm.n_autos,
+          pm.n_bienes_raices,
+          pm.totalavaluos,
+          (
+            coalesce(pm.n_autos, 0) * 10 +
+            coalesce(pm.n_bienes_raices, 0) * 20 +
+            case when nullif(btrim(coalesce(pm.razon_social_empresa, '')), '') is not null then 15 else 0 end +
+            case when nullif(trim(pm.email), '') is not null then 5 else 0 end +
+            case when nullif(trim(pm.fono_cel), '') is not null then 5 else 0 end
+          )::int as score_patrimonial,
+          (
+            (
+              case when nullif(trim(pm.nombres), '') is not null then 1 else 0 end +
+              case when nullif(trim(pm.email), '') is not null then 1 else 0 end +
+              case when nullif(trim(pm.fono_cel), '') is not null then 1 else 0 end +
+              case when nullif(trim(pm.region_part), '') is not null then 1 else 0 end +
+              case when coalesce(pm.n_autos, 0) > 0 then 1 else 0 end +
+              case when nullif(btrim(coalesce(pm.razon_social_empresa, '')), '') is not null then 1 else 0 end +
+              case when nullif(trim(pm.domicilio_region), '') is not null then 1 else 0 end +
+              case when coalesce(pm.n_bienes_raices, 0) > 0 then 1 else 0 end
+            )::float / 8.0 * 100
+          )::int as cobertura_pct
+        from public.personas_master pm
+        where nullif(btrim(coalesce(pm.razon_social_empresa, '')), '') is null
+          and (
+            $2::boolean = false
+            or (
+              coalesce(nullif(trim(pm.region_part), ''), nullif(trim(pm.domicilio_region), '')) is not null
+              and coalesce(nullif(trim(pm.comuna_part), ''), nullif(trim(pm.domicilio_comuna), '')) is not null
+            )
+          )
+      ),
+      naturales as (
         select
           rutid,
           nullif(ltrim(regexp_replace(upper(rutid::text), '[^0-9K]', '', 'g'), '0'), '') as rut_key,
@@ -186,142 +239,71 @@ async function queryPeople({
           materno,
           email,
           fono_cel,
-          coalesce(
-            nullif(region_canonica, ''),
-            nullif(region_part, ''),
-            nullif(domicilio_region, ''),
-            $4::text
-          ) as region,
-          coalesce(
-            nullif(comuna_canonica, ''),
-            nullif(comuna_part, ''),
-            nullif(domicilio_comuna, ''),
-            $5::text
-          ) as comuna,
-          coalesce(n_autos, 0) as n_autos,
-          coalesce(n_bienes_raices, 0) as n_bienes_raices,
-          coalesce(totalavaluos, 0)::numeric as totalavaluos,
-          coalesce(score_patrimonial, 0) as score_patrimonial,
-          coalesce(cobertura_pct, 0) as cobertura_pct,
+          region,
+          comuna,
+          n_autos,
+          n_bienes_raices,
+          totalavaluos,
+          score_patrimonial,
+          cobertura_pct,
           case
             when coalesce(totalavaluos, 0) >= 500000000
               or coalesce(n_bienes_raices, 0) >= 3
               or coalesce(n_autos, 0) >= 4
-              or coalesce(score_patrimonial, 0) >= 120 then 'AB'
+              or score_patrimonial >= 120 then 'AB'
             when coalesce(totalavaluos, 0) >= 180000000
               or coalesce(n_bienes_raices, 0) >= 2
               or coalesce(n_autos, 0) >= 2
-              or coalesce(score_patrimonial, 0) >= 70 then 'C1a'
+              or score_patrimonial >= 70 then 'C1a'
             when coalesce(totalavaluos, 0) >= 80000000
               or coalesce(n_bienes_raices, 0) >= 1
               or coalesce(n_autos, 0) >= 1
-              or coalesce(score_patrimonial, 0) >= 40 then 'C1b'
+              or score_patrimonial >= 40 then 'C1b'
             when coalesce(totalavaluos, 0) >= 30000000
-              or coalesce(score_patrimonial, 0) >= 20 then 'C2'
-            when coalesce(score_patrimonial, 0) >= 10 then 'C3'
+              or score_patrimonial >= 20 then 'C2'
+            when score_patrimonial >= 10 then 'C3'
             else 'D/E'
           end as grupo_socioeconomico_proxy,
           case
-            when coalesce(score_patrimonial, 0) >= 150 then 'score_150_mas'
-            when coalesce(score_patrimonial, 0) >= 100 then 'score_100_149'
-            when coalesce(score_patrimonial, 0) >= 70 then 'score_70_99'
-            when coalesce(score_patrimonial, 0) >= 40 then 'score_40_69'
-            when coalesce(score_patrimonial, 0) >= 20 then 'score_20_39'
-            when coalesce(score_patrimonial, 0) >= 10 then 'score_10_19'
+            when score_patrimonial >= 150 then 'score_150_mas'
+            when score_patrimonial >= 100 then 'score_100_149'
+            when score_patrimonial >= 70 then 'score_70_99'
+            when score_patrimonial >= 40 then 'score_40_69'
+            when score_patrimonial >= 20 then 'score_20_39'
+            when score_patrimonial >= 10 then 'score_10_19'
             else 'score_0_9'
           end as tramo_score_patrimonial
-        from public.master_personas_view
-        where nullif(btrim(coalesce(razon_social_empresa, '')), '') is null
-          and (
-            $3::boolean = false
-            or (
-              coalesce(nullif(region_canonica, ''), nullif(region_part, ''), nullif(domicilio_region, '')) is not null
-              and coalesce(nullif(comuna_canonica, ''), nullif(comuna_part, ''), nullif(domicilio_comuna, '')) is not null
-            )
-          )
-      ),
-      cohortes as (
-        select
-          region,
-          comuna,
-          grupo_socioeconomico_proxy,
-          tramo_score_patrimonial,
-          count(*)::int as cantidad_personas,
-          sum(n_autos)::int as total_autos,
-          round(avg(n_autos)::numeric, 2) as promedio_autos,
-          count(*) filter (where n_autos > 0)::int as personas_con_autos,
-          sum(n_bienes_raices)::int as total_bienes_raices,
-          round(avg(n_bienes_raices)::numeric, 2) as promedio_bienes_raices,
-          count(*) filter (where n_bienes_raices > 0)::int as personas_con_bienes_raices,
-          round(sum(totalavaluos))::bigint as avaluo_total_clp,
-          round(avg(totalavaluos))::bigint as avaluo_promedio_clp,
-          round(avg(score_patrimonial)::numeric, 2) as score_patrimonial_promedio,
-          round(avg(cobertura_pct)::numeric, 2) as cobertura_promedio_pct,
-          (
-            least(55, ln(1 + sum(totalavaluos)) / ln(1 + 1000000000000::numeric) * 55)
-            + least(25, ln(1 + sum(n_bienes_raices)) / ln(1 + 100000) * 25)
-            + least(15, ln(1 + sum(n_autos)) / ln(1 + 100000) * 15)
-            + least(5, count(*)::numeric / 10000 * 5)
-          )::numeric(10,2) as indice_oportunidad_zona
-        from naturales
-        where ($1::text[] is null or grupo_socioeconomico_proxy = any($1::text[]))
-        group by 1, 2, 3, 4
-        having count(*) >= $2::int
+        from base
       ),
       seleccion as (
         select
-          n.*,
-          c.cantidad_personas,
-          c.total_autos,
-          c.promedio_autos,
-          c.personas_con_autos,
-          c.total_bienes_raices,
-          c.promedio_bienes_raices,
-          c.personas_con_bienes_raices,
-          c.avaluo_total_clp,
-          c.avaluo_promedio_clp,
-          c.score_patrimonial_promedio,
-          c.cobertura_promedio_pct,
-          c.indice_oportunidad_zona
-        from naturales n
-        join cohortes c
-          on c.region = n.region
-         and c.comuna = n.comuna
-         and c.grupo_socioeconomico_proxy = n.grupo_socioeconomico_proxy
-         and c.tramo_score_patrimonial = n.tramo_score_patrimonial
+          f.*,
+          1::int as cantidad_personas,
+          coalesce(f.n_autos, 0)::int as total_autos,
+          coalesce(f.n_autos, 0)::numeric(10,2) as promedio_autos,
+          case when coalesce(f.n_autos, 0) > 0 then 1 else 0 end::int as personas_con_autos,
+          coalesce(f.n_bienes_raices, 0)::int as total_bienes_raices,
+          coalesce(f.n_bienes_raices, 0)::numeric(10,2) as promedio_bienes_raices,
+          case when coalesce(f.n_bienes_raices, 0) > 0 then 1 else 0 end::int as personas_con_bienes_raices,
+          round(coalesce(f.totalavaluos, 0))::bigint as avaluo_total_clp,
+          round(coalesce(f.totalavaluos, 0))::bigint as avaluo_promedio_clp,
+          f.score_patrimonial::numeric(10,2) as score_patrimonial_promedio,
+          f.cobertura_pct::numeric(10,2) as cobertura_promedio_pct,
+          (
+            least(55, ln(1 + coalesce(f.totalavaluos, 0)) / ln(1 + 1000000000000::numeric) * 55)
+            + least(25, ln(1 + coalesce(f.n_bienes_raices, 0)) / ln(1 + 100000) * 25)
+            + least(15, ln(1 + coalesce(f.n_autos, 0)) / ln(1 + 100000) * 15)
+            + 0.01
+          )::numeric(10,2) as indice_oportunidad_zona
+        from naturales f
+        where ($1::text[] is null or f.grupo_socioeconomico_proxy = any($1::text[]))
         order by
-          c.indice_oportunidad_zona desc,
-          c.cantidad_personas desc,
-          c.avaluo_total_clp desc,
-          n.score_patrimonial desc,
-          n.totalavaluos desc,
-          n.rutid asc
-        limit $6::int
-      ),
-      bbrr_contactos as (
-        select distinct on (s.rutid)
-          s.rutid,
-          nullif(btrim(bp.direccion), '') as direccion,
-          nullif(btrim(bp.email), '') as email_propiedad,
-          nullif(btrim(concat(coalesce(bp.fono_area_cel, ''), coalesce(bp.fono_numero_cel, ''))), '') as telefono_propiedad_celular,
-          nullif(btrim(concat(coalesce(bp.fono_area_part, ''), coalesce(bp.fono_numero_part, ''))), '') as telefono_propiedad_particular,
-          nullif(btrim(concat(coalesce(bp.fono_area_comer, ''), coalesce(bp.fono_numero_comer, ''))), '') as telefono_propiedad_comercial
-        from seleccion s
-        join public.bbrr_propiedades bp
-          on bp.rutid = s.rutid
-          or bp.rutid = s.rut_key
-          or nullif(ltrim(regexp_replace(upper(bp.rutid::text), '[^0-9K]', '', 'g'), '0'), '') = s.rut_key
-        where nullif(btrim(bp.direccion), '') is not null
-          or nullif(btrim(bp.email), '') is not null
-          or nullif(btrim(concat(coalesce(bp.fono_area_cel, ''), coalesce(bp.fono_numero_cel, ''))), '') is not null
-          or nullif(btrim(concat(coalesce(bp.fono_area_part, ''), coalesce(bp.fono_numero_part, ''))), '') is not null
-          or nullif(btrim(concat(coalesce(bp.fono_area_comer, ''), coalesce(bp.fono_numero_comer, ''))), '') is not null
-        order by
-          s.rutid,
-          (nullif(btrim(bp.direccion), '') is not null) desc,
-          bp.avaluo_fiscal desc nulls last,
-          bp.updated_at desc nulls last,
-          bp.id asc
+          f.totalavaluos desc,
+          score_patrimonial desc,
+          f.n_bienes_raices desc,
+          f.n_autos desc,
+          f.rutid asc
+        limit $5::int
       )
       select
         row_number() over (
@@ -333,9 +315,9 @@ async function queryPeople({
         s.nombres,
         s.paterno,
         s.materno,
-        coalesce(s.email, bc.email_propiedad) as email,
+        coalesce(s.email, ec.best_email, bc.email_propiedad) as email,
         bc.email_propiedad,
-        s.fono_cel,
+        coalesce(s.fono_cel, pc.best_phone, bc.telefono_propiedad_celular, bc.telefono_propiedad_particular, bc.telefono_propiedad_comercial) as fono_cel,
         bc.telefono_propiedad_celular,
         bc.telefono_propiedad_particular,
         bc.telefono_propiedad_comercial,
@@ -354,19 +336,57 @@ async function queryPeople({
         s.personas_con_bienes_raices,
         s.avaluo_total_clp::text,
         s.avaluo_promedio_clp::text,
-        s.n_autos,
-        s.n_bienes_raices,
-        s.totalavaluos::text,
+        coalesce(s.n_autos, 0) as n_autos,
+        coalesce(s.n_bienes_raices, 0) as n_bienes_raices,
+        coalesce(s.totalavaluos, 0)::text as totalavaluos,
         s.score_patrimonial,
         s.cobertura_pct,
         s.score_patrimonial_promedio::text,
         s.cobertura_promedio_pct::text,
         'personas_identificadas_con_contacto_y_segmentacion' as tipo_descarga
       from seleccion s
-      left join bbrr_contactos bc on bc.rutid = s.rutid
+      left join lateral (
+        select pcp.contact_value as best_phone
+        from public.persona_contact_points pcp
+        where pcp.rutid = s.rutid
+          and pcp.contact_type = 'phone'
+        order by pcp.is_verified desc, pcp.is_primary desc, pcp.quality_score desc, pcp.last_seen_at desc
+        limit 1
+      ) pc on true
+      left join lateral (
+        select pcp.contact_value as best_email
+        from public.persona_contact_points pcp
+        where pcp.rutid = s.rutid
+          and pcp.contact_type = 'email'
+        order by pcp.is_verified desc, pcp.is_primary desc, pcp.quality_score desc, pcp.last_seen_at desc
+        limit 1
+      ) ec on true
+      left join lateral (
+        select
+          nullif(btrim(bp.direccion), '') as direccion,
+          nullif(btrim(bp.email), '') as email_propiedad,
+          nullif(btrim(concat(coalesce(bp.fono_area_cel, ''), coalesce(bp.fono_numero_cel, ''))), '') as telefono_propiedad_celular,
+          nullif(btrim(concat(coalesce(bp.fono_area_part, ''), coalesce(bp.fono_numero_part, ''))), '') as telefono_propiedad_particular,
+          nullif(btrim(concat(coalesce(bp.fono_area_comer, ''), coalesce(bp.fono_numero_comer, ''))), '') as telefono_propiedad_comercial
+        from public.bbrr_propiedades bp
+        where bp.rutid = s.rutid
+          and (
+            nullif(btrim(bp.direccion), '') is not null
+            or nullif(btrim(bp.email), '') is not null
+            or nullif(btrim(concat(coalesce(bp.fono_area_cel, ''), coalesce(bp.fono_numero_cel, ''))), '') is not null
+            or nullif(btrim(concat(coalesce(bp.fono_area_part, ''), coalesce(bp.fono_numero_part, ''))), '') is not null
+            or nullif(btrim(concat(coalesce(bp.fono_area_comer, ''), coalesce(bp.fono_numero_comer, ''))), '') is not null
+          )
+        order by
+          (nullif(btrim(bp.direccion), '') is not null) desc,
+          bp.avaluo_fiscal desc nulls last,
+          bp.updated_at desc nulls last,
+          bp.id asc
+        limit 1
+      ) bc on true
       order by s.indice_oportunidad_zona desc, s.cantidad_personas desc, s.avaluo_total_clp desc, s.score_patrimonial desc, s.totalavaluos desc, s.rutid asc
       `,
-      [groupFilter, minCount, geolocatedOnly, missingRegion, missingComuna, limit]
+      [groupFilter, geolocatedOnly, missingRegion, missingComuna, limit]
     )
 
     return rows
@@ -392,12 +412,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const groups = getGroupParams(searchParams.getAll('group'))
   const geolocatedOnly = searchParams.get('geo') !== 'all'
-  const minCount = getPositiveInt(searchParams.get('min_count'), 50, 1000)
   const limit = getPositiveInt(searchParams.get('limit'), 1000, 10000)
   const format = searchParams.get('format') === 'json' ? 'json' : 'csv'
 
   try {
-    const rows = await queryPeople({ groups, geolocatedOnly, minCount, limit })
+    const rows = await queryPeople({ groups, geolocatedOnly, limit })
     const groupLabels = groups.map(group => GROUP_LABELS[group])
 
     if (format === 'json') {
@@ -407,7 +426,6 @@ export async function GET(req: NextRequest) {
         meta: {
           group: groupLabels.join(', '),
           geolocated_only: geolocatedOnly,
-          min_count: minCount,
           limit,
           row_count: rows.length,
         },
