@@ -36,7 +36,9 @@ const GSE_OPTIONS = [
   { value: 'C2', label: 'C2' },
   { value: 'C3', label: 'C3' },
   { value: 'DE', label: 'D/E' },
-]
+] as const
+
+type GseGroupValue = typeof GSE_OPTIONS[number]['value']
 
 function getExportHref(fuente: DataSource) {
   if (!fuente.canonical_table && !fuente.source_table_name) return null
@@ -86,7 +88,7 @@ export default function DatasetsPage() {
   const [preview, setPreview] = useState<DatasetPreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const [gseGroup, setGseGroup] = useState('ALL')
+  const [gseGroups, setGseGroups] = useState<GseGroupValue[]>(['ALL'])
   const [gseGeoMode, setGseGeoMode] = useState<'geolocated' | 'all'>('geolocated')
   const [gseMinCount, setGseMinCount] = useState('50')
 
@@ -151,9 +153,22 @@ export default function DatasetsPage() {
     setPreviewLoading(false)
   }
 
+  function toggleGseGroup(group: GseGroupValue) {
+    setGseGroups(current => {
+      if (group === 'ALL') return ['ALL']
+
+      const selected = current.filter(value => value !== 'ALL')
+      const next = selected.includes(group)
+        ? selected.filter(value => value !== group)
+        : [...selected, group]
+
+      return next.length > 0 ? next : ['ALL']
+    })
+  }
+
   function getGseExportHref() {
     const params = new URLSearchParams({
-      group: gseGroup,
+      group: gseGroups.includes('ALL') ? 'ALL' : gseGroups.join(','),
       geo: gseGeoMode === 'geolocated' ? 'geolocated' : 'all',
       min_count: gseMinCount || '50',
       limit: '10000',
@@ -199,48 +214,61 @@ export default function DatasetsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+            <div className="space-y-4 mt-5">
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Grupo
+                  Grupos
                 </label>
-                <select
-                  value={gseGroup}
-                  onChange={event => setGseGroup(event.target.value)}
-                  className="input-base"
-                >
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
                   {GSE_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <label
+                      key={option.value}
+                      className={`flex h-10 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors ${
+                        gseGroups.includes(option.value)
+                          ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-100'
+                          : 'border-[#253357] bg-[#0f172a] text-slate-300 hover:border-cyan-400/40'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={gseGroups.includes(option.value)}
+                        onChange={() => toggleGseGroup(option.value)}
+                        className="h-4 w-4 rounded border-slate-600 bg-[#0b1224] accent-cyan-400"
+                      />
+                      <span>{option.label}</span>
+                    </label>
                   ))}
-                </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Cobertura territorial
-                </label>
-                <select
-                  value={gseGeoMode}
-                  onChange={event => setGseGeoMode(event.target.value === 'all' ? 'all' : 'geolocated')}
-                  className="input-base"
-                >
-                  <option value="geolocated">Solo con región y comuna</option>
-                  <option value="all">Incluir sin zona</option>
-                </select>
-              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Cobertura territorial
+                  </label>
+                  <select
+                    value={gseGeoMode}
+                    onChange={event => setGseGeoMode(event.target.value === 'all' ? 'all' : 'geolocated')}
+                    className="input-base"
+                  >
+                    <option value="geolocated">Solo con región y comuna</option>
+                    <option value="all">Incluir sin zona</option>
+                  </select>
+                </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Mínimo por segmento
-                </label>
-                <input
-                  type="number"
-                  min="50"
-                  max="1000"
-                  value={gseMinCount}
-                  onChange={event => setGseMinCount(event.target.value)}
-                  className="input-base"
-                />
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Mínimo por segmento
+                  </label>
+                  <input
+                    type="number"
+                    min="50"
+                    max="1000"
+                    value={gseMinCount}
+                    onChange={event => setGseMinCount(event.target.value)}
+                    className="input-base"
+                  />
+                </div>
               </div>
             </div>
 
@@ -263,7 +291,7 @@ export default function DatasetsPage() {
             <div className="space-y-2 text-xs text-slate-400">
               <p><span className="font-semibold text-slate-200">AB/C1a/C1b</span> se infiere con señales patrimoniales altas: avalúos, cantidad de bienes raíces, autos y score interno.</p>
               <p><span className="font-semibold text-slate-200">C2/C3/D-E</span> agrupa el resto por bandas de score patrimonial y señales disponibles.</p>
-              <p>La salida está pensada para priorización territorial y análisis comercial, no para identificar individuos.</p>
+              <p>La salida está pensada para priorización y activación comercial con personas identificadas.</p>
             </div>
           </div>
         </section>

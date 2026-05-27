@@ -111,13 +111,25 @@ function getPgConnectionString() {
   return url.toString()
 }
 
-function getGroupParam(value: string | null): GseGroup {
-  const normalized = (value ?? 'ALL').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+function getGroupToken(value: string): GseGroup | null {
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
   if (normalized === 'C1A') return 'C1A'
   if (normalized === 'C1B') return 'C1B'
   if (normalized === 'DE' || normalized === 'D' || normalized === 'E') return 'DE'
   if (['ALL', 'AB', 'C2', 'C3'].includes(normalized)) return normalized as GseGroup
-  return 'ALL'
+  return null
+}
+
+function getGroupParams(values: string[]): GseGroup[] {
+  const parsed = values
+    .flatMap(value => value.split(','))
+    .map(getGroupToken)
+    .filter((group): group is GseGroup => Boolean(group))
+
+  if (parsed.length === 0 || parsed.includes('ALL')) return ['ALL']
+
+  const order: GseGroup[] = ['AB', 'C1A', 'C1B', 'C2', 'C3', 'DE']
+  return order.filter(group => parsed.includes(group))
 }
 
 function getPositiveInt(value: string | null, fallback: number, max: number) {
@@ -127,12 +139,12 @@ function getPositiveInt(value: string | null, fallback: number, max: number) {
 }
 
 async function queryPeople({
-  group,
+  groups,
   geolocatedOnly,
   minCount,
   limit,
 }: {
-  group: GseGroup
+  groups: GseGroup[]
   geolocatedOnly: boolean
   minCount: number
   limit: number
@@ -147,8 +159,7 @@ async function queryPeople({
     ssl: { rejectUnauthorized: false },
   })
 
-  const groupLabel = GROUP_LABELS[group]
-  const groupFilter = group === 'ALL' ? null : groupLabel
+  const groupFilter = groups.includes('ALL') ? null : groups.map(group => GROUP_LABELS[group])
   const missingRegion = geolocatedOnly ? null : 'SIN_REGION'
   const missingComuna = geolocatedOnly ? null : 'SIN_COMUNA'
 
@@ -253,7 +264,7 @@ async function queryPeople({
             + least(5, count(*)::numeric / 10000 * 5)
           )::numeric(10,2) as indice_oportunidad_zona
         from naturales
-        where ($1::text is null or grupo_socioeconomico_proxy = $1::text)
+        where ($1::text[] is null or grupo_socioeconomico_proxy = any($1::text[]))
         group by 1, 2, 3, 4
         having count(*) >= $2::int
       ),
@@ -379,21 +390,22 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = req.nextUrl
-  const group = getGroupParam(searchParams.get('group'))
+  const groups = getGroupParams(searchParams.getAll('group'))
   const geolocatedOnly = searchParams.get('geo') !== 'all'
   const minCount = getPositiveInt(searchParams.get('min_count'), 50, 1000)
   const limit = getPositiveInt(searchParams.get('limit'), 1000, 10000)
   const format = searchParams.get('format') === 'json' ? 'json' : 'csv'
 
   try {
-    const rows = await queryPeople({ group, geolocatedOnly, minCount, limit })
+    const rows = await queryPeople({ groups, geolocatedOnly, minCount, limit })
+    const groupLabels = groups.map(group => GROUP_LABELS[group])
 
     if (format === 'json') {
       return NextResponse.json({
         success: true,
         data: rows,
         meta: {
-          group: GROUP_LABELS[group],
+          group: groupLabels.join(', '),
           geolocated_only: geolocatedOnly,
           min_count: minCount,
           limit,
@@ -402,7 +414,9 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const suffix = group === 'ALL' ? 'todos' : GROUP_LABELS[group].toLowerCase().replace('/', '-')
+    const suffix = groups.includes('ALL')
+      ? 'todos'
+      : groupLabels.join('-').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     const geoSuffix = geolocatedOnly ? 'geolocalizadas' : 'todas'
 
     return new Response(toCsv(rows), {
