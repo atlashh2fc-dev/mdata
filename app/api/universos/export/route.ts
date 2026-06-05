@@ -351,6 +351,19 @@ function validateExportRequest(
   return null
 }
 
+function getActiveDatasetDimensions(
+  dimensions: DatasetDimension[],
+  filters: Record<string, boolean | null | undefined>
+) {
+  const activeDatasetKeys = new Set(
+    Object.entries(filters)
+      .filter(([key, value]) => value !== null && value !== undefined && !STATIC_FILTER_KEYS.has(key))
+      .map(([key]) => key)
+  )
+
+  return dimensions.filter(dim => activeDatasetKeys.has(dim.key))
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -379,10 +392,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: validationError }, { status: 400 })
     }
 
+    const activeDatasetDimensions = getActiveDatasetDimensions(dimensions, filters)
     const encoder = new TextEncoder()
     const headers = [
       ...BASE_EXPORT_HEADERS,
-      ...dimensions.map(dim => `dataset_${dim.slug}`),
+      ...activeDatasetDimensions.map(dim => `dataset_${dim.slug}`),
     ]
     const fileName = `universo-${slugify(entityFilter)}-${new Date().toISOString().slice(0, 10)}.csv`
 
@@ -394,7 +408,7 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(`${headers.map(csvEscape).join(',')}\n`))
 
           while (true) {
-            const { sql, params } = buildExportQuery(dimensions, entityFilter, filters, cursor)
+            const { sql, params } = buildExportQuery(activeDatasetDimensions, entityFilter, filters, cursor)
             const result = await client!.query(sql, params)
 
             if (result.rows.length === 0) break

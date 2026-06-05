@@ -388,6 +388,106 @@ async function getDatasetProfile(dataset: DatasetCatalogItem, sampleLimit = DEFA
   })
 }
 
+function extractCompanyIndustryQuery(message: string) {
+  const normalized = message
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[¿?¡!.,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const patterns = [
+    /\bempresas?\s+(?:de|del|en|sobre|rubro|actividad)\s+(.+)$/,
+    /\bcompanias?\s+(?:de|del|en|sobre|rubro|actividad)\s+(.+)$/,
+    /\bclientes?\s+(?:de|del|en|sobre|rubro|actividad)\s+(.+)$/,
+    /\bbases?\s+(?:de|del|en|sobre|rubro|actividad)\s+(.+)$/,
+  ]
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    const candidate = match?.[1]
+      ?.replace(/\b(tienes|tenemos|hay|existen|disponibles|en la base|en bases|para exportar)\b/g, '')
+      .trim()
+
+    if (candidate && candidate.length > 2) return candidate
+  }
+
+  const knownIndustryTerms = [
+    'factoring',
+    'leasing',
+    'financiera',
+    'financieras',
+    'constructora',
+    'constructoras',
+    'inmobiliaria',
+    'inmobiliarias',
+    'transporte',
+    'logistica',
+    'mineria',
+    'agricola',
+    'retail',
+    'salud',
+    'educacion',
+  ]
+
+  return knownIndustryTerms.find(term => normalized.includes(term)) ?? null
+}
+
+async function searchCompaniesByIndustry(term: string, limit = 10) {
+  const safeLimit = Math.min(Math.max(Number(limit), 1), 30)
+  const searchTerm = term.trim()
+
+  if (searchTerm.length < 3) {
+    throw new Error('Indica un rubro o actividad con al menos 3 caracteres.')
+  }
+
+  return withClient(async client => {
+    const result = await client.query(`
+      WITH matches AS (
+        SELECT
+          rutid,
+          razon_social,
+          segmento_tamano_empresa,
+          rubro_economico_ultimo,
+          subrubro_economico_ultimo,
+          actividad_economica_ultima,
+          region,
+          comuna,
+          email,
+          fono_cel,
+          score_patrimonial
+        FROM public.empresas_comercial_unificada
+        WHERE COALESCE(es_universo_operativo_ventas, true) = true
+          AND (
+            razon_social ILIKE $1
+            OR rubro_economico_ultimo ILIKE $1
+            OR subrubro_economico_ultimo ILIKE $1
+            OR actividad_economica_ultima ILIKE $1
+          )
+      ),
+      counted AS (
+        SELECT count(*)::bigint AS total FROM matches
+      )
+      SELECT
+        matches.*,
+        counted.total
+      FROM matches
+      CROSS JOIN counted
+      ORDER BY
+        score_patrimonial DESC NULLS LAST,
+        razon_social ASC NULLS LAST
+      LIMIT $2
+    `, [`%${searchTerm}%`, safeLimit])
+
+    return {
+      term: searchTerm,
+      total: Number(result.rows[0]?.total ?? 0),
+      rows: result.rows.map(({ total, ...row }) => row),
+    }
+  })
+}
+
 function renderDatasetCatalogMarkdown(catalog: DatasetCatalogItem[]) {
   if (catalog.length === 0) {
     return 'No encontré bases activas registradas en `dataset_overview`.'
@@ -451,6 +551,31 @@ function wantsDatasetProfile(message: string) {
 
 async function answerFastDataQuestion(messages: { role: string; content: string }[]) {
   const lastUserMessage = getLastUserMessage(messages)
+  const companyIndustryQuery = extractCompanyIndustryQuery(lastUserMessage)
+
+  if (companyIndustryQuery) {
+    const result = await searchCompaniesByIndustry(companyIndustryQuery)
+    const columns = ['rutid', 'razon_social', 'actividad_economica_ultima', 'region', 'comuna', 'fono_cel', 'email']
+    const sampleTable = result.rows.length > 0
+      ? [
+        `| ${columns.join(' | ')} |`,
+        `| ${columns.map(() => '---').join(' | ')} |`,
+        ...result.rows.slice(0, 8).map(row => `| ${columns.map(column => csvLikeValue(row[column])).join(' | ')} |`),
+      ].join('\n')
+      : 'No encontré coincidencias directas en razón social, rubro, subrubro ni actividad.'
+
+    return [
+      `**Empresas relacionadas con “${result.term}”**`,
+      '',
+      `Encontré **${formatCount(result.total)}** coincidencia${result.total === 1 ? '' : 's'} en el universo de empresas.`,
+      '',
+      sampleTable,
+      '',
+      result.total > 0
+        ? 'Puedo usar este mismo criterio para armar una descarga filtrada o cruzarlo con contacto, región, tamaño y score.'
+        : 'Si quieres, pruebo una búsqueda más amplia por rubros financieros relacionados.',
+    ].join('\n')
+  }
 
   if (/\b(crm|contact\s*center|gestiones?|gestion|pyme|pymes)\b/i.test(lastUserMessage)) {
     const overview = await getPymeCrmOverview()
