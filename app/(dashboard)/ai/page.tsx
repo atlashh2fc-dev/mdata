@@ -11,6 +11,8 @@ type Message = {
   content: string
 }
 
+const CHAT_REQUEST_TIMEOUT_MS = 18000
+
 function formatCompactCount(value: number | null | undefined): string {
   if (!value) return 'datos actualizados'
   return new Intl.NumberFormat('es-CL', {
@@ -25,6 +27,40 @@ function buildWelcomeMessage(stats: DashboardStats | null): string {
   }
 
   return `¡Hola! Soy InceptionLabs, tu **Cerebro Inteligente de Negocios**.\n\nTengo acceso en tiempo real a ${formatNumber(stats.total_ruts)} perfiles, ${formatNumber(stats.total_autos)} vehículos y ${formatNumber(stats.empresas_universo_total)} empresas activas en tu maestro de datos actualizado.\n\n¿En qué industria te gustaría que encontremos tu próximo segmento de alto valor hoy?`
+}
+
+function normalizePrompt(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[¿?¡!.,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getInstantReply(prompt: string, stats: DashboardStats | null): string | null {
+  const normalized = normalizePrompt(prompt)
+
+  if (/^(hola|ola|buenas|buenos dias|buen dia|buenas tardes|buenas noches|hello|hi|hey)$/.test(normalized)) {
+    return stats
+      ? `Hola. Estoy listo.\n\nTengo cargados **${formatNumber(stats.total_ruts)} perfiles**, **${formatNumber(stats.empresas_universo_total)} empresas** y **${formatNumber(stats.total_autos)} vehículos**.\n\nPregúntame directo, por ejemplo: “tienes empresas de factoring”, “cuántas empresas con contacto tenemos” o “muéstrame las bases disponibles”.`
+      : 'Hola. Estoy listo para consultar bases, empresas, cruces y segmentos. Pregúntame directo, por ejemplo: “tienes empresas de factoring” o “muéstrame las bases disponibles”.'
+  }
+
+  if (/^(que puedes hacer|que haces|ayuda|help|como funciona)$/.test(normalized)) {
+    return [
+      'Puedo responder rápido sobre:',
+      '',
+      '- Bases disponibles, columnas y muestras.',
+      '- Empresas por rubro o actividad, como factoring, transporte o inmobiliarias.',
+      '- Cruces con CRM, contacto, región, tamaño y score.',
+      '- Segmentos exportables cuando me das criterios concretos.',
+    ].join('\n')
+  }
+
+  return null
 }
 
 export default function CerebroDeNegociosPage() {
@@ -78,7 +114,17 @@ export default function CerebroDeNegociosPage() {
     setInput('')
     const newMessages = [...messages, { role: 'user', content: userMsg } as Message]
     setMessages(newMessages)
+
+    const instantReply = getInstantReply(userMsg, dashboardStats)
+    if (instantReply) {
+      setMessages([...newMessages, { role: 'assistant', content: instantReply }])
+      return
+    }
+
     setLoading(true)
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), CHAT_REQUEST_TIMEOUT_MS)
 
     try {
       // Filtrar mensajes 'system' u otros ocultos si es necesario, pero mantenemos simple:
@@ -90,7 +136,8 @@ export default function CerebroDeNegociosPage() {
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: payload })
+        body: JSON.stringify({ messages: payload }),
+        signal: controller.signal,
       })
 
       const data = await res.json()
@@ -100,9 +147,14 @@ export default function CerebroDeNegociosPage() {
         setMessages(prev => [...prev, { role: 'assistant', content: 'Lo siento, ocurrió un error procesando la consulta.' }])
       }
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Error de conexión con la IA.' }])
+      const message = err instanceof DOMException && err.name === 'AbortError'
+        ? 'La IA se demoró más de lo aceptable. Para consultas de datos, pregúntame directo por una base, rubro o cruce y responderé por la ruta rápida.'
+        : 'Error de conexión con la IA.'
+      setMessages(prev => [...prev, { role: 'assistant', content: message }])
+    } finally {
+      window.clearTimeout(timeout)
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const renderInlineMarkdown = (text: string) => {

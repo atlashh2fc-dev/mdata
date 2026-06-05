@@ -20,7 +20,7 @@ const DEFAULT_SAMPLE_LIMIT = 20
 const MAX_SAMPLE_LIMIT = 100
 const DEFAULT_DATASET_CATALOG_LIMIT = 30
 const DEFAULT_DATASET_SAMPLE_LIMIT = 8
-const LLM_TIMEOUT_MS = 45000
+const LLM_TIMEOUT_MS = 18000
 const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 const ALLOWED_SEGMENT_FIELDS = new Set(FILTER_FIELDS.map(field => field.key as string))
 const ALLOWED_SEGMENT_OPERATORS = new Set<FilterOperator>([
@@ -122,6 +122,17 @@ function getLastUserMessage(messages: { role: string; content: string }[]) {
   return [...messages].reverse().find(message => message.role === 'user')?.content ?? ''
 }
 
+function normalizePrompt(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[¿?¡!.,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function formatCount(value: unknown) {
   const numberValue = Number(value ?? 0)
   return Number.isFinite(numberValue) ? numberValue.toLocaleString('es-CL') : '0'
@@ -147,6 +158,27 @@ function withTimeoutSignal(timeoutMs = LLM_TIMEOUT_MS) {
     signal: controller.signal,
     clear: () => clearTimeout(timeout),
   }
+}
+
+function getDirectAssistantResponse(messages: { role: string; content: string }[]) {
+  const normalized = normalizePrompt(getLastUserMessage(messages))
+
+  if (/^(hola|ola|buenas|buenos dias|buen dia|buenas tardes|buenas noches|hello|hi|hey)$/.test(normalized)) {
+    return 'Hola. Estoy listo para consultar bases, empresas, rubros, cruces y segmentos. Pregúntame directo, por ejemplo: “tienes empresas de factoring” o “muéstrame las bases disponibles”.'
+  }
+
+  if (/^(que puedes hacer|que haces|ayuda|help|como funciona)$/.test(normalized)) {
+    return [
+      'Puedo responder rápido sobre:',
+      '',
+      '- Bases disponibles, columnas y muestras.',
+      '- Empresas por rubro o actividad, como factoring, transporte o inmobiliarias.',
+      '- Cruces con CRM, contacto, región, tamaño y score.',
+      '- Segmentos exportables cuando me das criterios concretos.',
+    ].join('\n')
+  }
+
+  return null
 }
 
 async function fetchStats() {
@@ -829,6 +861,11 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const { messages } = await req.json()
+    const directResponse = getDirectAssistantResponse(messages || [])
+
+    if (directResponse) {
+      return NextResponse.json({ success: true, message: directResponse, mode: 'instant' })
+    }
 
     if (shouldAnswerFastDataQuestion(messages || []) && !shouldSyncCrm(messages || [])) {
       try {
