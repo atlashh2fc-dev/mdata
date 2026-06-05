@@ -16,6 +16,7 @@ import {
   BriefcaseBusiness,
   TrendingUp,
   RefreshCcw,
+  Download,
   Check,
   X,
   Minus,
@@ -125,6 +126,8 @@ export default function UniversosPage() {
   const [dimensions, setDimensions] = useState<UniverseDimension[]>(DEFAULT_DIMENSIONS)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [entityFilter, setEntityFilter] = useState<EntityFilter>('persona_natural')
 
   // Filters state (null = ANY, true = REQUIRED, false = EXCLUDED)
@@ -240,6 +243,42 @@ export default function UniversosPage() {
   }
 
   const resetFilters = () => setFilters({})
+
+  async function exportCurrentSegment() {
+    if (activeCount === 0 || exporting) return
+
+    setExporting(true)
+    setExportError(null)
+
+    try {
+      const res = await fetch('/api/universos/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityFilter, filters }),
+      })
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error ?? 'No se pudo exportar este segmento.')
+      }
+
+      const blob = await res.blob()
+      const disposition = res.headers.get('Content-Disposition') ?? ''
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'universo-segmento.csv'
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'No se pudo exportar este segmento.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // Active filters count
   const activeCount = Object.values(filters).filter(v => v !== null).length
@@ -495,9 +534,19 @@ export default function UniversosPage() {
                    </div>
                  </div>
                  
-                 <button className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all ${activeCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>
-                    {activeCount > 0 ? 'Exportar este segmento exacto' : 'Aplica filtros para exportar'}
+                 <button
+                  onClick={exportCurrentSegment}
+                  disabled={activeCount === 0 || exporting}
+                  className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all inline-flex items-center justify-center gap-2 ${activeCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25 disabled:opacity-60 disabled:cursor-wait' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                 >
+                    <Download className="w-4 h-4" />
+                    {exporting ? 'Exportando…' : activeCount > 0 ? 'Exportar este segmento exacto' : 'Aplica filtros para exportar'}
                  </button>
+                 {exportError && (
+                  <p className="mt-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                    {exportError}
+                  </p>
+                 )}
                </>
              )}
           </div>

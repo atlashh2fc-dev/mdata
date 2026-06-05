@@ -18,6 +18,10 @@ const CRM_SYNC_MAX_BUFFER = 1024 * 1024 * 4
 const DEFAULT_CRM_FRESH_MINUTES = 180
 const DEFAULT_SAMPLE_LIMIT = 20
 const MAX_SAMPLE_LIMIT = 100
+const DEFAULT_DATASET_CATALOG_LIMIT = 30
+const DEFAULT_DATASET_SAMPLE_LIMIT = 8
+const LLM_TIMEOUT_MS = 45000
+const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 const ALLOWED_SEGMENT_FIELDS = new Set(FILTER_FIELDS.map(field => field.key as string))
 const ALLOWED_SEGMENT_OPERATORS = new Set<FilterOperator>([
   'eq',
@@ -52,6 +56,21 @@ type CrmFreshness = {
   last_score_refresh_at: string | null
   age_minutes: number | null
   is_fresh: boolean
+}
+
+type DatasetCatalogItem = {
+  id: string | null
+  name: string | null
+  slug: string | null
+  description: string | null
+  canonical_table: string | null
+  source_table_name: string | null
+  record_count: number | null
+  latest_loaded_row_count: number | null
+  last_loaded_at: string | null
+  latest_version_completed_at: string | null
+  last_job_status: string | null
+  latest_version_status: string | null
 }
 
 let pool: Pool | null = null
@@ -89,6 +108,45 @@ function getPool() {
   }
 
   return pool
+}
+
+function isValidIdentifier(value: string | null | undefined) {
+  return Boolean(value && TABLE_NAME_PATTERN.test(value))
+}
+
+function quoteIdentifier(identifier: string) {
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function getLastUserMessage(messages: { role: string; content: string }[]) {
+  return [...messages].reverse().find(message => message.role === 'user')?.content ?? ''
+}
+
+function formatCount(value: unknown) {
+  const numberValue = Number(value ?? 0)
+  return Number.isFinite(numberValue) ? numberValue.toLocaleString('es-CL') : '0'
+}
+
+function formatDate(value: unknown) {
+  if (!value) return 'sin fecha'
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function csvLikeValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function withTimeoutSignal(timeoutMs = LLM_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeout),
+  }
 }
 
 async function fetchStats() {
@@ -247,6 +305,183 @@ async function getPymeCrmOverview() {
       freshness,
     }
   })
+}
+
+async function getDatasetCatalog(limit = DEFAULT_DATASET_CATALOG_LIMIT) {
+  const safeLimit = Math.min(Math.max(Number(limit), 1), 100)
+
+  return withClient(async client => {
+    const result = await client.query(`
+      SELECT
+        id,
+        name,
+        slug,
+        description,
+        canonical_table,
+        source_table_name,
+        record_count,
+        latest_loaded_row_count,
+        last_loaded_at,
+        latest_version_completed_at,
+        last_job_status,
+        latest_version_status
+      FROM public.dataset_overview
+      WHERE COALESCE(is_active, true) = true
+      ORDER BY COALESCE(latest_version_completed_at, last_loaded_at, updated_at, created_at) DESC NULLS LAST
+      LIMIT $1
+    `, [safeLimit])
+
+    return result.rows as DatasetCatalogItem[]
+  })
+}
+
+function resolveDatasetFromMessage(message: string, catalog: DatasetCatalogItem[]) {
+  const normalized = message.toLowerCase()
+
+  return catalog.find(item => {
+    const slug = item.slug?.toLowerCase()
+    const name = item.name?.toLowerCase()
+    const table = item.canonical_table?.toLowerCase()
+    return Boolean(
+      (slug && normalized.includes(slug)) ||
+      (table && normalized.includes(table)) ||
+      (name && name.length > 3 && normalized.includes(name))
+    )
+  }) ?? null
+}
+
+async function getDatasetProfile(dataset: DatasetCatalogItem, sampleLimit = DEFAULT_DATASET_SAMPLE_LIMIT) {
+  const tableName = dataset.canonical_table ?? dataset.source_table_name
+  if (!isValidIdentifier(tableName)) {
+    throw new Error('La base no tiene una tabla fisica valida para revisar.')
+  }
+
+  const safeLimit = Math.min(Math.max(Number(sampleLimit), 1), 20)
+
+  return withClient(async client => {
+    const columnsResult = await client.query(`
+      SELECT
+        a.attname AS column_name,
+        format_type(a.atttypid, a.atttypmod) AS data_type
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname = $1
+        AND c.relkind IN ('r', 'p', 'v', 'm')
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+      ORDER BY a.attnum ASC
+    `, [tableName])
+
+    const sampleResult = await client.query(
+      `SELECT * FROM public.${quoteIdentifier(tableName!)} LIMIT $1`,
+      [safeLimit]
+    )
+
+    return {
+      dataset,
+      table_name: tableName,
+      columns: columnsResult.rows as { column_name: string; data_type: string }[],
+      sample_rows: sampleResult.rows as Record<string, unknown>[],
+    }
+  })
+}
+
+function renderDatasetCatalogMarkdown(catalog: DatasetCatalogItem[]) {
+  if (catalog.length === 0) {
+    return 'No encontré bases activas registradas en `dataset_overview`.'
+  }
+
+  const rows = catalog.map(item => {
+    const count = item.latest_loaded_row_count ?? item.record_count ?? 0
+    const status = item.latest_version_status ?? item.last_job_status ?? 'sin estado'
+    const loadedAt = item.latest_version_completed_at ?? item.last_loaded_at
+    return `| ${item.name ?? item.slug ?? 'Sin nombre'} | \`${item.slug ?? 'sin-slug'}\` | ${formatCount(count)} | ${status} | ${formatDate(loadedAt)} |`
+  })
+
+  return [
+    `Tenemos **${catalog.length} bases activas recientes** listas para consulta rápida:`,
+    '',
+    '| Base | Slug | Filas | Estado | Última carga |',
+    '|---|---:|---:|---|---|',
+    ...rows,
+    '',
+    'Puedes pedirme `analiza base <slug>` o `muéstrame columnas de <slug>` y respondo desde la tabla real sin hacer procesos largos.',
+  ].join('\n')
+}
+
+function renderDatasetProfileMarkdown(profile: Awaited<ReturnType<typeof getDatasetProfile>>) {
+  const { dataset, columns, sample_rows: sampleRows } = profile
+  const count = dataset.latest_loaded_row_count ?? dataset.record_count ?? 0
+  const columnPreview = columns.slice(0, 18).map(col => `\`${col.column_name}\` (${col.data_type})`).join(', ')
+  const visibleColumns = columns.slice(0, 8).map(col => col.column_name)
+  const sampleTable = sampleRows.length > 0
+    ? [
+      `| ${visibleColumns.join(' | ')} |`,
+      `| ${visibleColumns.map(() => '---').join(' | ')} |`,
+      ...sampleRows.slice(0, 5).map(row => `| ${visibleColumns.map(column => csvLikeValue(row[column])).join(' | ')} |`),
+    ].join('\n')
+    : 'Sin muestra disponible.'
+
+  return [
+    `**${dataset.name ?? dataset.slug ?? 'Base'}**`,
+    '',
+    `- Slug: \`${dataset.slug ?? 'sin-slug'}\``,
+    `- Tabla: \`${profile.table_name}\``,
+    `- Filas registradas: **${formatCount(count)}**`,
+    `- Columnas: **${columns.length}**`,
+    `- Última carga: ${formatDate(dataset.latest_version_completed_at ?? dataset.last_loaded_at)}`,
+    '',
+    `Columnas principales: ${columnPreview || 'sin columnas detectadas'}.`,
+    '',
+    sampleTable,
+  ].join('\n')
+}
+
+function shouldAnswerFastDataQuestion(messages: { role: string; content: string }[]) {
+  const lastUserMessage = getLastUserMessage(messages)
+  return /\b(bases?|datas?|datasets?|fuentes?|tablas?|bdd|columnas?|filas?|registros?|muestra|muestrame|analiza|analisis|cruces?|crm|contact\s*center|gestiones?|pyme|pymes)\b/i
+    .test(lastUserMessage)
+}
+
+function wantsDatasetProfile(message: string) {
+  return /\b(analiza|analisis|columnas?|muestra|muestrame|ejemplos?|filas?|estructura|perfil|preview)\b/i.test(message)
+}
+
+async function answerFastDataQuestion(messages: { role: string; content: string }[]) {
+  const lastUserMessage = getLastUserMessage(messages)
+
+  if (/\b(crm|contact\s*center|gestiones?|gestion|pyme|pymes)\b/i.test(lastUserMessage)) {
+    const overview = await getPymeCrmOverview()
+    const freshness = overview.freshness
+    const metrics = overview.metrics
+
+    return [
+      '**Resumen PyME / CRM rápido**',
+      '',
+      `- Total PyME: **${formatCount(metrics.total_pyme)}**`,
+      `- Con gestión CRM: **${formatCount(metrics.pyme_con_gestion_crm)}**`,
+      `- Con gestión y contacto válido: **${formatCount(metrics.pyme_con_gestion_y_contacto_valido)}**`,
+      `- Con mejor teléfono: **${formatCount(metrics.pyme_con_mejor_telefono)}**`,
+      `- Con mejor email: **${formatCount(metrics.pyme_con_mejor_email)}**`,
+      `- Prioridad alta: **${formatCount(metrics.pyme_prioridad_alta)}**`,
+      '',
+      `Freshness CRM: ${freshness.is_fresh ? 'vigente' : 'revisar'} · último sync ${formatDate(freshness.last_sync_completed_at)}.`,
+      '',
+      'No lancé sincronización automática para no dejar pegado el chat. Si quieres refrescar CRM ahora, pídeme “sincroniza CRM”.',
+    ].join('\n')
+  }
+
+  const catalog = await getDatasetCatalog()
+  const matchedDataset = resolveDatasetFromMessage(lastUserMessage, catalog)
+
+  if (matchedDataset && wantsDatasetProfile(lastUserMessage)) {
+    const profile = await getDatasetProfile(matchedDataset)
+    return renderDatasetProfileMarkdown(profile)
+  }
+
+  return renderDatasetCatalogMarkdown(catalog)
 }
 
 async function getPymeCrmSample(args: { limit?: number; onlyValidContact?: boolean; onlyWithCrm?: boolean }) {
@@ -409,6 +644,23 @@ async function executeTool(
     return JSON.stringify(await ensureCrmFresh(Number(args.max_fresh_minutes ?? DEFAULT_CRM_FRESH_MINUTES)), null, 2)
   }
 
+  if (name === 'getDatasetCatalog') {
+    return JSON.stringify(await getDatasetCatalog(Number(args.limit ?? DEFAULT_DATASET_CATALOG_LIMIT)), null, 2)
+  }
+
+  if (name === 'getDatasetProfile') {
+    const catalog = await getDatasetCatalog(100)
+    const query = String(args.query ?? '')
+    const dataset = resolveDatasetFromMessage(query, catalog)
+      ?? catalog.find(item => item.slug === args.slug)
+
+    if (!dataset) {
+      throw new Error('No encontré una base que coincida con ese nombre o slug.')
+    }
+
+    return JSON.stringify(await getDatasetProfile(dataset, Number(args.sample_limit ?? DEFAULT_DATASET_SAMPLE_LIMIT)), null, 2)
+  }
+
   if (name === 'getPymeCrmOverview') {
     return JSON.stringify(await getPymeCrmOverview(), null, 2)
   }
@@ -429,14 +681,20 @@ async function executeTool(
 }
 
 function shouldLoadBusinessContext(messages: { role: string; content: string }[]) {
-  const lastUserMessage = [...messages].reverse().find(message => message.role === 'user')?.content ?? ''
-  return /\b(pyme|pymes|bdd|crm|contact\s*center|contacto|contactos|gestion|gestiones|empresa|empresas|muestra|filas|ejemplos?|adjunto)\b/i
+  const lastUserMessage = getLastUserMessage(messages)
+  return /\b(crm|contact\s*center|contacto|contactos|gestion|gestiones|empresa|empresas|muestra|ejemplos?|adjunto)\b/i
     .test(lastUserMessage)
 }
 
 function shouldLoadSample(messages: { role: string; content: string }[]) {
-  const lastUserMessage = [...messages].reverse().find(message => message.role === 'user')?.content ?? ''
+  const lastUserMessage = getLastUserMessage(messages)
   return /\b(muestra|filas|ejemplos?|adjunto|sample|listado|tabla)\b/i.test(lastUserMessage)
+}
+
+function shouldSyncCrm(messages: { role: string; content: string }[]) {
+  const lastUserMessage = getLastUserMessage(messages)
+  return /\b(sincroniza|sincronizar|sync|refresca|actualiza)\b/i.test(lastUserMessage) &&
+    /\b(crm|contact\s*center|gestiones?|feedback)\b/i.test(lastUserMessage)
 }
 
 export async function POST(req: NextRequest) {
@@ -445,12 +703,21 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
+    const { messages } = await req.json()
+
+    if (shouldAnswerFastDataQuestion(messages || []) && !shouldSyncCrm(messages || [])) {
+      try {
+        const message = await answerFastDataQuestion(messages || [])
+        return NextResponse.json({ success: true, message, mode: 'fast-data' })
+      } catch (fastError) {
+        console.warn('[AI fast-data fallback]', fastError)
+      }
+    }
+    
     if (!INCEPTION_KEY) {
       return NextResponse.json({ error: 'INCEPTION_API_KEY no configurada' }, { status: 500 })
     }
 
-    const { messages } = await req.json()
-    
     // Obtener contexto de BD real
     const stats = await fetchStats()
     const systemPrompt = `Eres el "Cerebro de Negocios" de la plataforma RUT Intelligence. 
@@ -463,8 +730,9 @@ También tienes herramientas internas de datos para responder preguntas sobre el
 
 Reglas obligatorias:
 - Si el usuario pregunta por PyME, BDD PyME, empresas, gestiones CRM, contactos CRM, contact center, muestras o ejemplos de datos, usa herramientas internas. No inventes cifras.
-- Antes de responder métricas o muestras CRM, llama ensureCrmFresh. Si sincroniza, usa los datos post-sync. Si no sincroniza, declara el timestamp disponible.
+- No sincronices CRM automáticamente. Solo llama ensureCrmFresh si el usuario pide explícitamente sincronizar, refrescar o actualizar CRM; para consultas normales usa los datos disponibles y declara el timestamp.
 - Para conteos como "cuanta bdd pyme tenemos" o "cuantos tienen contacto con CRM", llama getPymeCrmOverview.
+- Para preguntas sobre qué bases/datasets existen, columnas, registros o estructura, llama getDatasetCatalog o getDatasetProfile.
 - Si el usuario pide muestra, ejemplos o filas, llama getPymeCrmSample y devuelve una tabla Markdown breve con los campos más útiles.
 - Explica de forma clara si los datos vienen de persona_scores/contact_center_feedback sincronizados desde crm_feedback_export_v1.
 - Si el usuario pide "descargar", "exportar", "link", "enlace" o "URL" para un segmento inferible, llama createSegmentDownload y entrega el enlace Markdown de descarga. No respondas que no puedes si existen filtros concretos.
@@ -485,9 +753,11 @@ ${JSON.stringify(stats, null, 2)}
       const contextPayload: Record<string, unknown> = {}
 
       try {
-        contextPayload.crm_freshness = await ensureCrmFresh()
+        contextPayload.crm_freshness = shouldSyncCrm(messages || [])
+          ? await ensureCrmFresh()
+          : await getCrmFreshness()
       } catch (error) {
-        contextPayload.crm_freshness_error = error instanceof Error ? error.message : 'No se pudo validar/sincronizar CRM.'
+        contextPayload.crm_freshness_error = error instanceof Error ? error.message : 'No se pudo validar CRM.'
       }
 
       try {
@@ -536,13 +806,53 @@ ${JSON.stringify(stats, null, 2)}
         type: 'function',
         function: {
           name: 'ensureCrmFresh',
-          description: 'Valida si el CRM local esta actualizado. Si esta viejo, ejecuta el sync desde registro_intel/crm_feedback_export_v1 y refresca scoring CRM.',
+          description: 'Valida si el CRM local esta actualizado y, solo cuando el usuario lo pidio explicitamente, ejecuta el sync desde registro_intel/crm_feedback_export_v1 y refresca scoring CRM.',
           parameters: {
             type: 'object',
             properties: {
               max_fresh_minutes: {
                 type: 'number',
                 description: 'Minutos maximos aceptables desde el ultimo sync. Default 180.'
+              }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'getDatasetCatalog',
+          description: 'Lista rapidamente las bases/datasets activos: nombre, slug, tabla, filas, estado y ultima carga.',
+          parameters: {
+            type: 'object',
+            properties: {
+              limit: {
+                type: 'number',
+                description: 'Cantidad maxima de bases a listar. Default 30, max recomendado 100.'
+              }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'getDatasetProfile',
+          description: 'Perfila una base especifica por nombre o slug: columnas, tipos y muestra liviana de filas.',
+          parameters: {
+            type: 'object',
+            properties: {
+              slug: {
+                type: 'string',
+                description: 'Slug exacto si se conoce.'
+              },
+              query: {
+                type: 'string',
+                description: 'Texto del usuario o nombre aproximado de la base.'
+              },
+              sample_limit: {
+                type: 'number',
+                description: 'Filas de muestra. Default 8, max 20.'
               }
             }
           }
@@ -659,19 +969,21 @@ ${JSON.stringify(stats, null, 2)}
     ]
 
     // 1. LLamada a InceptionLabs
+    const firstLlmTimeout = withTimeoutSignal()
     let res = await fetch(INCEPTION_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${INCEPTION_KEY}`,
         'Content-Type': 'application/json'
       },
+      signal: firstLlmTimeout.signal,
       body: JSON.stringify({
         model: 'mercury-2',
         messages: currentMessages,
         tools: tools,
         tool_choice: 'auto'
       })
-    })
+    }).finally(firstLlmTimeout.clear)
 
     let data = await res.json()
 
@@ -703,19 +1015,21 @@ ${JSON.stringify(stats, null, 2)}
       }
 
       // Volver a llamar al LLM con la data de la tool
+      const roundLlmTimeout = withTimeoutSignal()
       res = await fetch(INCEPTION_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${INCEPTION_KEY}`,
           'Content-Type': 'application/json'
         },
+        signal: roundLlmTimeout.signal,
         body: JSON.stringify({
           model: 'mercury-2',
           messages: currentMessages,
           tools,
           tool_choice: 'auto'
         })
-      })
+      }).finally(roundLlmTimeout.clear)
       data = await res.json()
     }
 

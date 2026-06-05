@@ -19,8 +19,6 @@ const STATIC_DIMENSIONS = [
   { key: 'con_empresa', label: 'Dueño de Empresa', description: 'Cruce con razón social o empresa', source: 'master' },
 ] as const
 
-const DATASET_DIMENSION_LIMIT = 6
-const DATASET_DIMENSION_MAX_ROWS = 500_000
 const SKIPPED_DATASET_SLUGS = new Set([
   'master_personas',
   'padron_2024',
@@ -129,7 +127,7 @@ async function discoverDatasetDimensions(pgPool: Pool): Promise<DatasetDimension
       ds.name,
       ds.description,
       ds.canonical_table,
-      ds.record_count,
+      COALESCE(ds.record_count, ds.latest_loaded_row_count, 0) AS record_count,
       COALESCE(ds.latest_version_completed_at, ds.last_loaded_at, ds.updated_at, ds.created_at) AS last_loaded_at
     FROM public.dataset_overview ds
     JOIN pg_catalog.pg_class cls
@@ -147,13 +145,11 @@ async function discoverDatasetDimensions(pgPool: Pool): Promise<DatasetDimension
       AND ds.canonical_table IS NOT NULL
       AND COALESCE(ds.last_job_status, ds.latest_version_status, 'completed') <> 'failed'
       AND COALESCE(ds.record_count, ds.latest_loaded_row_count, 0) > 0
-      AND COALESCE(ds.record_count, ds.latest_loaded_row_count, 0) <= $1
     ORDER BY COALESCE(ds.latest_version_completed_at, ds.last_loaded_at, ds.updated_at, ds.created_at) DESC NULLS LAST
-  `, [DATASET_DIMENSION_MAX_ROWS])
+  `)
 
   return rows
     .filter(row => row.slug && row.canonical_table && !SKIPPED_DATASET_SLUGS.has(row.slug))
-    .slice(0, DATASET_DIMENSION_LIMIT)
     .map(row => ({
       key: toDimensionKey(row.slug),
       label: row.name,
