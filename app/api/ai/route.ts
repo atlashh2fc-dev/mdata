@@ -73,6 +73,23 @@ type DatasetCatalogItem = {
   latest_version_status: string | null
 }
 
+type AssistantIntent =
+  | { type: 'direct'; confidence: number }
+  | { type: 'dataset_catalog'; confidence: number }
+  | { type: 'dataset_profile'; confidence: number }
+  | { type: 'company_industry'; confidence: number; query: string }
+  | { type: 'crm_overview'; confidence: number }
+  | { type: 'crm_sample'; confidence: number }
+  | { type: 'crm_sync'; confidence: number }
+  | { type: 'export_segment'; confidence: number }
+  | { type: 'strategy'; confidence: number }
+
+type AssistantAgentResult = {
+  agent: string
+  message: string
+  confidence: number
+}
+
 let pool: Pool | null = null
 let crmSyncPromise: Promise<{
   stdout: string
@@ -421,13 +438,7 @@ async function getDatasetProfile(dataset: DatasetCatalogItem, sampleLimit = DEFA
 }
 
 function extractCompanyIndustryQuery(message: string) {
-  const normalized = message
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[¿?¡!.,;:]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const normalized = normalizePrompt(message)
 
   const patterns = [
     /\bempresas?\s+(?:de|del|en|sobre|rubro|actividad)\s+(.+)$/,
@@ -447,7 +458,13 @@ function extractCompanyIndustryQuery(message: string) {
 
   const knownIndustryTerms = [
     'factoring',
+    'factorgin',
+    'factorin',
+    'factoraje',
     'leasing',
+    'servicios financieros',
+    'servicio financiero',
+    'financiero',
     'financiera',
     'financieras',
     'constructora',
@@ -466,17 +483,54 @@ function extractCompanyIndustryQuery(message: string) {
   return knownIndustryTerms.find(term => normalized.includes(term)) ?? null
 }
 
+function expandCompanyIndustryTerms(term: string) {
+  const normalized = normalizePrompt(term)
+  const terms = new Set<string>()
+
+  for (const part of normalized.split(/\s+(?:o|y)\s+|\/|,/g)) {
+    const cleaned = part
+      .replace(/\b(empresas?|clientes?|bases?|tienes|tenemos|hay|existen|disponibles|de|del|en|sobre|rubro|actividad)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (cleaned.length > 2) terms.add(cleaned)
+  }
+
+  if (/\bfactor\w*\b/.test(normalized)) {
+    terms.add('factoring')
+    terms.add('factoraje')
+    terms.add('facturas')
+  }
+
+  if (/\bfinancier\w*\b/.test(normalized) || normalized.includes('servicios financieros')) {
+    terms.add('servicios financieros')
+    terms.add('servicio financiero')
+    terms.add('financiero')
+    terms.add('financiera')
+    terms.add('financieras')
+    terms.add('intermediacion financiera')
+    terms.add('actividades financieras')
+    terms.add('credito')
+    terms.add('creditos')
+  }
+
+  return Array.from(terms).filter(item => item.length > 2).slice(0, 12)
+}
+
 async function searchCompaniesByIndustry(term: string, limit = 10) {
   const safeLimit = Math.min(Math.max(Number(limit), 1), 30)
-  const searchTerm = term.trim()
+  const searchTerms = expandCompanyIndustryTerms(term)
 
-  if (searchTerm.length < 3) {
+  if (searchTerms.length === 0) {
     throw new Error('Indica un rubro o actividad con al menos 3 caracteres.')
   }
 
   return withClient(async client => {
-    const result = await client.query(`
-      WITH matches AS (
+    await client.query("SET statement_timeout = '8000ms'")
+
+    try {
+      const likeTerms = searchTerms.map(item => `%${item}%`)
+      const result = await client.query(`
         SELECT
           rutid,
           razon_social,
@@ -491,31 +545,29 @@ async function searchCompaniesByIndustry(term: string, limit = 10) {
           score_patrimonial
         FROM public.empresas_comercial_unificada
         WHERE COALESCE(es_universo_operativo_ventas, true) = true
-          AND (
-            razon_social ILIKE $1
-            OR rubro_economico_ultimo ILIKE $1
-            OR subrubro_economico_ultimo ILIKE $1
-            OR actividad_economica_ultima ILIKE $1
+          AND EXISTS (
+            SELECT 1
+            FROM unnest($1::text[]) AS q(term)
+            WHERE COALESCE(razon_social, '') ILIKE q.term
+              OR COALESCE(rubro_economico_ultimo, '') ILIKE q.term
+              OR COALESCE(subrubro_economico_ultimo, '') ILIKE q.term
+              OR COALESCE(actividad_economica_ultima, '') ILIKE q.term
           )
-      ),
-      counted AS (
-        SELECT count(*)::bigint AS total FROM matches
-      )
-      SELECT
-        matches.*,
-        counted.total
-      FROM matches
-      CROSS JOIN counted
-      ORDER BY
-        score_patrimonial DESC NULLS LAST,
-        razon_social ASC NULLS LAST
-      LIMIT $2
-    `, [`%${searchTerm}%`, safeLimit])
+        ORDER BY
+          score_patrimonial DESC NULLS LAST,
+          razon_social ASC NULLS LAST
+        LIMIT $2
+      `, [likeTerms, safeLimit])
 
-    return {
-      term: searchTerm,
-      total: Number(result.rows[0]?.total ?? 0),
-      rows: result.rows.map(({ total, ...row }) => row),
+      return {
+        term,
+        search_terms: searchTerms,
+        sample_count: result.rows.length,
+        has_more: result.rows.length === safeLimit,
+        rows: result.rows,
+      }
+    } finally {
+      await client.query('RESET statement_timeout').catch(() => null)
     }
   })
 }
@@ -573,7 +625,7 @@ function renderDatasetProfileMarkdown(profile: Awaited<ReturnType<typeof getData
 
 function shouldAnswerFastDataQuestion(messages: { role: string; content: string }[]) {
   const lastUserMessage = getLastUserMessage(messages)
-  return /\b(bases?|datas?|datasets?|fuentes?|tablas?|bdd|columnas?|filas?|registros?|muestra|muestrame|analiza|analisis|cruces?|crm|contact\s*center|gestiones?|pyme|pymes)\b/i
+  return /\b(bases?|datas?|datasets?|fuentes?|tablas?|bdd|columnas?|filas?|registros?|muestra|muestrame|analiza|analisis|cruces?|crm|contact\s*center|gestiones?|pyme|pymes|empresas?|factoring|factorgin|factorin|factoraje|financier\w*|servicios?\s+financieros?)\b/i
     .test(lastUserMessage)
 }
 
@@ -599,11 +651,14 @@ async function answerFastDataQuestion(messages: { role: string; content: string 
     return [
       `**Empresas relacionadas con “${result.term}”**`,
       '',
-      `Encontré **${formatCount(result.total)}** coincidencia${result.total === 1 ? '' : 's'} en el universo de empresas.`,
+      result.sample_count > 0
+        ? `Sí. Encontré coincidencias en el universo de empresas. Busqué por: ${result.search_terms.map(item => `\`${item}\``).join(', ')}.`
+        : `No encontré coincidencias rápidas buscando por: ${result.search_terms.map(item => `\`${item}\``).join(', ')}.`,
+      result.has_more ? 'Te muestro una muestra inicial; hay más resultados posibles.' : '',
       '',
       sampleTable,
       '',
-      result.total > 0
+      result.sample_count > 0
         ? 'Puedo usar este mismo criterio para armar una descarga filtrada o cruzarlo con contacto, región, tamaño y score.'
         : 'Si quieres, pruebo una búsqueda más amplia por rubros financieros relacionados.',
     ].join('\n')
@@ -639,6 +694,32 @@ async function answerFastDataQuestion(messages: { role: string; content: string 
   }
 
   return renderDatasetCatalogMarkdown(catalog)
+}
+
+function renderCompanyIndustryMarkdown(result: Awaited<ReturnType<typeof searchCompaniesByIndustry>>) {
+  const columns = ['rutid', 'razon_social', 'actividad_economica_ultima', 'region', 'comuna', 'fono_cel', 'email']
+  const sampleTable = result.rows.length > 0
+    ? [
+      `| ${columns.join(' | ')} |`,
+      `| ${columns.map(() => '---').join(' | ')} |`,
+      ...result.rows.slice(0, 8).map(row => `| ${columns.map(column => csvLikeValue(row[column])).join(' | ')} |`),
+    ].join('\n')
+    : 'No encontré coincidencias directas en razón social, rubro, subrubro ni actividad.'
+
+  return [
+    `**Empresas relacionadas con “${result.term}”**`,
+    '',
+    result.sample_count > 0
+      ? `Sí. Encontré coincidencias en el universo de empresas. Busqué por: ${result.search_terms.map(item => `\`${item}\``).join(', ')}.`
+      : `No encontré coincidencias rápidas buscando por: ${result.search_terms.map(item => `\`${item}\``).join(', ')}.`,
+    result.has_more ? 'Te muestro una muestra inicial; hay más resultados posibles.' : '',
+    '',
+    sampleTable,
+    '',
+    result.sample_count > 0
+      ? 'Puedo usar este mismo criterio para armar una descarga filtrada o cruzarlo con contacto, región, tamaño y score.'
+      : 'Puedo ampliar por términos relacionados, pero necesito otro sinónimo o actividad para evitar una búsqueda demasiado abierta.',
+  ].join('\n')
 }
 
 async function getPymeCrmSample(args: { limit?: number; onlyValidContact?: boolean; onlyWithCrm?: boolean }) {
@@ -854,6 +935,186 @@ function shouldSyncCrm(messages: { role: string; content: string }[]) {
     /\b(crm|contact\s*center|gestiones?|feedback)\b/i.test(lastUserMessage)
 }
 
+function routeAssistantIntent(messages: { role: string; content: string }[]): AssistantIntent {
+  const lastUserMessage = getLastUserMessage(messages)
+  const normalized = normalizePrompt(lastUserMessage)
+  const directResponse = getDirectAssistantResponse(messages)
+  if (directResponse) return { type: 'direct', confidence: 1 }
+
+  if (shouldSyncCrm(messages)) return { type: 'crm_sync', confidence: 0.95 }
+
+  const companyIndustryQuery = extractCompanyIndustryQuery(lastUserMessage)
+  if (companyIndustryQuery) {
+    return { type: 'company_industry', confidence: 0.92, query: companyIndustryQuery }
+  }
+
+  if (/\b(descarga|descargar|exporta|exportar|link|enlace|url)\b/i.test(normalized)) {
+    return { type: 'export_segment', confidence: 0.8 }
+  }
+
+  if (/\b(crm|contact center|contacto|contactos|gestion|gestiones|pyme|pymes)\b/i.test(normalized)) {
+    if (/\b(muestra|filas|ejemplos|listado|tabla|sample)\b/i.test(normalized)) {
+      return { type: 'crm_sample', confidence: 0.9 }
+    }
+    return { type: 'crm_overview', confidence: 0.9 }
+  }
+
+  if (/\b(analiza|analisis|columnas|muestra|muestrame|ejemplos|filas|estructura|perfil|preview)\b/i.test(normalized) &&
+    /\b(base|bases|dataset|datasets|fuente|fuentes|tabla|tablas|bdd)\b/i.test(normalized)) {
+    return { type: 'dataset_profile', confidence: 0.86 }
+  }
+
+  if (/\b(base|bases|dataset|datasets|fuente|fuentes|tabla|tablas|bdd|datas)\b/i.test(normalized)) {
+    return { type: 'dataset_catalog', confidence: 0.86 }
+  }
+
+  if (shouldAnswerFastDataQuestion(messages)) {
+    return { type: 'dataset_catalog', confidence: 0.65 }
+  }
+
+  return { type: 'strategy', confidence: 0.5 }
+}
+
+async function runAssistantAgent(
+  intent: AssistantIntent,
+  messages: { role: string; content: string }[],
+  context: { userId: string; origin: string }
+): Promise<AssistantAgentResult | null> {
+  const lastUserMessage = getLastUserMessage(messages)
+
+  if (intent.type === 'direct') {
+    return {
+      agent: 'DirectAgent',
+      confidence: intent.confidence,
+      message: getDirectAssistantResponse(messages) ?? 'Estoy listo.',
+    }
+  }
+
+  if (intent.type === 'company_industry') {
+    const result = await searchCompaniesByIndustry(intent.query)
+    return {
+      agent: 'CompanyIndustryAgent',
+      confidence: intent.confidence,
+      message: renderCompanyIndustryMarkdown(result),
+    }
+  }
+
+  if (intent.type === 'dataset_catalog') {
+    const catalog = await getDatasetCatalog()
+    return {
+      agent: 'DatasetCatalogAgent',
+      confidence: intent.confidence,
+      message: renderDatasetCatalogMarkdown(catalog),
+    }
+  }
+
+  if (intent.type === 'dataset_profile') {
+    const catalog = await getDatasetCatalog(100)
+    const matchedDataset = resolveDatasetFromMessage(lastUserMessage, catalog)
+    if (!matchedDataset) {
+      return {
+        agent: 'DatasetProfileAgent',
+        confidence: 0.55,
+        message: `${renderDatasetCatalogMarkdown(catalog)}\n\nNo pude identificar una base específica en tu pregunta. Usa el \`slug\` de la tabla y te perfilo columnas + muestra.`,
+      }
+    }
+
+    const profile = await getDatasetProfile(matchedDataset)
+    return {
+      agent: 'DatasetProfileAgent',
+      confidence: intent.confidence,
+      message: renderDatasetProfileMarkdown(profile),
+    }
+  }
+
+  if (intent.type === 'crm_overview') {
+    return {
+      agent: 'CrmOverviewAgent',
+      confidence: intent.confidence,
+      message: await answerFastDataQuestion(messages),
+    }
+  }
+
+  if (intent.type === 'crm_sample') {
+    const sample = await getPymeCrmSample({ limit: 20, onlyWithCrm: true, onlyValidContact: true })
+    const columns = ['rutid', 'razon_social_empresa', 'crm_ultima_gestion', 'crm_ultimo_resultado', 'crm_mejor_telefono', 'crm_mejor_email']
+    const sampleTable = sample.rows.length > 0
+      ? [
+        `| ${columns.join(' | ')} |`,
+        `| ${columns.map(() => '---').join(' | ')} |`,
+        ...sample.rows.slice(0, 10).map(row => `| ${columns.map(column => csvLikeValue(row[column])).join(' | ')} |`),
+      ].join('\n')
+      : 'No encontré muestra CRM con contacto válido.'
+
+    return {
+      agent: 'CrmSampleAgent',
+      confidence: intent.confidence,
+      message: [
+        '**Muestra PyME / CRM**',
+        '',
+        sampleTable,
+        '',
+        'La muestra viene de `persona_scores` y `contact_center_feedback`, sin sincronizar CRM automáticamente.',
+      ].join('\n'),
+    }
+  }
+
+  if (intent.type === 'crm_sync') {
+    const sync = await ensureCrmFresh()
+    return {
+      agent: 'CrmSyncAgent',
+      confidence: intent.confidence,
+      message: [
+        '**CRM revisado**',
+        '',
+        `- Refrescado ahora: **${sync.refreshed ? 'sí' : 'no'}**`,
+        `- Estado: ${sync.reason ?? 'sin detalle'}`,
+        `- Último sync antes: ${formatDate(sync.before?.last_sync_completed_at)}`,
+        `- Último sync después: ${formatDate(sync.after?.last_sync_completed_at)}`,
+      ].join('\n'),
+    }
+  }
+
+  if (intent.type === 'export_segment') {
+    try {
+      const inferredFilters: FilterCondition[] = []
+      const normalized = normalizePrompt(lastUserMessage)
+
+      if (/\bautos?|vehiculos?\b/i.test(normalized)) inferredFilters.push({ field: 'tiene_autos', operator: 'eq', value: true })
+      if (/\bempresas?|pyme|pymes\b/i.test(normalized)) inferredFilters.push({ field: 'tiene_empresa', operator: 'eq', value: true })
+      if (/\bbienes raices|propiedades?\b/i.test(normalized)) inferredFilters.push({ field: 'tiene_bienes_raices', operator: 'eq', value: true })
+
+      if (inferredFilters.length === 0) {
+        return {
+          agent: 'ExportAgent',
+          confidence: 0.6,
+          message: 'Puedo exportar, pero necesito criterios concretos para no bajar una base completa. Ejemplos: `exporta empresas con contacto`, `exporta personas con autos`, `exporta bienes raíces en RM`.',
+        }
+      }
+
+      const result = await createSegmentDownload({
+        name: 'Segmento IA',
+        description: lastUserMessage,
+        filters: { logic: 'AND', conditions: inferredFilters },
+      }, context.userId, context.origin)
+
+      return {
+        agent: 'ExportAgent',
+        confidence: intent.confidence,
+        message: `Listo. Creé el segmento **${result.name}** con **${formatCount(result.row_count)}** registros.\n\n[Descargar CSV](${result.download_path})`,
+      }
+    } catch (error) {
+      return {
+        agent: 'ExportAgent',
+        confidence: 0.45,
+        message: error instanceof Error ? error.message : 'No pude crear la exportación.',
+      }
+    }
+  }
+
+  return null
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
@@ -861,10 +1122,33 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const { messages } = await req.json()
-    const directResponse = getDirectAssistantResponse(messages || [])
+    const intent = routeAssistantIntent(messages || [])
+    const internalAgentResult = intent.type === 'strategy'
+      ? null
+      : await runAssistantAgent(intent, messages || [], {
+        userId: user.id,
+        origin: req.nextUrl.origin,
+      }).catch(agentError => {
+        console.warn('[AI agent error]', { intent, error: agentError })
+        const message = agentError instanceof Error && /statement timeout|canceling statement/i.test(agentError.message)
+          ? 'La consulta del agente de datos superó el tiempo máximo. No la mandé a IA para evitar que quede colgada; acota por rubro, región, tamaño o pide solo muestra.'
+          : 'No pude resolver esa consulta con los agentes internos. Acota la pregunta por base, rubro, cruce o exportación.'
 
-    if (directResponse) {
-      return NextResponse.json({ success: true, message: directResponse, mode: 'instant' })
+        return {
+          agent: `${intent.type}:error`,
+          confidence: 0.2,
+          message,
+        }
+      })
+
+    if (internalAgentResult) {
+      return NextResponse.json({
+        success: true,
+        message: internalAgentResult.message,
+        mode: 'agent',
+        agent: internalAgentResult.agent,
+        confidence: internalAgentResult.confidence,
+      })
     }
 
     if (shouldAnswerFastDataQuestion(messages || []) && !shouldSyncCrm(messages || [])) {
@@ -873,6 +1157,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, message, mode: 'fast-data' })
       } catch (fastError) {
         console.warn('[AI fast-data fallback]', fastError)
+        const message = fastError instanceof Error && /statement timeout|canceling statement/i.test(fastError.message)
+          ? 'La consulta rápida sobre datos superó el tiempo máximo. No la mandé a IA para evitar que quede colgada; prueba con un rubro más específico o pide una muestra por región/tamaño.'
+          : 'No pude resolver esa consulta rápida sobre datos en este momento. Prueba con un rubro, base o cruce más específico.'
+
+        return NextResponse.json({ success: true, message, mode: 'fast-data-error' })
       }
     }
     
