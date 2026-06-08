@@ -4,6 +4,7 @@ declare module 'pg' {
       text: string,
       values?: unknown[]
     ): Promise<{ rows: T[] }>
+    query(queryStream: unknown): any
     release(): void
   }
 
@@ -26,4 +27,8 @@ declare module 'pg' {
     ): Promise<{ rows: T[] }>
     end(): Promise<void>
   }
+}
+
+declare module 'pg-copy-streams' {
+  export function to(sql: string): unknown
 }

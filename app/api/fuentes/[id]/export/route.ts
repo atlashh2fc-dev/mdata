@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Pool, type PoolClient } from 'pg'
+import { to as copyTo } from 'pg-copy-streams'
 import { createSupabaseServerClient, db } from '@/lib/db/supabase'
 
 export const runtime = 'nodejs'
@@ -153,7 +154,7 @@ function csvEscape(value: unknown) {
 }
 
 function quoteIdentifier(identifier: string) {
-  return `"${identifier}"`
+  return `"${identifier.replace(/"/g, '""')}"`
 }
 
 function isValidIdentifier(value: string | null | undefined) {
@@ -670,6 +671,72 @@ function createCsvStream(source: ExportableSource, plan: ExportPlan) {
   })
 }
 
+function buildCopySelectClause(plan: ExportPlan) {
+  if (!plan.columns) return '*'
+
+  return plan.columns
+    .map(column => {
+      const sourceColumn = quoteIdentifier(column.source)
+      const alias = column.alias ? ` AS ${quoteIdentifier(column.alias)}` : ''
+      return `${sourceColumn}${alias}`
+    })
+    .join(', ')
+}
+
+function createPostgresCopyCsvStream(plan: ExportPlan) {
+  const pool = createPool()
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      if (!pool) {
+        controller.error(new Error('No hay una conexion Postgres disponible para exportar.'))
+        return
+      }
+
+      let client: PoolClient | null = null
+
+      try {
+        client = await pool.connect()
+        await client.query('SET statement_timeout = 0')
+
+        const tableRef = `${quoteIdentifier('public')}.${quoteIdentifier(plan.tableName)}`
+        const selectClause = buildCopySelectClause(plan)
+        const copySql = `COPY (SELECT ${selectClause} FROM ${tableRef}) TO STDOUT WITH (FORMAT csv, HEADER true)`
+        const copyStream = (client as any).query(copyTo(copySql))
+
+        copyStream.on('data', (chunk: Buffer | string) => {
+          controller.enqueue(typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk)
+        })
+
+        copyStream.on('end', async () => {
+          client?.release()
+          client = null
+          await pool.end()
+          controller.close()
+        })
+
+        copyStream.on('error', async (error: Error) => {
+          console.error('[fuentes/export][copy_stream]', {
+            tableName: plan.tableName,
+            error,
+          })
+          client?.release()
+          client = null
+          await pool.end()
+          controller.error(error)
+        })
+      } catch (error) {
+        client?.release()
+        await pool.end()
+        controller.error(error)
+      }
+    },
+    async cancel() {
+      await pool?.end().catch(() => undefined)
+    },
+  })
+}
+
 function createCsvStreamWithCrm(source: ExportableSource, plan: ExportPlan) {
   const encoder = new TextEncoder()
   const pool = createPool()
@@ -809,7 +876,7 @@ export async function GET(
     await pool.end()
   }
 
-  return new NextResponse(includeCrm ? createCsvStreamWithCrm(source, plan) : createCsvStream(source, plan), {
+  return new NextResponse(includeCrm ? createCsvStreamWithCrm(source, plan) : createPostgresCopyCsvStream(plan), {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${includeCrm ? buildCsvFileName({
