@@ -20,7 +20,8 @@ import {
   Check,
   X,
   Minus,
-  Info
+  Info,
+  SlidersHorizontal
 } from 'lucide-react'
 import { formatNumber } from '@/lib/utils/formatters'
 
@@ -34,6 +35,12 @@ interface UniverseRow {
   con_domicilio: boolean
   con_bienes_raices: boolean
   dataset_flags?: Record<string, boolean>
+  trabajadores_bucket?: string | null
+  facturacion_bucket?: string | null
+  tamano_empresa_bucket?: string | null
+  tendencia_bucket?: string | null
+  patrimonio_bucket?: string | null
+  region_bucket?: string | null
   total: number
   refreshed_at?: string | null
 }
@@ -50,6 +57,63 @@ interface UniverseDimension {
 
 type FilterState = true | false | null
 type EntityFilter = 'todos' | UniverseRow['entidad_tipo']
+
+type AdvancedFilters = {
+  trabajadores_bucket: string
+  facturacion_bucket: string
+  tamano_empresa_bucket: string
+  tendencia_bucket: string
+  patrimonio_bucket: string
+  region_bucket: string
+}
+
+type AdvancedFilterKey = keyof AdvancedFilters
+
+const ANY_VALUE = '__any__'
+
+const DEFAULT_ADVANCED_FILTERS: AdvancedFilters = {
+  trabajadores_bucket: ANY_VALUE,
+  facturacion_bucket: ANY_VALUE,
+  tamano_empresa_bucket: ANY_VALUE,
+  tendencia_bucket: ANY_VALUE,
+  patrimonio_bucket: ANY_VALUE,
+  region_bucket: ANY_VALUE,
+}
+
+const ADVANCED_FILTER_CONFIG: Array<{
+  key: AdvancedFilterKey
+  label: string
+  description: string
+}> = [
+  { key: 'trabajadores_bucket', label: 'Trabajadores', description: 'Dotación 2024 agrupada para empresas' },
+  { key: 'facturacion_bucket', label: 'Facturación', description: 'Tramos SII agrupados por nivel de ventas' },
+  { key: 'tamano_empresa_bucket', label: 'Tamaño empresa', description: 'Micro, pequeña, mediana, grande o corporación' },
+  { key: 'tendencia_bucket', label: 'Tendencia ventas', description: 'Sube, baja, estable o sin datos' },
+  { key: 'patrimonio_bucket', label: 'Nivel patrimonial', description: 'Score patrimonial consolidado por rango' },
+  { key: 'region_bucket', label: 'Región', description: 'Región consolidada del universo' },
+]
+
+const BUCKET_LABELS: Record<string, string> = {
+  sin_datos: 'Sin datos',
+  sin_segmento: 'Sin segmento',
+  sin_region: 'Sin región',
+  pyme_master_sin_tramo: 'PyME sin tramo',
+  pequena: 'Pequeña',
+  gran_empresa: 'Gran empresa',
+  corporacion: 'Corporación',
+  micro: 'Micro',
+  mediana: 'Mediana',
+  sube: 'Sube',
+  baja: 'Baja',
+  estable: 'Estable',
+  'T1-T5': 'T1-T5 · Micro',
+  'T6-T7': 'T6-T7 · Pequeña',
+  'T8-T9': 'T8-T9 · Mediana',
+  'T10-T12': 'T10-T12 · Grande',
+  'T13+': 'T13+ · Corporación',
+  '500+': '500+',
+  '81+': '81+',
+}
 
 const ENTITY_GROUPS: Array<{
   key: EntityFilter
@@ -121,6 +185,35 @@ function getRowFlag(row: UniverseRow, key: string) {
   return Boolean(row.dataset_flags?.[key])
 }
 
+function getBucketLabel(value: string) {
+  return BUCKET_LABELS[value] ?? value
+}
+
+function getAdvancedValue(row: UniverseRow, key: AdvancedFilterKey) {
+  return row[key] ?? DEFAULT_ADVANCED_FILTERS[key]
+}
+
+function formatBucketOption(value: string) {
+  return value === ANY_VALUE ? 'Cualquiera' : getBucketLabel(value)
+}
+
+function sortBucketOptions(key: AdvancedFilterKey, values: string[]) {
+  const order: Partial<Record<AdvancedFilterKey, string[]>> = {
+    trabajadores_bucket: ['sin_datos', '0', '1-9', '10-49', '50-199', '200-499', '500+'],
+    facturacion_bucket: ['sin_datos', 'T1-T5', 'T6-T7', 'T8-T9', 'T10-T12', 'T13+'],
+    tamano_empresa_bucket: ['sin_segmento', 'pyme_master_sin_tramo', 'micro', 'pequena', 'mediana', 'gran_empresa', 'corporacion'],
+    tendencia_bucket: ['sin_datos', 'sube', 'estable', 'baja'],
+    patrimonio_bucket: ['sin_datos', '0', '1-20', '21-40', '41-60', '61-80', '81+'],
+  }
+  const preferred = order[key] ?? []
+  return values.sort((a, b) => {
+    const ai = preferred.indexOf(a)
+    const bi = preferred.indexOf(b)
+    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 999) - (bi >= 0 ? bi : 999)
+    return getBucketLabel(a).localeCompare(getBucketLabel(b), 'es')
+  })
+}
+
 export default function UniversosPage() {
   const [data, setData] = useState<UniverseRow[]>([])
   const [dimensions, setDimensions] = useState<UniverseDimension[]>(DEFAULT_DIMENSIONS)
@@ -132,6 +225,7 @@ export default function UniversosPage() {
 
   // Filters state (null = ANY, true = REQUIRED, false = EXCLUDED)
   const [filters, setFilters] = useState<Record<string, FilterState>>({})
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(DEFAULT_ADVANCED_FILTERS)
 
   useEffect(() => {
     loadUniversos()
@@ -189,6 +283,28 @@ export default function UniversosPage() {
     return data.filter(row => row.entidad_tipo === entityFilter)
   }, [data, entityFilter])
 
+  const advancedOptions = useMemo(() => {
+    const options: Record<AdvancedFilterKey, string[]> = {
+      trabajadores_bucket: [],
+      facturacion_bucket: [],
+      tamano_empresa_bucket: [],
+      tendencia_bucket: [],
+      patrimonio_bucket: [],
+      region_bucket: [],
+    }
+
+    for (const config of ADVANCED_FILTER_CONFIG) {
+      const values = new Set<string>()
+      for (const row of scopedData) {
+        const value = getAdvancedValue(row, config.key)
+        if (value && value !== ANY_VALUE) values.add(value)
+      }
+      options[config.key] = sortBucketOptions(config.key, [...values])
+    }
+
+    return options
+  }, [scopedData])
+
   // Grand total (all rows)
   const totalBase = useMemo(() => scopedData.reduce((acc, row) => acc + row.total, 0), [scopedData])
 
@@ -219,6 +335,15 @@ export default function UniversosPage() {
         }
       }
       if (isMatch) {
+        for (const config of ADVANCED_FILTER_CONFIG) {
+          const selected = advancedFilters[config.key]
+          if (selected !== ANY_VALUE && getAdvancedValue(row, config.key) !== selected) {
+            isMatch = false
+            break
+          }
+        }
+      }
+      if (isMatch) {
         count += row.total
         matchingRows.push(row)
       }
@@ -226,7 +351,7 @@ export default function UniversosPage() {
     // Sort by total desc
     matchingRows.sort((a, b) => b.total - a.total)
     return { count, matchingRows }
-  }, [filters, scopedData])
+  }, [advancedFilters, filters, scopedData])
 
   const pct = totalBase > 0 ? (result.count / totalBase) * 100 : 0
 
@@ -242,10 +367,49 @@ export default function UniversosPage() {
     })
   }
 
-  const resetFilters = () => setFilters({})
+  const resetFilters = () => {
+    setFilters({})
+    setAdvancedFilters(DEFAULT_ADVANCED_FILTERS)
+  }
+
+  const setAdvancedFilter = (key: AdvancedFilterKey, value: string) => {
+    setAdvancedFilters(prev => ({ ...prev, [key]: value }))
+  }
+
+  const applyContactableCompaniesPreset = () => {
+    setEntityFilter('persona_juridica')
+    setFilters(prev => ({ ...prev, con_fono: true, con_empresa: true }))
+  }
+
+  const applyMipymePreset = () => {
+    setEntityFilter('persona_juridica')
+    setFilters(prev => ({ ...prev, con_fono: true, con_empresa: true }))
+    setAdvancedFilters(prev => ({
+      ...prev,
+      trabajadores_bucket: '10-49',
+      facturacion_bucket: 'T6-T7',
+    }))
+  }
+
+  const applyGrowthPreset = () => {
+    setEntityFilter('persona_juridica')
+    setFilters(prev => ({ ...prev, con_fono: true, con_empresa: true }))
+    setAdvancedFilters(prev => ({
+      ...prev,
+      tendencia_bucket: 'sube',
+    }))
+  }
+
+  const applyHighPatrimonyPreset = () => {
+    setFilters(prev => ({ ...prev, con_fono: true, con_bienes_raices: true }))
+    setAdvancedFilters(prev => ({
+      ...prev,
+      patrimonio_bucket: '81+',
+    }))
+  }
 
   async function exportCurrentSegment() {
-    if (activeCount === 0 || exporting) return
+    if (totalActiveCount === 0 || exporting) return
 
     setExporting(true)
     setExportError(null)
@@ -254,7 +418,7 @@ export default function UniversosPage() {
       const res = await fetch('/api/universos/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityFilter, filters }),
+        body: JSON.stringify({ entityFilter, filters, advancedFilters }),
       })
 
       if (!res.ok) {
@@ -282,6 +446,8 @@ export default function UniversosPage() {
 
   // Active filters count
   const activeCount = Object.values(filters).filter(v => v !== null).length
+  const activeAdvancedFilters = Object.entries(advancedFilters).filter(([, value]) => value !== ANY_VALUE) as Array<[AdvancedFilterKey, string]>
+  const totalActiveCount = activeCount + activeAdvancedFilters.length
   const activeFilters = Object.entries(filters).filter(([, v]) => v !== null)
   const datasetDimensionCount = dimensions.filter(dim => dim.source === 'dataset').length
 
@@ -342,6 +508,80 @@ export default function UniversosPage() {
                 </button>
               )
             })}
+          </div>
+
+          <div className="rounded-2xl border border-slate-700/60 bg-[#1e293b]/70 p-4 shadow-elevation-1">
+            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-cyan-300" />
+                  <h3 className="text-sm font-semibold text-slate-200">Filtros comerciales avanzados</h3>
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Segmenta empresas y personas por dotación, facturación, tendencia, patrimonio y territorio sin recalcular la base completa.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={applyContactableCompaniesPreset}
+                  className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-200 transition hover:border-cyan-400/60"
+                >
+                  Empresas contactables
+                </button>
+                <button
+                  type="button"
+                  onClick={applyMipymePreset}
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-200 transition hover:border-emerald-400/60"
+                >
+                  MiPYME rápida
+                </button>
+                <button
+                  type="button"
+                  onClick={applyGrowthPreset}
+                  className="rounded-lg border border-lime-500/30 bg-lime-500/10 px-3 py-2 text-xs font-medium text-lime-200 transition hover:border-lime-400/60"
+                >
+                  Creciendo
+                </button>
+                <button
+                  type="button"
+                  onClick={applyHighPatrimonyPreset}
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200 transition hover:border-amber-400/60"
+                >
+                  Alto patrimonio
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+              {ADVANCED_FILTER_CONFIG.map(config => {
+                const options = advancedOptions[config.key]
+                const selected = advancedFilters[config.key]
+                return (
+                  <div key={config.key} className="rounded-xl border border-slate-700/50 bg-[#0f172a]/60 p-3">
+                    <label className="mb-1 block text-xs font-semibold text-slate-300">{config.label}</label>
+                    <p className="mb-2 min-h-[28px] text-[10px] leading-relaxed text-slate-500">{config.description}</p>
+                    <select
+                      value={selected}
+                      onChange={event => setAdvancedFilter(config.key, event.target.value)}
+                      className="input-base h-9 py-1.5 text-xs"
+                    >
+                      <option value={ANY_VALUE}>Cualquiera</option>
+                      {options.map(option => (
+                        <option key={option} value={option}>
+                          {formatBucketOption(option)}
+                        </option>
+                      ))}
+                    </select>
+                    {options.length === 0 && (
+                      <p className="mt-2 text-[10px] text-amber-300">
+                        Actualiza la matriz para poblar este filtro.
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -413,7 +653,7 @@ export default function UniversosPage() {
           </div>
 
           {/* TABLA DE DESGLOSE — muestra exactamente qué filas se están sumando */}
-          {!loading && activeCount > 0 && (
+          {!loading && totalActiveCount > 0 && (
             <div className="mt-2">
               <div className="flex items-center gap-2 mb-2">
                 <Info className="w-3.5 h-3.5 text-slate-500" />
@@ -431,6 +671,11 @@ export default function UniversosPage() {
                             {shortLabel(d)}
                           </th>
                         ))}
+                        {ADVANCED_FILTER_CONFIG.map(config => (
+                          <th key={config.key} className="px-2 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                            {config.label}
+                          </th>
+                        ))}
                         <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Registros</th>
                         <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">%</th>
                       </tr>
@@ -446,6 +691,11 @@ export default function UniversosPage() {
                               <BoolBadge val={getRowFlag(row, d.key)} />
                             </td>
                           ))}
+                          {ADVANCED_FILTER_CONFIG.map(config => (
+                            <td key={config.key} className="px-2 py-2 text-left text-[10px] text-slate-400 whitespace-nowrap">
+                              {formatBucketOption(getAdvancedValue(row, config.key))}
+                            </td>
+                          ))}
                           <td className="px-3 py-2 text-right font-mono font-semibold text-white">
                             {formatNumber(row.total)}
                           </td>
@@ -457,7 +707,7 @@ export default function UniversosPage() {
                     </tbody>
                     <tfoot>
                       <tr className="bg-slate-800/60 border-t border-slate-600/50">
-                        <td colSpan={dimensions.length} className="px-3 py-2 text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                        <td colSpan={dimensions.length + ADVANCED_FILTER_CONFIG.length} className="px-3 py-2 text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
                           Total
                         </td>
                         <td className="px-3 py-2 text-right font-mono font-bold text-cyan-400">
@@ -488,7 +738,7 @@ export default function UniversosPage() {
                <>
                  <h2 className="text-base font-bold text-slate-300 mb-1">Universo Resultante</h2>
                  <p className="text-[10px] text-slate-500 mb-6">
-                   {ENTITY_GROUPS.find(group => group.key === entityFilter)?.label ?? 'Todos'} · {activeCount === 0 ? 'sin filtros adicionales' : `${activeCount} filtro${activeCount > 1 ? 's' : ''} activo${activeCount > 1 ? 's' : ''}`}
+                   {ENTITY_GROUPS.find(group => group.key === entityFilter)?.label ?? 'Todos'} · {totalActiveCount === 0 ? 'sin filtros adicionales' : `${totalActiveCount} filtro${totalActiveCount > 1 ? 's' : ''} activo${totalActiveCount > 1 ? 's' : ''}`}
                  </p>
                  
                  <div className="my-4">
@@ -501,7 +751,7 @@ export default function UniversosPage() {
                  </div>
 
                  {/* Filtros activos */}
-                 {activeCount > 0 && (
+                 {totalActiveCount > 0 && (
                    <div className="w-full bg-slate-800/50 rounded-xl p-3 mt-4 border border-white/5 text-left">
                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Filtros aplicados</p>
                      <div className="flex flex-wrap gap-1.5">
@@ -516,6 +766,18 @@ export default function UniversosPage() {
                            >
                              {val === true ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
                              {dim ? shortLabel(dim) : key}
+                           </span>
+                         )
+                       })}
+                       {activeAdvancedFilters.map(([key, value]) => {
+                         const config = ADVANCED_FILTER_CONFIG.find(item => item.key === key)
+                         return (
+                           <span
+                             key={key}
+                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+                           >
+                             <SlidersHorizontal className="w-2.5 h-2.5" />
+                             {config?.label ?? key}: {formatBucketOption(value)}
                            </span>
                          )
                        })}
@@ -535,12 +797,13 @@ export default function UniversosPage() {
                  </div>
                  
                  <button
+                  type="button"
                   onClick={exportCurrentSegment}
-                  disabled={activeCount === 0 || exporting}
-                  className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all inline-flex items-center justify-center gap-2 ${activeCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25 disabled:opacity-60 disabled:cursor-wait' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                  disabled={totalActiveCount === 0 || exporting}
+                  className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all inline-flex items-center justify-center gap-2 ${totalActiveCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25 disabled:opacity-60 disabled:cursor-wait' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
                  >
                     <Download className="w-4 h-4" />
-                    {exporting ? 'Exportando…' : activeCount > 0 ? 'Exportar este segmento exacto' : 'Aplica filtros para exportar'}
+                    {exporting ? 'Exportando...' : totalActiveCount > 0 ? 'Exportar este segmento exacto' : 'Aplica filtros para exportar'}
                  </button>
                  {exportError && (
                   <p className="mt-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">

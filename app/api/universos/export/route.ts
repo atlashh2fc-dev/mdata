@@ -18,6 +18,15 @@ const STATIC_FILTER_KEYS = new Set([
   'con_empresa',
 ])
 
+const ADVANCED_FILTER_KEYS = new Set([
+  'trabajadores_bucket',
+  'facturacion_bucket',
+  'tamano_empresa_bucket',
+  'tendencia_bucket',
+  'patrimonio_bucket',
+  'region_bucket',
+])
+
 const ENTITY_FILTERS = new Set([
   'todos',
   'persona_natural',
@@ -57,8 +66,16 @@ const BASE_EXPORT_HEADERS = [
   'subrubro',
   'tamano_empresa',
   'tramo_ventas_ultimo',
+  'trabajadores_2024',
+  'resultado_tendencia',
   'score_patrimonial',
   'cobertura_pct',
+  'trabajadores_bucket',
+  'facturacion_bucket',
+  'tamano_empresa_bucket',
+  'tendencia_bucket',
+  'patrimonio_bucket',
+  'region_bucket',
   'con_nombre',
   'con_fono',
   'con_email',
@@ -78,6 +95,7 @@ type DatasetDimension = {
 type ExportBody = {
   entityFilter?: string
   filters?: Record<string, boolean | null | undefined>
+  advancedFilters?: Record<string, string | null | undefined>
 }
 
 function getPostgresConnectionString() {
@@ -196,10 +214,45 @@ function buildDatasetSelects(dimensions: DatasetDimension[]) {
   })
 }
 
+function workerBucketExpression(alias: string) {
+  return `CASE
+    WHEN ${alias}.trabajadores_2024 IS NULL THEN 'sin_datos'
+    WHEN ${alias}.trabajadores_2024 = 0 THEN '0'
+    WHEN ${alias}.trabajadores_2024 BETWEEN 1 AND 9 THEN '1-9'
+    WHEN ${alias}.trabajadores_2024 BETWEEN 10 AND 49 THEN '10-49'
+    WHEN ${alias}.trabajadores_2024 BETWEEN 50 AND 199 THEN '50-199'
+    WHEN ${alias}.trabajadores_2024 BETWEEN 200 AND 499 THEN '200-499'
+    ELSE '500+'
+  END`
+}
+
+function salesBucketExpression(alias: string) {
+  return `CASE
+    WHEN ${alias}.ultimo_tramo_ventas IS NULL THEN 'sin_datos'
+    WHEN ${alias}.ultimo_tramo_ventas BETWEEN 1 AND 5 THEN 'T1-T5'
+    WHEN ${alias}.ultimo_tramo_ventas BETWEEN 6 AND 7 THEN 'T6-T7'
+    WHEN ${alias}.ultimo_tramo_ventas BETWEEN 8 AND 9 THEN 'T8-T9'
+    WHEN ${alias}.ultimo_tramo_ventas BETWEEN 10 AND 12 THEN 'T10-T12'
+    ELSE 'T13+'
+  END`
+}
+
+function patrimonyBucketExpression(alias: string) {
+  return `CASE
+    WHEN COALESCE(${alias}.score_patrimonial, 0) = 0 THEN '0'
+    WHEN COALESCE(${alias}.score_patrimonial, 0) BETWEEN 1 AND 20 THEN '1-20'
+    WHEN COALESCE(${alias}.score_patrimonial, 0) BETWEEN 21 AND 40 THEN '21-40'
+    WHEN COALESCE(${alias}.score_patrimonial, 0) BETWEEN 41 AND 60 THEN '41-60'
+    WHEN COALESCE(${alias}.score_patrimonial, 0) BETWEEN 61 AND 80 THEN '61-80'
+    ELSE '81+'
+  END`
+}
+
 function buildExportQuery(
   dimensions: DatasetDimension[],
   entityFilter: string,
   filters: Record<string, boolean | null | undefined>,
+  advancedFilters: Record<string, string | null | undefined>,
   cursor: { rutKey: string; entityType: string } | null
 ) {
   const datasetKeys = new Set(dimensions.map(dim => dim.key))
@@ -225,6 +278,12 @@ function buildExportQuery(
     }
   }
 
+  for (const [key, value] of Object.entries(advancedFilters)) {
+    if (!value || value === '__any__') continue
+    params.push(value)
+    whereClauses.push(`b.${quoteIdentifier(key)} = $${params.length}`)
+  }
+
   if (cursor) {
     params.push(cursor.rutKey, cursor.entityType)
     whereClauses.push(`(b.rut_key, b.entidad_tipo) > ($${params.length - 1}, $${params.length})`)
@@ -246,8 +305,8 @@ function buildExportQuery(
         p.nombre_completo AS nombre_o_razon_social,
         p.email,
         p.fono_cel,
-        COALESCE(NULLIF(BTRIM(p.region_canonica), ''), NULLIF(BTRIM(p.region_part), ''), NULLIF(BTRIM(p.domicilio_region), '')) AS region,
-        COALESCE(NULLIF(BTRIM(p.comuna_canonica), ''), NULLIF(BTRIM(p.comuna_part), ''), NULLIF(BTRIM(p.domicilio_comuna), '')) AS comuna,
+        COALESCE(NULLIF(BTRIM(p.region_part), ''), NULLIF(BTRIM(p.domicilio_region), '')) AS region,
+        COALESCE(NULLIF(BTRIM(p.comuna_part), ''), NULLIF(BTRIM(p.domicilio_comuna), '')) AS comuna,
         NULL::text AS direccion,
         p.n_autos,
         p.n_bienes_raices,
@@ -257,8 +316,16 @@ function buildExportQuery(
         NULL::text AS subrubro,
         NULL::text AS tamano_empresa,
         NULL::text AS tramo_ventas_ultimo,
+        NULL::integer AS trabajadores_2024,
+        NULL::text AS resultado_tendencia,
         p.score_patrimonial,
         p.cobertura_pct,
+        'sin_datos'::text AS trabajadores_bucket,
+        'sin_datos'::text AS facturacion_bucket,
+        'sin_segmento'::text AS tamano_empresa_bucket,
+        'sin_datos'::text AS tendencia_bucket,
+        ${patrimonyBucketExpression('p')} AS patrimonio_bucket,
+        COALESCE(NULLIF(BTRIM(p.region_part), ''), NULLIF(BTRIM(p.domicilio_region), ''), 'sin_region') AS region_bucket,
         p.con_nombre_real AS con_nombre,
         (NULLIF(BTRIM(p.fono_cel), '') IS NOT NULL) AS con_fono,
         (NULLIF(BTRIM(p.email), '') IS NOT NULL) AS con_email,
@@ -296,8 +363,16 @@ function buildExportQuery(
         e.subrubro_economico_ultimo AS subrubro,
         e.segmento_tamano_empresa AS tamano_empresa,
         e.ultimo_tramo_ventas::text AS tramo_ventas_ultimo,
+        e.trabajadores_2024,
+        e.resultado_tendencia,
         e.score_patrimonial,
         e.cobertura_pct,
+        ${workerBucketExpression('e')} AS trabajadores_bucket,
+        ${salesBucketExpression('e')} AS facturacion_bucket,
+        COALESCE(NULLIF(BTRIM(e.segmento_tamano_empresa), ''), 'sin_segmento') AS tamano_empresa_bucket,
+        COALESCE(NULLIF(BTRIM(e.resultado_tendencia), ''), 'sin_datos') AS tendencia_bucket,
+        ${patrimonyBucketExpression('e')} AS patrimonio_bucket,
+        COALESCE(NULLIF(BTRIM(e.region), ''), 'sin_region') AS region_bucket,
         (NULLIF(BTRIM(e.razon_social), '') IS NOT NULL) AS con_nombre,
         (NULLIF(BTRIM(e.fono_cel), '') IS NOT NULL) AS con_fono,
         (NULLIF(BTRIM(e.email), '') IS NOT NULL) AS con_email,
@@ -316,6 +391,7 @@ function buildExportQuery(
     )
     ${datasetCtes.length > 0 ? `, ${datasetCtes.join(',\n')}` : ''}
     SELECT
+      b.rut_key AS __rut_key,
       ${BASE_EXPORT_HEADERS.map(header => `b.${quoteIdentifier(header)}`).join(',\n      ')}
       ${datasetSelects.length > 0 ? `,\n      ${datasetSelects.join(',\n      ')}` : ''}
     FROM base b
@@ -331,7 +407,8 @@ function buildExportQuery(
 function validateExportRequest(
   dimensions: DatasetDimension[],
   entityFilter: string,
-  filters: Record<string, boolean | null | undefined>
+  filters: Record<string, boolean | null | undefined>,
+  advancedFilters: Record<string, string | null | undefined>
 ) {
   if (!ENTITY_FILTERS.has(entityFilter)) {
     return 'Tipo de universo no valido.'
@@ -345,6 +422,13 @@ function validateExportRequest(
 
     if (!STATIC_FILTER_KEYS.has(key) && !datasetKeys.has(key)) {
       return `Filtro desconocido: ${key}. Actualiza la matriz e intenta de nuevo.`
+    }
+  }
+
+  for (const [key, value] of Object.entries(advancedFilters)) {
+    if (!ADVANCED_FILTER_KEYS.has(key)) return `Filtro comercial desconocido: ${key}.`
+    if (value !== null && value !== undefined && typeof value !== 'string') {
+      return `Filtro comercial invalido para ${key}.`
     }
   }
 
@@ -372,6 +456,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({})) as ExportBody
   const entityFilter = body.entityFilter ?? 'persona_natural'
   const filters = body.filters ?? {}
+  const advancedFilters = body.advancedFilters ?? {}
 
   const pool = createPool()
   if (!pool) {
@@ -386,7 +471,7 @@ export async function POST(req: NextRequest) {
     client = await pool.connect()
     await client.query('SET statement_timeout = 0')
     const dimensions = await discoverDatasetDimensions(client)
-    const validationError = validateExportRequest(dimensions, entityFilter, filters)
+    const validationError = validateExportRequest(dimensions, entityFilter, filters, advancedFilters)
 
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 })
@@ -408,7 +493,13 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(`${headers.map(csvEscape).join(',')}\n`))
 
           while (true) {
-            const { sql, params } = buildExportQuery(activeDatasetDimensions, entityFilter, filters, cursor)
+            const { sql, params } = buildExportQuery(
+              activeDatasetDimensions,
+              entityFilter,
+              filters,
+              advancedFilters,
+              cursor
+            )
             const result = await client!.query(sql, params)
 
             if (result.rows.length === 0) break
@@ -423,9 +514,7 @@ export async function POST(req: NextRequest) {
 
             const lastRow = result.rows.at(-1)
             cursor = {
-              rutKey: lastRow.rutid
-                ? String(lastRow.rutid).replace(/[^0-9Kk]/g, '').toUpperCase().padStart(10, '0')
-                : '',
+              rutKey: String(lastRow.__rut_key ?? ''),
               entityType: String(lastRow.entidad_tipo ?? ''),
             }
 

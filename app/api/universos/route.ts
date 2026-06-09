@@ -108,9 +108,23 @@ async function ensureUniverseSyncTables(pgPool: Pool) {
       con_domicilio boolean NOT NULL,
       con_bienes_raices boolean NOT NULL,
       dataset_flags jsonb NOT NULL DEFAULT '{}'::jsonb,
+      trabajadores_bucket text NOT NULL DEFAULT 'sin_datos',
+      facturacion_bucket text NOT NULL DEFAULT 'sin_datos',
+      tamano_empresa_bucket text NOT NULL DEFAULT 'sin_segmento',
+      tendencia_bucket text NOT NULL DEFAULT 'sin_datos',
+      patrimonio_bucket text NOT NULL DEFAULT 'sin_datos',
+      region_bucket text NOT NULL DEFAULT 'sin_region',
       total bigint NOT NULL,
       refreshed_at timestamptz NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE public.stats_universos_dynamic
+      ADD COLUMN IF NOT EXISTS trabajadores_bucket text NOT NULL DEFAULT 'sin_datos',
+      ADD COLUMN IF NOT EXISTS facturacion_bucket text NOT NULL DEFAULT 'sin_datos',
+      ADD COLUMN IF NOT EXISTS tamano_empresa_bucket text NOT NULL DEFAULT 'sin_segmento',
+      ADD COLUMN IF NOT EXISTS tendencia_bucket text NOT NULL DEFAULT 'sin_datos',
+      ADD COLUMN IF NOT EXISTS patrimonio_bucket text NOT NULL DEFAULT 'sin_datos',
+      ADD COLUMN IF NOT EXISTS region_bucket text NOT NULL DEFAULT 'sin_region';
 
     CREATE INDEX IF NOT EXISTS idx_stats_universos_dynamic_entity
       ON public.stats_universos_dynamic (entidad_tipo);
@@ -200,6 +214,12 @@ async function getUpdatedUniversos() {
       con_domicilio,
       con_bienes_raices,
       dataset_flags,
+      trabajadores_bucket,
+      facturacion_bucket,
+      tamano_empresa_bucket,
+      tendencia_bucket,
+      patrimonio_bucket,
+      region_bucket,
       total::bigint,
       refreshed_at
     FROM public.stats_universos_dynamic
@@ -311,6 +331,12 @@ async function refreshDynamicUniverseMatrix() {
         con_domicilio,
         con_bienes_raices,
         dataset_flags,
+        trabajadores_bucket,
+        facturacion_bucket,
+        tamano_empresa_bucket,
+        tendencia_bucket,
+        patrimonio_bucket,
+        region_bucket,
         total,
         refreshed_at
       )
@@ -331,7 +357,24 @@ async function refreshDynamicUniverseMatrix() {
               NULLIF(BTRIM(p.domicilio_comuna), '')
             ) IS NOT NULL
           ) AS con_domicilio,
-          (COALESCE(p.n_bienes_raices, 0) > 0 OR COALESCE(p.totalavaluos, 0) > 0) AS con_bienes_raices
+          (COALESCE(p.n_bienes_raices, 0) > 0 OR COALESCE(p.totalavaluos, 0) > 0) AS con_bienes_raices,
+          'sin_datos'::text AS trabajadores_bucket,
+          'sin_datos'::text AS facturacion_bucket,
+          'sin_segmento'::text AS tamano_empresa_bucket,
+          'sin_datos'::text AS tendencia_bucket,
+          CASE
+            WHEN COALESCE(p.score_patrimonial, 0) = 0 THEN '0'
+            WHEN COALESCE(p.score_patrimonial, 0) BETWEEN 1 AND 20 THEN '1-20'
+            WHEN COALESCE(p.score_patrimonial, 0) BETWEEN 21 AND 40 THEN '21-40'
+            WHEN COALESCE(p.score_patrimonial, 0) BETWEEN 41 AND 60 THEN '41-60'
+            WHEN COALESCE(p.score_patrimonial, 0) BETWEEN 61 AND 80 THEN '61-80'
+            ELSE '81+'
+          END AS patrimonio_bucket,
+          COALESCE(
+            NULLIF(BTRIM(p.region_part), ''),
+            NULLIF(BTRIM(p.domicilio_region), ''),
+            'sin_region'
+          ) AS region_bucket
         FROM public.personas_master_clasificada p
         WHERE p.entidad_tipo <> 'persona_juridica'
 
@@ -352,7 +395,35 @@ async function refreshDynamicUniverseMatrix() {
               NULLIF(BTRIM(e.comuna), '')
             ) IS NOT NULL
           ) AS con_domicilio,
-          (COALESCE(e.n_bienes_raices, 0) > 0 OR COALESCE(e.totalavaluos, 0) > 0) AS con_bienes_raices
+          (COALESCE(e.n_bienes_raices, 0) > 0 OR COALESCE(e.totalavaluos, 0) > 0) AS con_bienes_raices,
+          CASE
+            WHEN e.trabajadores_2024 IS NULL THEN 'sin_datos'
+            WHEN e.trabajadores_2024 = 0 THEN '0'
+            WHEN e.trabajadores_2024 BETWEEN 1 AND 9 THEN '1-9'
+            WHEN e.trabajadores_2024 BETWEEN 10 AND 49 THEN '10-49'
+            WHEN e.trabajadores_2024 BETWEEN 50 AND 199 THEN '50-199'
+            WHEN e.trabajadores_2024 BETWEEN 200 AND 499 THEN '200-499'
+            ELSE '500+'
+          END AS trabajadores_bucket,
+          CASE
+            WHEN e.ultimo_tramo_ventas IS NULL THEN 'sin_datos'
+            WHEN e.ultimo_tramo_ventas BETWEEN 1 AND 5 THEN 'T1-T5'
+            WHEN e.ultimo_tramo_ventas BETWEEN 6 AND 7 THEN 'T6-T7'
+            WHEN e.ultimo_tramo_ventas BETWEEN 8 AND 9 THEN 'T8-T9'
+            WHEN e.ultimo_tramo_ventas BETWEEN 10 AND 12 THEN 'T10-T12'
+            ELSE 'T13+'
+          END AS facturacion_bucket,
+          COALESCE(NULLIF(BTRIM(e.segmento_tamano_empresa), ''), 'sin_segmento') AS tamano_empresa_bucket,
+          COALESCE(NULLIF(BTRIM(e.resultado_tendencia), ''), 'sin_datos') AS tendencia_bucket,
+          CASE
+            WHEN COALESCE(e.score_patrimonial, 0) = 0 THEN '0'
+            WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 1 AND 20 THEN '1-20'
+            WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 21 AND 40 THEN '21-40'
+            WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 41 AND 60 THEN '41-60'
+            WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 61 AND 80 THEN '61-80'
+            ELSE '81+'
+          END AS patrimonio_bucket,
+          COALESCE(NULLIF(BTRIM(e.region), ''), 'sin_region') AS region_bucket
         FROM public.empresas_comercial_unificada e
         WHERE COALESCE(e.es_universo_operativo_ventas, true) = true
       )
@@ -367,6 +438,12 @@ async function refreshDynamicUniverseMatrix() {
         b.con_domicilio,
         b.con_bienes_raices,
         ${flagPairs.length > 0 ? `jsonb_build_object(${flagPairs.join(', ')})` : `'{}'::jsonb`} AS dataset_flags,
+        b.trabajadores_bucket,
+        b.facturacion_bucket,
+        b.tamano_empresa_bucket,
+        b.tendencia_bucket,
+        b.patrimonio_bucket,
+        b.region_bucket,
         COUNT(*)::bigint AS total,
         now() AS refreshed_at
       FROM base b
@@ -379,7 +456,13 @@ async function refreshDynamicUniverseMatrix() {
         b.con_autos,
         b.con_empresa,
         b.con_domicilio,
-        b.con_bienes_raices
+        b.con_bienes_raices,
+        b.trabajadores_bucket,
+        b.facturacion_bucket,
+        b.tamano_empresa_bucket,
+        b.tendencia_bucket,
+        b.patrimonio_bucket,
+        b.region_bucket
         ${flagGroupings.length > 0 ? `,\n        ${flagGroupings.join(',\n        ')}` : ''}
     `)
 
