@@ -223,7 +223,7 @@ export default function UniversosPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>('persona_natural')
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>('persona_juridica')
 
   // Filters state (null = ANY, true = REQUIRED, false = EXCLUDED)
   const [filters, setFilters] = useState<Record<string, FilterState>>({})
@@ -235,11 +235,17 @@ export default function UniversosPage() {
 
   async function loadUniversos() {
     setLoading(true)
+    setExportError(null)
     try {
       const res = await fetch('/api/universos', { cache: 'no-store' })
       const json = await res.json()
+      if (!res.ok || !json.success) {
+        throw new Error(json.error ?? 'No se pudo cargar el explorador de universos.')
+      }
       setData(json.data || [])
       if (json.dimensions?.length) setDimensions(json.dimensions)
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'No se pudo cargar el explorador de universos.')
     } finally {
       setLoading(false)
     }
@@ -247,16 +253,20 @@ export default function UniversosPage() {
 
   async function refreshUniversos() {
     setRefreshing(true)
+    setExportError(null)
     try {
       const res = await fetch('/api/universos', {
         method: 'POST',
         cache: 'no-store',
       })
       const json = await res.json()
-      if (res.ok) {
-        setData(json.data || [])
-        if (json.dimensions?.length) setDimensions(json.dimensions)
+      if (!res.ok || !json.success) {
+        throw new Error(json.error ?? 'No se pudo actualizar la matriz.')
       }
+      setData(json.data || [])
+      if (json.dimensions?.length) setDimensions(json.dimensions)
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'No se pudo actualizar la matriz.')
     } finally {
       setRefreshing(false)
     }
@@ -577,7 +587,7 @@ export default function UniversosPage() {
                     </select>
                     {options.length === 0 && (
                       <p className="mt-2 text-[10px] text-amber-300">
-                        Sin valores útiles en este universo. Cambia a Jurídicas o espera la matriz comercial.
+                        Sin valores comerciales cargados. Usa Actualizar matriz.
                       </p>
                     )}
                   </div>

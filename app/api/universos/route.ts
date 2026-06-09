@@ -225,7 +225,7 @@ async function getUpdatedUniversos() {
     FROM public.stats_universos_dynamic
   `)
 
-  if (dynamicRows.length > 0) {
+  if (dynamicRows.length > 0 && dynamicRows.some(row => Number(row.total ?? 0) > 0)) {
     return dynamicRows.map(row => ({
       ...row,
       dataset_flags: row.dataset_flags ?? {},
@@ -274,22 +274,6 @@ async function getUpdatedUniversos() {
     dataset_flags: {},
     total: Number(row.total ?? 0),
   }))
-}
-
-function hasUsefulCommercialBuckets(rows: Array<Record<string, unknown>> | null | undefined) {
-  if (!rows?.length) return false
-
-  return rows.some(row => (
-    row.entidad_tipo === 'persona_juridica' &&
-    Number(row.total ?? 0) > 0 &&
-    (
-      !['sin_datos', null, undefined].includes(row.trabajadores_bucket as string | null | undefined) ||
-      !['sin_datos', null, undefined].includes(row.facturacion_bucket as string | null | undefined) ||
-      !['sin_segmento', null, undefined].includes(row.tamano_empresa_bucket as string | null | undefined) ||
-      !['sin_datos', null, undefined].includes(row.tendencia_bucket as string | null | undefined) ||
-      !['sin_region', null, undefined].includes(row.region_bucket as string | null | undefined)
-    )
-  ))
 }
 
 async function refreshDynamicUniverseMatrix() {
@@ -441,7 +425,6 @@ async function refreshDynamicUniverseMatrix() {
           END AS patrimonio_bucket,
           COALESCE(NULLIF(BTRIM(e.region), ''), 'sin_region') AS region_bucket
         FROM public.empresas_comercial_unificada e
-        WHERE COALESCE(e.es_universo_operativo_ventas, true) = true
       )
       ${datasetCtes.length > 0 ? `, ${datasetCtes.join(',\n')}` : ''}
       SELECT
@@ -506,14 +489,8 @@ export async function GET(req: NextRequest) {
     // if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const pgPool = getPool()
-    let data = await getUpdatedUniversos() ?? await getStoredUniversos(supabase)
-    let datasetDimensions = pgPool ? await getDatasetDimensions(pgPool) : []
-
-    if (pgPool && !hasUsefulCommercialBuckets(data as Array<Record<string, unknown>>)) {
-      const refreshedDimensions = await refreshDynamicUniverseMatrix()
-      data = await getUpdatedUniversos() ?? data
-      datasetDimensions = refreshedDimensions ?? await getDatasetDimensions(pgPool)
-    }
+    const data = await getUpdatedUniversos() ?? await getStoredUniversos(supabase)
+    const datasetDimensions = pgPool ? await getDatasetDimensions(pgPool) : []
 
     return NextResponse.json({
       success: true,
