@@ -196,7 +196,7 @@ function getAdvancedValue(row: UniverseRow, key: AdvancedFilterKey) {
 }
 
 function formatBucketOption(value: string) {
-  return value === ANY_VALUE ? 'Cualquiera' : getBucketLabel(value)
+  return value === ANY_VALUE ? 'No filtrar' : getBucketLabel(value)
 }
 
 function sortBucketOptions(key: AdvancedFilterKey, values: string[]) {
@@ -578,7 +578,7 @@ export default function UniversosPage() {
                       onChange={event => setAdvancedFilter(config.key, event.target.value)}
                       className="input-base h-9 py-1.5 text-xs"
                     >
-                      <option value={ANY_VALUE}>Cualquiera</option>
+                      <option value={ANY_VALUE}>No filtrar</option>
                       {options.map(option => (
                         <option key={option} value={option}>
                           {formatBucketOption(option)}

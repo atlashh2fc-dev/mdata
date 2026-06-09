@@ -43,6 +43,37 @@ type DatasetDimension = {
   last_loaded_at: string | null
 }
 
+function normalizeEntityType(value: unknown) {
+  return value === 'invalido' ? 'basura' : value
+}
+
+function mapUniverseRows(rows: Array<Record<string, unknown>>) {
+  return rows.map(row => ({
+    ...row,
+    entidad_tipo: normalizeEntityType(row.entidad_tipo),
+    dataset_flags: row.dataset_flags ?? {},
+    total: Number(row.total ?? 0),
+    refreshed_at: row.refreshed_at ? new Date(row.refreshed_at as string | number | Date).toISOString() : null,
+  }))
+}
+
+function hasUsefulCommercialBuckets(rows: Array<Record<string, unknown>> | null | undefined) {
+  if (!rows?.length) return false
+
+  return rows.some(row => (
+    row.entidad_tipo === 'persona_juridica' &&
+    Number(row.total ?? 0) > 0 &&
+    (
+      !['sin_datos', null, undefined].includes(row.trabajadores_bucket as string | null | undefined) ||
+      !['sin_datos', null, undefined].includes(row.facturacion_bucket as string | null | undefined) ||
+      !['sin_segmento', null, undefined].includes(row.tamano_empresa_bucket as string | null | undefined) ||
+      !['sin_datos', null, undefined].includes(row.tendencia_bucket as string | null | undefined) ||
+      !['sin_datos', null, undefined].includes(row.patrimonio_bucket as string | null | undefined) ||
+      !['sin_region', null, undefined].includes(row.region_bucket as string | null | undefined)
+    )
+  ))
+}
+
 function getPostgresConnectionString() {
   const connectionString = process.env.POSTGRES_URL_NON_POOLING
     ?? process.env.POSTGRES_URL
@@ -226,12 +257,15 @@ async function getUpdatedUniversos() {
   `)
 
   if (dynamicRows.length > 0 && dynamicRows.some(row => Number(row.total ?? 0) > 0)) {
-    return dynamicRows.map(row => ({
-      ...row,
-      dataset_flags: row.dataset_flags ?? {},
-      total: Number(row.total ?? 0),
-      refreshed_at: row.refreshed_at ? new Date(row.refreshed_at).toISOString() : null,
-    }))
+    if (!hasUsefulCommercialBuckets(dynamicRows)) {
+      const repairedRows = await refreshCompanyCommercialUniverseRows(pgPool)
+      return mapUniverseRows([
+        ...dynamicRows.filter(row => row.entidad_tipo !== 'persona_juridica'),
+        ...repairedRows,
+      ])
+    }
+
+    return mapUniverseRows(dynamicRows)
   }
 
   const { rows } = await pgPool.query(`
@@ -269,11 +303,114 @@ async function getUpdatedUniversos() {
     FROM empresa_rows
   `)
 
-  return rows.map(row => ({
-    ...row,
-    dataset_flags: {},
-    total: Number(row.total ?? 0),
-  }))
+  return mapUniverseRows(rows.map(row => ({ ...row, dataset_flags: {} })))
+}
+
+async function refreshCompanyCommercialUniverseRows(pgPool: Pool) {
+  await ensureUniverseSyncTables(pgPool)
+
+  await pgPool.query('BEGIN')
+  try {
+    await pgPool.query('SET LOCAL statement_timeout = 0')
+    await pgPool.query(`
+      DELETE FROM public.stats_universos_dynamic
+      WHERE entidad_tipo = 'persona_juridica'
+    `)
+
+    const { rows } = await pgPool.query(`
+      INSERT INTO public.stats_universos_dynamic (
+        entidad_tipo,
+        con_nombre,
+        con_email,
+        con_fono,
+        con_autos,
+        con_empresa,
+        con_domicilio,
+        con_bienes_raices,
+        dataset_flags,
+        trabajadores_bucket,
+        facturacion_bucket,
+        tamano_empresa_bucket,
+        tendencia_bucket,
+        patrimonio_bucket,
+        region_bucket,
+        total,
+        refreshed_at
+      )
+      SELECT
+        'persona_juridica'::text AS entidad_tipo,
+        (NULLIF(BTRIM(e.razon_social), '') IS NOT NULL) AS con_nombre,
+        (NULLIF(BTRIM(e.email), '') IS NOT NULL) AS con_email,
+        (NULLIF(BTRIM(e.fono_cel), '') IS NOT NULL) AS con_fono,
+        (COALESCE(e.n_autos, 0) > 0) AS con_autos,
+        true AS con_empresa,
+        (
+          COALESCE(
+            NULLIF(BTRIM(e.domicilio_direccion), ''),
+            NULLIF(BTRIM(e.region), ''),
+            NULLIF(BTRIM(e.comuna), '')
+          ) IS NOT NULL
+        ) AS con_domicilio,
+        (COALESCE(e.n_bienes_raices, 0) > 0 OR COALESCE(e.totalavaluos, 0) > 0) AS con_bienes_raices,
+        '{}'::jsonb AS dataset_flags,
+        CASE
+          WHEN e.trabajadores_2024 IS NULL THEN 'sin_datos'
+          WHEN e.trabajadores_2024 = 0 THEN '0'
+          WHEN e.trabajadores_2024 BETWEEN 1 AND 9 THEN '1-9'
+          WHEN e.trabajadores_2024 BETWEEN 10 AND 49 THEN '10-49'
+          WHEN e.trabajadores_2024 BETWEEN 50 AND 199 THEN '50-199'
+          WHEN e.trabajadores_2024 BETWEEN 200 AND 499 THEN '200-499'
+          ELSE '500+'
+        END AS trabajadores_bucket,
+        CASE
+          WHEN e.ultimo_tramo_ventas IS NULL THEN 'sin_datos'
+          WHEN e.ultimo_tramo_ventas BETWEEN 1 AND 5 THEN 'T1-T5'
+          WHEN e.ultimo_tramo_ventas BETWEEN 6 AND 7 THEN 'T6-T7'
+          WHEN e.ultimo_tramo_ventas BETWEEN 8 AND 9 THEN 'T8-T9'
+          WHEN e.ultimo_tramo_ventas BETWEEN 10 AND 12 THEN 'T10-T12'
+          ELSE 'T13+'
+        END AS facturacion_bucket,
+        COALESCE(NULLIF(BTRIM(e.segmento_tamano_empresa), ''), 'sin_segmento') AS tamano_empresa_bucket,
+        COALESCE(NULLIF(BTRIM(e.resultado_tendencia), ''), 'sin_datos') AS tendencia_bucket,
+        CASE
+          WHEN COALESCE(e.score_patrimonial, 0) = 0 THEN '0'
+          WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 1 AND 20 THEN '1-20'
+          WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 21 AND 40 THEN '21-40'
+          WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 41 AND 60 THEN '41-60'
+          WHEN COALESCE(e.score_patrimonial, 0) BETWEEN 61 AND 80 THEN '61-80'
+          ELSE '81+'
+        END AS patrimonio_bucket,
+        COALESCE(NULLIF(BTRIM(e.region), ''), 'sin_region') AS region_bucket,
+        COUNT(*)::bigint AS total,
+        now() AS refreshed_at
+      FROM public.empresas_comercial_unificada e
+      GROUP BY 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15
+      RETURNING
+        entidad_tipo,
+        con_nombre,
+        con_email,
+        con_fono,
+        con_autos,
+        con_empresa,
+        con_domicilio,
+        con_bienes_raices,
+        dataset_flags,
+        trabajadores_bucket,
+        facturacion_bucket,
+        tamano_empresa_bucket,
+        tendencia_bucket,
+        patrimonio_bucket,
+        region_bucket,
+        total::bigint,
+        refreshed_at
+    `)
+
+    await pgPool.query('COMMIT')
+    return rows
+  } catch (error) {
+    await pgPool.query('ROLLBACK')
+    throw error
+  }
 }
 
 async function refreshDynamicUniverseMatrix() {
@@ -496,7 +633,7 @@ export async function GET(req: NextRequest) {
       success: true,
       data,
       dimensions: [...STATIC_DIMENSIONS, ...datasetDimensions],
-      synced_at: data?.[0]?.refreshed_at ?? null,
+      synced_at: (data?.[0] as Record<string, unknown> | undefined)?.refreshed_at ?? null,
     })
   } catch (error) {
     console.error('[API/Universos]', error)
@@ -519,7 +656,7 @@ export async function POST() {
       success: true,
       data,
       dimensions: [...STATIC_DIMENSIONS, ...(datasetDimensions ?? [])],
-      synced_at: data?.[0]?.refreshed_at ?? null,
+      synced_at: (data?.[0] as Record<string, unknown> | undefined)?.refreshed_at ?? null,
     })
   } catch (error) {
     console.error('[API/Universos refresh]', error)
