@@ -276,6 +276,22 @@ async function getUpdatedUniversos() {
   }))
 }
 
+function hasUsefulCommercialBuckets(rows: Array<Record<string, unknown>> | null | undefined) {
+  if (!rows?.length) return false
+
+  return rows.some(row => (
+    row.entidad_tipo === 'persona_juridica' &&
+    Number(row.total ?? 0) > 0 &&
+    (
+      !['sin_datos', null, undefined].includes(row.trabajadores_bucket as string | null | undefined) ||
+      !['sin_datos', null, undefined].includes(row.facturacion_bucket as string | null | undefined) ||
+      !['sin_segmento', null, undefined].includes(row.tamano_empresa_bucket as string | null | undefined) ||
+      !['sin_datos', null, undefined].includes(row.tendencia_bucket as string | null | undefined) ||
+      !['sin_region', null, undefined].includes(row.region_bucket as string | null | undefined)
+    )
+  ))
+}
+
 async function refreshDynamicUniverseMatrix() {
   const pgPool = getPool()
   if (!pgPool) return null
@@ -490,8 +506,14 @@ export async function GET(req: NextRequest) {
     // if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const pgPool = getPool()
-    const data = await getUpdatedUniversos() ?? await getStoredUniversos(supabase)
-    const datasetDimensions = pgPool ? await getDatasetDimensions(pgPool) : []
+    let data = await getUpdatedUniversos() ?? await getStoredUniversos(supabase)
+    let datasetDimensions = pgPool ? await getDatasetDimensions(pgPool) : []
+
+    if (pgPool && !hasUsefulCommercialBuckets(data as Array<Record<string, unknown>>)) {
+      const refreshedDimensions = await refreshDynamicUniverseMatrix()
+      data = await getUpdatedUniversos() ?? data
+      datasetDimensions = refreshedDimensions ?? await getDatasetDimensions(pgPool)
+    }
 
     return NextResponse.json({
       success: true,

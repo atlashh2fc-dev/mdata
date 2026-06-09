@@ -115,6 +115,8 @@ const BUCKET_LABELS: Record<string, string> = {
   '81+': '81+',
 }
 
+const NON_ACTIONABLE_BUCKETS = new Set(['sin_datos', 'sin_segmento', 'sin_region'])
+
 const ENTITY_GROUPS: Array<{
   key: EntityFilter
   label: string
@@ -297,7 +299,7 @@ export default function UniversosPage() {
       const values = new Set<string>()
       for (const row of scopedData) {
         const value = getAdvancedValue(row, config.key)
-        if (value && value !== ANY_VALUE) values.add(value)
+        if (value && value !== ANY_VALUE && !NON_ACTIONABLE_BUCKETS.has(value)) values.add(value)
       }
       options[config.key] = sortBucketOptions(config.key, [...values])
     }
@@ -575,7 +577,7 @@ export default function UniversosPage() {
                     </select>
                     {options.length === 0 && (
                       <p className="mt-2 text-[10px] text-amber-300">
-                        Actualiza la matriz para poblar este filtro.
+                        Sin valores útiles en este universo. Cambia a Jurídicas o espera la matriz comercial.
                       </p>
                     )}
                   </div>
