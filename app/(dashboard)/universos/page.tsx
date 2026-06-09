@@ -106,13 +106,32 @@ const BUCKET_LABELS: Record<string, string> = {
   sube: 'Sube',
   baja: 'Baja',
   estable: 'Estable',
-  'T1-T5': 'T1-T5 · Micro',
-  'T6-T7': 'T6-T7 · Pequeña',
-  'T8-T9': 'T8-T9 · Mediana',
-  'T10-T12': 'T10-T12 · Grande',
-  'T13+': 'T13+ · Corporación',
-  '500+': '500+',
-  '81+': '81+',
+}
+
+const FILTER_BUCKET_LABELS: Partial<Record<AdvancedFilterKey, Record<string, string>>> = {
+  trabajadores_bucket: {
+    '0': '0 trabajadores',
+    '1-9': '1-9 trabajadores',
+    '10-49': '10-49 trabajadores',
+    '50-199': '50-199 trabajadores',
+    '200-499': '200-499 trabajadores',
+    '500+': '500+ trabajadores',
+  },
+  facturacion_bucket: {
+    'T1-T5': 'T1-T5 · hasta 10k UF/año',
+    'T6-T7': 'T6-T7 · 10k-50k UF/año',
+    'T8-T9': 'T8-T9 · 50k-200k UF/año',
+    'T10-T12': 'T10-T12 · 200k-1M UF/año',
+    'T13+': 'T13+ · >1M UF/año',
+  },
+  patrimonio_bucket: {
+    '0': '0 · sin avalúo',
+    '1-20': '1-20 · bajo',
+    '21-40': '21-40 · medio-bajo',
+    '41-60': '41-60 · medio',
+    '61-80': '61-80 · alto',
+    '81+': '81+ · muy alto',
+  },
 }
 
 const NON_ACTIONABLE_BUCKETS = new Set(['sin_datos', 'sin_segmento', 'sin_region'])
@@ -187,16 +206,16 @@ function getRowFlag(row: UniverseRow, key: string) {
   return Boolean(row.dataset_flags?.[key])
 }
 
-function getBucketLabel(value: string) {
-  return BUCKET_LABELS[value] ?? value
+function getBucketLabel(value: string, key?: AdvancedFilterKey) {
+  return FILTER_BUCKET_LABELS[key ?? 'trabajadores_bucket']?.[value] ?? BUCKET_LABELS[value] ?? value
 }
 
 function getAdvancedValue(row: UniverseRow, key: AdvancedFilterKey) {
   return row[key] ?? DEFAULT_ADVANCED_FILTERS[key]
 }
 
-function formatBucketOption(value: string) {
-  return value === ANY_VALUE ? 'No filtrar' : getBucketLabel(value)
+function formatBucketOption(value: string, key?: AdvancedFilterKey) {
+  return value === ANY_VALUE ? 'No filtrar' : getBucketLabel(value, key)
 }
 
 function sortBucketOptions(key: AdvancedFilterKey, values: string[]) {
@@ -212,7 +231,7 @@ function sortBucketOptions(key: AdvancedFilterKey, values: string[]) {
     const ai = preferred.indexOf(a)
     const bi = preferred.indexOf(b)
     if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 999) - (bi >= 0 ? bi : 999)
-    return getBucketLabel(a).localeCompare(getBucketLabel(b), 'es')
+    return getBucketLabel(a, key).localeCompare(getBucketLabel(b, key), 'es')
   })
 }
 
@@ -606,7 +625,7 @@ export default function UniversosPage() {
                       <option value={ANY_VALUE}>No filtrar</option>
                       {options.map(option => (
                         <option key={option} value={option}>
-                          {formatBucketOption(option)}
+                          {formatBucketOption(option, config.key)}
                         </option>
                       ))}
                     </select>
@@ -730,7 +749,7 @@ export default function UniversosPage() {
                           ))}
                           {ADVANCED_FILTER_CONFIG.map(config => (
                             <td key={config.key} className="px-2 py-2 text-left text-[10px] text-slate-400 whitespace-nowrap">
-                              {formatBucketOption(getAdvancedValue(row, config.key))}
+                              {formatBucketOption(getAdvancedValue(row, config.key), config.key)}
                             </td>
                           ))}
                           <td className="px-3 py-2 text-right font-mono font-semibold text-white">
@@ -814,7 +833,7 @@ export default function UniversosPage() {
                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
                            >
                              <SlidersHorizontal className="w-2.5 h-2.5" />
-                             {config?.label ?? key}: {formatBucketOption(value)}
+                             {config?.label ?? key}: {formatBucketOption(value, key)}
                            </span>
                          )
                        })}
