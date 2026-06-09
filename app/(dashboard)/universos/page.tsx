@@ -216,6 +216,23 @@ function sortBucketOptions(key: AdvancedFilterKey, values: string[]) {
   })
 }
 
+function rowMatchesStaticFilters(row: UniverseRow, filters: Record<string, FilterState>, exceptKey?: string) {
+  for (const [key, val] of Object.entries(filters)) {
+    if (key === exceptKey) continue
+    if (val !== null && getRowFlag(row, key) !== val) return false
+  }
+  return true
+}
+
+function rowMatchesAdvancedFilters(row: UniverseRow, advancedFilters: AdvancedFilters, exceptKey?: AdvancedFilterKey) {
+  for (const config of ADVANCED_FILTER_CONFIG) {
+    if (config.key === exceptKey) continue
+    const selected = advancedFilters[config.key]
+    if (selected !== ANY_VALUE && getAdvancedValue(row, config.key) !== selected) return false
+  }
+  return true
+}
+
 export default function UniversosPage() {
   const [data, setData] = useState<UniverseRow[]>([])
   const [dimensions, setDimensions] = useState<UniverseDimension[]>(DEFAULT_DIMENSIONS)
@@ -308,6 +325,8 @@ export default function UniversosPage() {
     for (const config of ADVANCED_FILTER_CONFIG) {
       const values = new Set<string>()
       for (const row of scopedData) {
+        if (!rowMatchesStaticFilters(row, filters)) continue
+        if (!rowMatchesAdvancedFilters(row, advancedFilters, config.key)) continue
         const value = getAdvancedValue(row, config.key)
         if (value && value !== ANY_VALUE && !NON_ACTIONABLE_BUCKETS.has(value)) values.add(value)
       }
@@ -315,7 +334,24 @@ export default function UniversosPage() {
     }
 
     return options
-  }, [scopedData])
+  }, [advancedFilters, filters, scopedData])
+
+  useEffect(() => {
+    setAdvancedFilters(prev => {
+      let changed = false
+      const next = { ...prev }
+
+      for (const config of ADVANCED_FILTER_CONFIG) {
+        const selected = prev[config.key]
+        if (selected !== ANY_VALUE && !advancedOptions[config.key].includes(selected)) {
+          next[config.key] = ANY_VALUE
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [advancedOptions])
 
   // Grand total (all rows)
   const totalBase = useMemo(() => scopedData.reduce((acc, row) => acc + row.total, 0), [scopedData])
@@ -327,11 +363,15 @@ export default function UniversosPage() {
       if (entityFilter === 'todos' && dim.source === 'dataset' && typeof dim.record_count === 'number') {
         out[dim.key] = dim.record_count
       } else {
-        out[dim.key] = scopedData.filter(r => getRowFlag(r, dim.key)).reduce((s, r) => s + r.total, 0)
+        out[dim.key] = scopedData
+          .filter(r => rowMatchesStaticFilters(r, filters, dim.key))
+          .filter(r => rowMatchesAdvancedFilters(r, advancedFilters))
+          .filter(r => getRowFlag(r, dim.key))
+          .reduce((s, r) => s + r.total, 0)
       }
     }
     return out
-  }, [dimensions, scopedData, entityFilter])
+  }, [advancedFilters, dimensions, filters, scopedData, entityFilter])
 
   // Calculamos el volumen instantáneamente cruzando la matriz precomputada
   const result = useMemo(() => {
@@ -339,22 +379,7 @@ export default function UniversosPage() {
     const matchingRows: UniverseRow[] = []
 
     for (const row of scopedData) {
-      let isMatch = true
-      for (const [key, val] of Object.entries(filters)) {
-        if (val !== null && getRowFlag(row, key) !== val) {
-          isMatch = false
-          break
-        }
-      }
-      if (isMatch) {
-        for (const config of ADVANCED_FILTER_CONFIG) {
-          const selected = advancedFilters[config.key]
-          if (selected !== ANY_VALUE && getAdvancedValue(row, config.key) !== selected) {
-            isMatch = false
-            break
-          }
-        }
-      }
+      const isMatch = rowMatchesStaticFilters(row, filters) && rowMatchesAdvancedFilters(row, advancedFilters)
       if (isMatch) {
         count += row.total
         matchingRows.push(row)
@@ -470,19 +495,19 @@ export default function UniversosPage() {
         subtitle="Matriz combinatoria — cruce de volúmenes en tiempo real"
       />
 
-      <div className="p-6 flex flex-col xl:flex-row gap-6" style={{ minHeight: 'calc(100vh - 5rem)' }}>
+      <div className="p-6 flex flex-col xl:flex-row gap-6 overflow-x-hidden" style={{ minHeight: 'calc(100vh - 5rem)' }}>
         
         {/* COLUMNA IZQUIERDA: CONTROLES */}
-        <div className="flex-1 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div>
+        <div className="min-w-0 flex-1 flex flex-col gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
               <h3 className="text-sm font-semibold text-slate-300">Dimensiones de Datos</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
                 Primero elige el universo base; luego incluye ✓ o excluye ✗ cada dimensión
                 {datasetDimensionCount > 0 ? ` · ${datasetDimensionCount} filtros sincronizados desde datasets` : ''}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <button
                 onClick={refreshUniversos}
                 disabled={refreshing}
@@ -498,7 +523,7 @@ export default function UniversosPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-3">
             {ENTITY_GROUPS.map(group => {
               const isActive = entityFilter === group.key
               const total = entityTotals[group.key]
@@ -506,10 +531,10 @@ export default function UniversosPage() {
                 <button
                   key={group.key}
                   onClick={() => setEntityFilter(group.key)}
-                  className={`rounded-xl border p-4 text-left transition-all ${isActive ? `${group.border} ${group.bg} shadow-[0_0_18px_rgba(15,23,42,0.35)]` : 'border-slate-700/50 bg-[#1e293b]/40 hover:bg-[#1e293b]/70'}`}
+                  className={`min-w-0 rounded-xl border p-4 text-left transition-all ${isActive ? `${group.border} ${group.bg} shadow-[0_0_18px_rgba(15,23,42,0.35)]` : 'border-slate-700/50 bg-[#1e293b]/40 hover:bg-[#1e293b]/70'}`}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <h4 className={`text-sm font-semibold ${isActive ? group.tone : 'text-white'}`}>{group.label}</h4>
                       <p className="mt-1 text-[10px] text-slate-500 leading-relaxed">{group.description}</p>
                     </div>
@@ -522,9 +547,9 @@ export default function UniversosPage() {
             })}
           </div>
 
-          <div className="rounded-2xl border border-slate-700/60 bg-[#1e293b]/70 p-4 shadow-elevation-1">
+          <div className="overflow-hidden rounded-2xl border border-slate-700/60 bg-[#1e293b]/70 p-4 shadow-elevation-1">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <SlidersHorizontal className="h-4 w-4 text-cyan-300" />
                   <h3 className="text-sm font-semibold text-slate-200">Filtros comerciales avanzados</h3>
@@ -533,7 +558,7 @@ export default function UniversosPage() {
                   Segmenta empresas y personas por dotación, facturación, tendencia, patrimonio y territorio sin recalcular la base completa.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex max-w-full flex-wrap gap-2 lg:max-w-[460px] lg:justify-end">
                 <button
                   type="button"
                   onClick={applyContactableCompaniesPreset}
@@ -570,13 +595,13 @@ export default function UniversosPage() {
                 const options = advancedOptions[config.key]
                 const selected = advancedFilters[config.key]
                 return (
-                  <div key={config.key} className="rounded-xl border border-slate-700/50 bg-[#0f172a]/60 p-3">
+                  <div key={config.key} className="min-w-0 overflow-hidden rounded-xl border border-slate-700/50 bg-[#0f172a]/60 p-3">
                     <label className="mb-1 block text-xs font-semibold text-slate-300">{config.label}</label>
                     <p className="mb-2 min-h-[28px] text-[10px] leading-relaxed text-slate-500">{config.description}</p>
                     <select
                       value={selected}
                       onChange={event => setAdvancedFilter(config.key, event.target.value)}
-                      className="input-base h-9 py-1.5 text-xs"
+                      className="input-base h-9 w-full min-w-0 max-w-full truncate py-1.5 text-xs"
                     >
                       <option value={ANY_VALUE}>No filtrar</option>
                       {options.map(option => (
@@ -625,14 +650,14 @@ export default function UniversosPage() {
                  <button
                     key={dim.key}
                     onClick={() => toggleFilter(dim.key)}
-                    className={`p-4 rounded-xl border transition-all duration-200 text-left flex flex-col gap-3 ${stateClass}`}
+                    className={`min-w-0 p-4 rounded-xl border transition-all duration-200 text-left flex flex-col gap-3 ${stateClass}`}
                  >
                    <div className="flex items-start justify-between w-full">
-                     <div className="flex items-center gap-3">
+                     <div className="min-w-0 flex items-center gap-3">
                         <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${dimStyle.bg}`}>
                           <Icon className={`w-4.5 h-4.5 ${dimStyle.color}`} />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <h4 className="text-sm font-semibold text-white leading-tight">{dim.label}</h4>
                           <p className={`text-[10px] mt-0.5 uppercase tracking-wider font-medium ${stateColor}`}>
                             {stateLabel}{dim.source === 'dataset' ? ' · Dataset' : ''}
@@ -738,7 +763,7 @@ export default function UniversosPage() {
         </div>
 
         {/* COLUMNA DERECHA: RESULTADO EN VIVO */}
-        <div className="xl:w-[400px] flex flex-col gap-4">
+        <div className="min-w-0 flex flex-col gap-4 xl:w-[400px] xl:min-w-[360px]">
           <div className="glass-panel flex flex-col justify-center items-center text-center p-8 relative overflow-hidden" style={{ minHeight: 320 }}>
              
              {/* Background glow animated */}
