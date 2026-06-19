@@ -19,6 +19,10 @@ const LOOKBACK_MINUTES = Number(process.env.REGISTRO_INTEL_LOOKBACK_MINUTES || 1
 const BATCH_SIZE = Number(process.env.REGISTRO_INTEL_DIRECT_BATCH_SIZE || 250)
 const UPSERT_CHUNK_SIZE = Number(process.env.REGISTRO_INTEL_LOCAL_UPSERT_CHUNK_SIZE || 50)
 const RUT_CHUNK_SIZE = Number(process.env.REGISTRO_INTEL_LOCAL_RUT_CHUNK_SIZE || 500)
+const PROCESS_CHUNK_SIZE = Number(process.env.REGISTRO_INTEL_DIRECT_PROCESS_CHUNK_SIZE || 1000)
+const DIRECT_TO = process.env.REGISTRO_INTEL_DIRECT_TO
+  ? new Date(process.env.REGISTRO_INTEL_DIRECT_TO).toISOString()
+  : null
 
 if (!LOCAL_URL || !LOCAL_SERVICE_KEY) {
   throw new Error('Faltan NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY/SUPABASE_SECRET_KEY')
@@ -35,6 +39,8 @@ const local = createClient(LOCAL_URL, LOCAL_SERVICE_KEY, {
 const remote = createClient(REMOTE_URL, REMOTE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 })
+
+let localPgClient = null
 
 function toIsoDate(value) {
   if (!value) return null
@@ -72,6 +78,14 @@ function normalizePhone(value) {
 
 function lower(value) {
   return String(value ?? '').trim().toLowerCase()
+}
+
+function normalizeChannel(value) {
+  const channel = lower(value)
+  if (['mailing', 'mail', 'correo'].includes(channel)) return 'email'
+  if (['call', 'phone_call', 'telefono', 'fono'].includes(channel)) return 'phone'
+  if (['wsp', 'wa'].includes(channel)) return 'whatsapp'
+  return channel || 'phone'
 }
 
 function parseInteger(value) {
@@ -206,10 +220,12 @@ async function createRun(cursorStartedAt) {
       source_kind: 'supabase_direct_tables',
       status: 'running',
       requested_from: cursorStartedAt,
+      requested_to: DIRECT_TO,
       cursor_value: cursorStartedAt,
       metadata: {
         source_view: SOURCE_VIEW,
         sync_method: 'calls_direct_cross',
+        cursor_to: DIRECT_TO,
       },
     })
     .select('id')
@@ -225,6 +241,11 @@ async function updateRun(runId, payload) {
 }
 
 async function upsertLocal(table, rows, onConflict) {
+  if (table === 'contact_center_feedback' || table === 'persona_contact_points') {
+    await upsertLocalPg(table, rows, onConflict)
+    return
+  }
+
   for (let i = 0; i < rows.length; i += UPSERT_CHUNK_SIZE) {
     const chunk = rows.slice(i, i + UPSERT_CHUNK_SIZE)
     const { error } = await local.from(table).upsert(chunk, { onConflict })
@@ -285,7 +306,7 @@ function mapFeedback(call, contact, campaign, profile, bestManagement, queue) {
     match_method: rutid ? 'direct_rut' : null,
     contact_phone: normalizePhone(call.phone_number || contact?.phone_mobile || contact?.phone_contact || contact?.phone_normalized),
     contact_email: normalizeEmail(contact?.email),
-    channel: lower(campaign?.campaign_channel) || 'phone',
+    channel: normalizeChannel(campaign?.campaign_channel),
     managed_at: toIsoDate(call.started_at || call.created_at),
     outcome,
     outcome_subtype: call.outcome,
@@ -380,12 +401,71 @@ function buildContactPoints(records, existingRuts) {
   return [...points.values()]
 }
 
+function chunkArray(items, size) {
+  const chunks = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
 function postgresConnectionString() {
   const raw = process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL || process.env.DATABASE_URL
   if (!raw) throw new Error('Falta POSTGRES_URL_NON_POOLING/POSTGRES_URL/DATABASE_URL')
   const url = new URL(raw)
   url.searchParams.delete('sslmode')
   return url.toString()
+}
+
+async function getLocalPgClient() {
+  if (localPgClient) return localPgClient
+
+  localPgClient = new Client({
+    connectionString: postgresConnectionString(),
+    ssl: { rejectUnauthorized: false },
+  })
+  await localPgClient.connect()
+  await localPgClient.query('set statement_timeout = 0')
+  return localPgClient
+}
+
+function sqlValue(value) {
+  if (value === undefined) return null
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return JSON.stringify(value)
+  }
+  return value
+}
+
+async function upsertLocalPg(table, rows, conflictColumns) {
+  if (rows.length === 0) return
+
+  const client = await getLocalPgClient()
+  const columns = Object.keys(rows[0])
+  const conflict = conflictColumns.split(',').map(column => column.trim())
+  const updates = columns
+    .filter(column => !conflict.includes(column))
+    .map(column => `${column} = excluded.${column}`)
+    .join(', ')
+
+  for (let i = 0; i < rows.length; i += UPSERT_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + UPSERT_CHUNK_SIZE)
+    const values = []
+    const tuples = chunk.map((row, rowIndex) => {
+      const placeholders = columns.map((column, columnIndex) => {
+        values.push(sqlValue(row[column]))
+        return `$${rowIndex * columns.length + columnIndex + 1}`
+      })
+      return `(${placeholders.join(', ')})`
+    })
+
+    await client.query(
+      `insert into public.${table} (${columns.join(', ')})
+       values ${tuples.join(', ')}
+       on conflict (${conflict.join(', ')}) do update set ${updates}`,
+      values
+    )
+  }
 }
 
 async function refreshBaseContactDataset() {
@@ -411,6 +491,8 @@ async function main() {
   let loaded = 0
   let refreshed = 0
   let maxCursor = fromIso
+  let affectedRutsCount = 0
+  let contactPointsCount = 0
 
   try {
     const callsById = new Map()
@@ -435,7 +517,8 @@ async function main() {
 
     for (const column of ['created_at', 'last_telephony_event_at']) {
       const rows = await fetchAll('calls', callSelect, query =>
-        query.gte(column, fromIso).order(column, { ascending: true })
+        (DIRECT_TO ? query.gte(column, fromIso).lte(column, DIRECT_TO) : query.gte(column, fromIso))
+          .order(column, { ascending: true })
       )
       for (const row of rows) {
         callsById.set(row.id, row)
@@ -449,24 +532,28 @@ async function main() {
     })
     fetched = calls.length
 
-    const contacts = await fetchByIds(
-      'contacts',
-      'id,rut,full_name,email,phone_mobile,phone_contact,phone_normalized',
-      'id',
-      calls.map(call => call.contact_id)
-    )
-    const campaigns = await fetchByIds('campaigns', 'id,name,campaign_channel', 'id', calls.map(call => call.campaign_id))
-    const profiles = await fetchByIds('profiles', 'user_id,full_name', 'user_id', calls.map(call => call.agent_id))
-    const pairs = calls.map(call => ({ campaign_id: call.campaign_id, contact_id: call.contact_id }))
-    const bestManagement = await fetchPairMap(
-      'campaign_contact_best_management',
-      'campaign_id,contact_id,best_call_id,updated_at',
-      pairs
-    )
-    const queue = await fetchPairMap('campaign_contact_queue', 'campaign_id,contact_id,updated_at', pairs)
+    const affectedRuts = new Set()
+    const callChunks = chunkArray(calls, PROCESS_CHUNK_SIZE)
 
-    const records = calls
-      .map(call => {
+    for (let index = 0; index < callChunks.length; index += 1) {
+      const callChunk = callChunks[index]
+      const contacts = await fetchByIds(
+        'contacts',
+        'id,rut,full_name,email,phone_mobile,phone_contact,phone_normalized',
+        'id',
+        callChunk.map(call => call.contact_id)
+      )
+      const campaigns = await fetchByIds('campaigns', 'id,name,campaign_channel', 'id', callChunk.map(call => call.campaign_id))
+      const profiles = await fetchByIds('profiles', 'user_id,full_name', 'user_id', callChunk.map(call => call.agent_id))
+      const pairs = callChunk.map(call => ({ campaign_id: call.campaign_id, contact_id: call.contact_id }))
+      const bestManagement = await fetchPairMap(
+        'campaign_contact_best_management',
+        'campaign_id,contact_id,best_call_id,updated_at',
+        pairs
+      )
+      const queue = await fetchPairMap('campaign_contact_queue', 'campaign_id,contact_id,updated_at', pairs)
+
+      const records = callChunk.map(call => {
         const key = `${call.campaign_id}:${call.contact_id}`
         return mapFeedback(
           call,
@@ -479,20 +566,28 @@ async function main() {
       })
       .filter(record => record.external_event_id && record.managed_at)
 
-    for (const record of records) {
-      const rowCursor = record.metadata?.source_updated_at
-      if (rowCursor && rowCursor > maxCursor) {
-        maxCursor = rowCursor
+      for (const record of records) {
+        const rowCursor = record.metadata?.source_updated_at
+        if (rowCursor && (!DIRECT_TO || rowCursor <= DIRECT_TO) && rowCursor > maxCursor) {
+          maxCursor = rowCursor
+        }
       }
+
+      await upsertLocal('contact_center_feedback', records, 'external_source,external_event_id')
+      loaded += records.length
+
+      const existingRuts = await fetchExistingMasterRuts(records.map(record => record.matched_rutid ?? record.rutid))
+      for (const rutid of existingRuts) affectedRuts.add(rutid)
+
+      const contactPoints = buildContactPoints(records, existingRuts)
+      await upsertLocal('persona_contact_points', contactPoints, 'rutid,contact_type,normalized_value')
+      contactPointsCount += contactPoints.length
+      refreshed += await refreshScoresForRutids([...existingRuts])
+      affectedRutsCount = affectedRuts.size
+
+      console.error(`[crm-sync-direct] lote ${index + 1}/${callChunks.length}: llamadas=${callChunk.length}, feedback=${records.length}, ruts=${affectedRutsCount}`)
     }
 
-    await upsertLocal('contact_center_feedback', records, 'external_source,external_event_id')
-    loaded = records.length
-
-    const existingRuts = await fetchExistingMasterRuts(records.map(record => record.matched_rutid ?? record.rutid))
-    const contactPoints = buildContactPoints(records, existingRuts)
-    await upsertLocal('persona_contact_points', contactPoints, 'rutid,contact_type,normalized_value')
-    refreshed = await refreshScoresForRutids([...existingRuts])
     const dataset = await refreshBaseContactDataset()
 
     await updateRun(runId, {
@@ -500,13 +595,13 @@ async function main() {
       cursor_value: maxCursor,
       records_fetched: fetched,
       records_loaded: loaded,
-      affected_ruts: existingRuts.size,
+      affected_ruts: affectedRutsCount,
       completed_at: new Date().toISOString(),
       metadata: {
         source_view: SOURCE_VIEW,
         sync_method: 'calls_direct_cross',
         refreshed_scores: refreshed,
-        contact_points: contactPoints.length,
+        contact_points: contactPointsCount,
         dataset,
       },
     })
@@ -519,8 +614,8 @@ async function main() {
       fetched,
       loaded,
       refreshed_scores: refreshed,
-      affected_ruts: existingRuts.size,
-      contact_points: contactPoints.length,
+      affected_ruts: affectedRutsCount,
+      contact_points: contactPointsCount,
       cursor_started_at: fromIso,
       cursor_ended_at: maxCursor,
       dataset,
@@ -538,7 +633,13 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error)
-  process.exit(1)
-})
+main()
+  .catch(error => {
+    console.error(error)
+    process.exitCode = 1
+  })
+  .finally(async () => {
+    if (localPgClient) {
+      await localPgClient.end()
+    }
+  })
