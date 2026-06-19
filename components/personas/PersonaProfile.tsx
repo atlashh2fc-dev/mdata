@@ -349,6 +349,8 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
           <DataRow label="Nombres" value={persona.nombres} />
           <DataRow label="Apellido paterno" value={persona.paterno} />
           <DataRow label="Apellido materno" value={persona.materno} />
+          <DataRow label="Cónyuge" value={persona.nombre_conyuge} icon={User} highlight={!!persona.nombre_conyuge} />
+          <DataRow label="RUT cónyuge" value={safeDisplayRut(persona.rutid_conyuge)} highlight={!!persona.rutid_conyuge} />
           <DataRow label="Email" value={persona.email} icon={Mail} highlight />
           <DataRow label="Teléfono" value={persona.fono_cel} icon={Phone} highlight />
           <DataRow label="Comuna" value={persona.comuna_part} icon={MapPin} />
@@ -467,6 +469,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
                 { label: 'Teléfono', ok: !!persona.fono_cel },
                 { label: 'Domicilio', ok: !!persona.domicilio_region },
                 { label: 'Empresa', ok: persona.tiene_empresa },
+                { label: 'Cónyuge', ok: !!persona.rutid_conyuge || !!persona.nombre_conyuge },
               ].map(c => (
                 <div
                   key={c.label}

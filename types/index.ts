@@ -84,6 +84,10 @@ export interface PersonaView {
   n_bienes_raices: number
   totalavaluos: number
   tiene_bienes_raices: boolean
+  rutid_conyuge: string | null
+  nombre_conyuge: string | null
+  conyuge_source: string | null
+  conyuge_loaded_at: string | null
   uso_propiedad_inferido: string | null
   bbrr_destinos: string[]
   n_propiedades_detalle: number
