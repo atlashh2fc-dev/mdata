@@ -31,6 +31,31 @@ type PreviewPlan = {
 }
 
 const DATASET_PREVIEW_FALLBACKS: Record<string, PreviewPlan> = {
+  base_contact: {
+    tableName: 'base_contact',
+    orderColumn: 'managed_at',
+    orderDirection: 'DESC',
+    columns: [
+      { source: 'rutid' },
+      { source: 'rut_formateado' },
+      { source: 'company_name', alias: 'empresa' },
+      { source: 'display_name', alias: 'nombre_visible' },
+      { source: 'contact_name', alias: 'nombre_contacto' },
+      { source: 'contact_name_source', alias: 'fuente_nombre_contacto' },
+      { source: 'contact_rutid', alias: 'rut_contacto' },
+      { source: 'contact_role', alias: 'cargo_contacto' },
+      { source: 'contact_phone', alias: 'telefono_hablado_contact_center' },
+      { source: 'phone_normalized', alias: 'telefono_normalizado_contact_center' },
+      { source: 'best_phone', alias: 'mejor_telefono' },
+      { source: 'contact_email', alias: 'email_contact_center' },
+      { source: 'best_email', alias: 'mejor_email' },
+      { source: 'managed_at', alias: 'fecha_gestion' },
+      { source: 'outcome', alias: 'resultado' },
+      { source: 'valid_contact_label', alias: 'etiqueta_contacto_valido' },
+      { source: 'agent_name', alias: 'agente' },
+      { source: 'campaign_name', alias: 'campana' },
+    ],
+  },
   pernat_resumen: {
     tableName: 'personas_master',
     orderColumn: 'rutid',
@@ -265,9 +290,8 @@ export async function GET(
   try {
     client = await pool.connect()
 
-    const physicalExists = await tableExists(client, physicalPlan.tableName)
     const fallbackPlan = source.slug ? DATASET_PREVIEW_FALLBACKS[source.slug] : null
-    const plan = physicalExists ? physicalPlan : fallbackPlan
+    const plan = fallbackPlan ?? physicalPlan
 
     if (!plan) {
       return NextResponse.json(
@@ -276,7 +300,7 @@ export async function GET(
       )
     }
 
-    const exists = physicalExists || await tableExists(client, plan.tableName)
+    const exists = await tableExists(client, plan.tableName)
     if (!exists) {
       return NextResponse.json(
         { error: `La tabla fuente ${plan.tableName} no existe en la base actual.` },
