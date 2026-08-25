@@ -1,6 +1,13 @@
 import process from 'node:process'
 import { createClient } from '@supabase/supabase-js'
 import pg from 'pg'
+import {
+  buildPostgrestKeysetFilter,
+  buildScanStart,
+  checkpointFromRow,
+  maxCheckpoint,
+  normalizeCheckpoint,
+} from './keyset-checkpoint.mjs'
 
 const { Client } = pg
 
@@ -125,37 +132,44 @@ function displayName(row) {
     ?? normalizeText(payload.razon_social_empresa)
 }
 
-async function getLastCursor() {
-  if (DIRECT_FROM) return new Date(DIRECT_FROM).toISOString()
+async function getLastCheckpoint() {
+  if (DIRECT_FROM) return normalizeCheckpoint(DIRECT_FROM)
 
   const { data, error } = await local
     .from('external_sync_runs')
-    .select('cursor_value, completed_at')
+    .select('cursor_value, completed_at, metadata')
     .eq('source_name', SOURCE_SYSTEM)
     .in('status', ['completed', 'partial'])
-    .order('completed_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .not('cursor_value', 'is', null)
+    .order('cursor_value', { ascending: false })
+    .limit(100)
 
   if (error) throw new Error(`No pude leer cursor local: ${error.message}`)
 
-  const cursor = data?.cursor_value ?? new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString()
-  return new Date(new Date(cursor).getTime() - LOOKBACK_MINUTES * 60 * 1000).toISOString()
+  if (!data?.length) {
+    return normalizeCheckpoint(new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString())
+  }
+
+  return data.reduce(
+    (checkpoint, run) => maxCheckpoint(checkpoint, normalizeCheckpoint(run.cursor_value, run.metadata?.cursor_id)),
+    normalizeCheckpoint(data[0].cursor_value, data[0].metadata?.cursor_id)
+  )
 }
 
-async function createRun(cursorStartedAt) {
+async function createRun(checkpoint, requestedFrom) {
   const { data, error } = await local
     .from('external_sync_runs')
     .insert({
       source_name: SOURCE_SYSTEM,
       source_kind: 'supabase_direct_tables',
       status: 'running',
-      requested_from: cursorStartedAt,
+      requested_from: requestedFrom,
       requested_to: DIRECT_TO,
-      cursor_value: cursorStartedAt,
+      cursor_value: checkpoint.timestamp,
       metadata: {
         source_table: 'registro_intel.campaign_base_leads',
         sync_method: 'active_leads_to_contact_points',
+        cursor_id: checkpoint.id,
       },
     })
     .select('id')
@@ -170,8 +184,7 @@ async function updateRun(runId, payload) {
   if (error) throw new Error(`No pude actualizar run ${runId}: ${error.message}`)
 }
 
-async function fetchLeads(fromIso) {
-  const rows = []
+async function fetchLeadsPage(pageCursor, inclusive) {
   const select = [
     'id',
     'rut_empresa',
@@ -186,24 +199,22 @@ async function fetchLeads(fromIso) {
     'source_payload',
   ].join(',')
 
-  for (let from = 0; ; from += BATCH_SIZE) {
-    let query = remote
-      .from('campaign_base_leads')
-      .select(select)
-      .gte('updated_at', fromIso)
-      .order('updated_at', { ascending: true })
-      .range(from, from + BATCH_SIZE - 1)
+  let query = remote
+    .from('campaign_base_leads')
+    .select(select)
+    .order('updated_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(BATCH_SIZE)
 
-    if (DIRECT_TO) query = query.lte('updated_at', DIRECT_TO)
+  query = inclusive
+    ? query.gte('updated_at', pageCursor.timestamp)
+    : query.or(buildPostgrestKeysetFilter('updated_at', 'id', pageCursor))
 
-    const { data, error } = await query
-    if (error) throw new Error(`No pude leer campaign_base_leads: ${error.message}`)
+  if (DIRECT_TO) query = query.lte('updated_at', DIRECT_TO)
 
-    rows.push(...(data ?? []))
-    if (!data || data.length < BATCH_SIZE) break
-  }
-
-  return rows
+  const { data, error } = await query
+  if (error) throw new Error(`No pude leer campaign_base_leads: ${error.message}`)
+  return data ?? []
 }
 
 async function fetchExistingMasterRuts(rutids) {
@@ -345,43 +356,72 @@ async function refreshScoresForRutids(rutids) {
 }
 
 async function main() {
-  const fromIso = await getLastCursor()
-  const runId = await createRun(fromIso)
+  const checkpointStarted = await getLastCheckpoint()
+  const scanStarted = DIRECT_FROM ? checkpointStarted : buildScanStart(checkpointStarted, LOOKBACK_MINUTES)
+  const runId = await createRun(checkpointStarted, scanStarted.timestamp)
   const startedAt = new Date().toISOString()
 
   let fetched = 0
   let contactPoints = 0
   let upserted = 0
   let refreshed = 0
-  let maxCursor = fromIso
+  let maxCursor = checkpointStarted
+  let scanCursor = scanStarted
+  let firstPage = true
+  const affectedRuts = new Set()
 
   try {
-    const leads = await fetchLeads(fromIso)
-    fetched = leads.length
+    for (;;) {
+      const leads = await fetchLeadsPage(scanCursor, firstPage)
+      if (leads.length === 0) break
 
-    for (const row of leads) {
-      const updatedAt = toIsoDate(row.updated_at)
-      if (updatedAt && updatedAt > maxCursor) maxCursor = updatedAt
+      const nextCursor = checkpointFromRow(leads[leads.length - 1], 'updated_at', 'id')
+      if (!nextCursor) throw new Error('campaign_base_leads no trajo updated_at/id válidos.')
+      scanCursor = nextCursor
+      firstPage = false
+      maxCursor = maxCheckpoint(maxCursor, nextCursor)
+      fetched += leads.length
+
+      const rutids = leads.map(row => normalizeRut(row.rut_empresa)).filter(Boolean)
+      const existingRuts = await fetchExistingMasterRuts(rutids)
+      const points = buildContactPoints(leads, existingRuts)
+      contactPoints += points.length
+      upserted += await upsertContactPoints(points)
+      for (const point of points) affectedRuts.add(point.rutid)
+
+      await updateRun(runId, {
+        records_fetched: fetched,
+        records_loaded: upserted,
+        affected_ruts: affectedRuts.size,
+        metadata: {
+          source_table: 'registro_intel.campaign_base_leads',
+          sync_method: 'active_leads_to_contact_points',
+          started_at: startedAt,
+          cursor_id: checkpointStarted.id,
+          scan_cursor_at: scanCursor.timestamp,
+          scan_cursor_id: scanCursor.id,
+          contact_points: contactPoints,
+        },
+      })
+
+      if (leads.length < BATCH_SIZE) break
     }
 
-    const rutids = leads.map(row => normalizeRut(row.rut_empresa)).filter(Boolean)
-    const existingRuts = await fetchExistingMasterRuts(rutids)
-    const points = buildContactPoints(leads, existingRuts)
-    contactPoints = points.length
-    upserted = await upsertContactPoints(points)
-    refreshed = await refreshScoresForRutids([...new Set(points.map(point => point.rutid))])
+    refreshed = await refreshScoresForRutids([...affectedRuts])
 
     await updateRun(runId, {
       status: 'completed',
-      cursor_value: maxCursor,
+      cursor_value: maxCursor.timestamp,
       completed_at: new Date().toISOString(),
       records_fetched: fetched,
       records_loaded: upserted,
-      affected_ruts: new Set(points.map(point => point.rutid)).size,
+      affected_ruts: affectedRuts.size,
       metadata: {
         source_table: 'registro_intel.campaign_base_leads',
         sync_method: 'active_leads_to_contact_points',
         started_at: startedAt,
+        cursor_id: maxCursor.id,
+        scan_started_at: scanStarted.timestamp,
         contact_points: contactPoints,
         refreshed_scores: refreshed,
       },
@@ -393,11 +433,13 @@ async function main() {
       contact_points: contactPoints,
       upserted,
       refreshed_scores: refreshed,
-      cursor: maxCursor,
+      cursor: maxCursor.timestamp,
+      cursor_id: maxCursor.id,
     }, null, 2))
   } catch (error) {
     await updateRun(runId, {
       status: 'failed',
+      cursor_value: checkpointStarted.timestamp,
       completed_at: new Date().toISOString(),
       records_fetched: fetched,
       records_loaded: upserted,
@@ -406,6 +448,10 @@ async function main() {
         source_table: 'registro_intel.campaign_base_leads',
         sync_method: 'active_leads_to_contact_points',
         started_at: startedAt,
+        cursor_id: checkpointStarted.id,
+        scan_cursor_at: scanCursor.timestamp,
+        scan_cursor_id: scanCursor.id,
+        checkpoint_preserved_after_error: true,
         contact_points: contactPoints,
         refreshed_scores: refreshed,
       },

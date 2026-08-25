@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { db } from '@/lib/db/supabase'
 import { normalizeCompanyName } from '@/lib/utils/company-match'
 import { cleanRut } from '@/lib/utils/rut'
-import type { ContactCenterFeedbackInput } from '@/types'
+import type { ContactCenterFeedbackInput, FeedbackOutcome } from '@/types'
 
 const ATLAS_ALLOWED_EVENT_TYPES = new Set([
   'sent',
@@ -58,6 +58,40 @@ type AtlasLeadBridgePayload = {
   } | null
 }
 
+type AtlasEngagementV1Payload = {
+  schema_version?: string
+  event_type?: string
+  event_name?: string
+  event_id?: string
+  occurred_at?: string
+  source?: { system?: string; component?: string } | string
+  engagement?: {
+    kind?: string
+    type?: string
+    channel?: string
+    campaign?: AtlasLeadBridgePayload['campaign']
+    outreach?: AtlasLeadBridgePayload['outreach']
+    lead?: AtlasLeadBridgePayload['lead']
+    context?: AtlasLeadBridgePayload['context']
+  }
+}
+
+type AtlasOperationFeedbackV1Item = {
+  event_id?: string
+  event_type?: string
+  occurred_at?: string
+  payload?: {
+    campaign_key?: string
+    external_key?: string
+    ended_at?: string | null
+    duration_seconds?: number | null
+    status?: string | null
+    outcome?: string | null
+    reason?: string | null
+    next_action_at?: string | null
+  }
+}
+
 type AtlasBridgeAuthorization =
   | { ok: true; mode: 'shared-secret' | 'hmac' }
   | { ok: false; status: number; error: string }
@@ -105,7 +139,8 @@ function normalizeIsoDatetime(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
 }
 
-function getAtlasBridgeSecret(): string | null {
+function getAtlasBridgeSecret(source?: string | null): string | null {
+  if (source === 'atlas2') return readString(process.env.ATLAS2_FEEDBACK_BRIDGE_SECRET)
   return (
     readString(process.env.ATLAS_LEAD_BRIDGE_SECRET) ??
     readString(process.env.CRM_FEEDBACK_INGEST_TOKEN)
@@ -147,57 +182,72 @@ function readMetadataString(metadata: Record<string, unknown> | null | undefined
 export async function resolveAtlasBridgeCompanyMatch(
   record: ContactCenterFeedbackInput
 ): Promise<ContactCenterFeedbackInput> {
-  const metadata = isRecord(record.metadata) ? record.metadata : {}
-  const companyName =
-    readMetadataString(metadata, 'company_name') ??
-    readString((record.raw_payload?.lead as Record<string, unknown> | undefined)?.companyName)
+  const [resolved] = await resolveAtlasBridgeCompanyMatches([record])
+  return resolved ?? record
+}
 
-  if (!companyName) return record
-
-  const matchKey = normalizeCompanyName(companyName)
-  if (!matchKey) return record
+export async function resolveAtlasBridgeCompanyMatches(
+  records: ContactCenterFeedbackInput[]
+): Promise<ContactCenterFeedbackInput[]> {
+  const candidates = records.map(record => {
+    const metadata = isRecord(record.metadata) ? record.metadata : {}
+    const companyName =
+      readMetadataString(metadata, 'company_name') ??
+      readString((record.raw_payload?.lead as Record<string, unknown> | undefined)?.companyName)
+    return { record, metadata, companyName, matchKey: companyName ? normalizeCompanyName(companyName) : null }
+  })
+  const companyNames = [...new Set(candidates.map(candidate => candidate.companyName).filter((value): value is string => Boolean(value)))]
+  if (!companyNames.length) return records
 
   const { data, error } = await db.rpc('match_company_names', {
-    input_names: [companyName],
+    input_names: companyNames,
   })
 
   if (error) {
-    console.warn('[resolveAtlasBridgeCompanyMatch]', error.message)
-    return record
+    console.warn('[resolveAtlasBridgeCompanyMatches]', error.message)
+    return records
   }
 
-  const matches = ((data ?? []) as CompanyNameMatchRow[])
-    .filter(row => row.rutid && row.match_key === matchKey)
-  const uniqueMatches = new Map(matches.map(row => [row.rutid as string, row]))
+  const matchesByKey = new Map<string, Map<string, CompanyNameMatchRow>>()
+  for (const row of (data ?? []) as CompanyNameMatchRow[]) {
+    if (!row.match_key || !row.rutid) continue
+    const matches = matchesByKey.get(row.match_key) ?? new Map<string, CompanyNameMatchRow>()
+    matches.set(row.rutid, row)
+    matchesByKey.set(row.match_key, matches)
+  }
 
-  if (uniqueMatches.size !== 1) {
+  return candidates.map(({ record, metadata, companyName, matchKey }) => {
+    if (!companyName || !matchKey) return record
+    const uniqueMatches = matchesByKey.get(matchKey) ?? new Map<string, CompanyNameMatchRow>()
+
+    if (uniqueMatches.size !== 1) {
+      return {
+        ...record,
+        metadata: {
+          ...metadata,
+          company_name: companyName,
+          atlas_company_match_key: matchKey,
+          atlas_company_match_status: uniqueMatches.size === 0 ? 'not_found' : 'ambiguous',
+        },
+      }
+    }
+
+    const [matchedRutid, match] = [...uniqueMatches.entries()][0]
     return {
       ...record,
+      matched_rutid: matchedRutid,
+      match_method: 'atlas_company_name_exact',
       metadata: {
         ...metadata,
         company_name: companyName,
+        atlas_original_rutid: record.rutid ?? null,
+        atlas_original_matched_rutid: record.matched_rutid ?? null,
         atlas_company_match_key: matchKey,
-        atlas_company_match_status: uniqueMatches.size === 0 ? 'not_found' : 'ambiguous',
+        atlas_company_match_status: 'matched',
+        atlas_company_match_name: match.razon_social_empresa ?? null,
       },
     }
-  }
-
-  const [matchedRutid, match] = [...uniqueMatches.entries()][0]
-
-  return {
-    ...record,
-    matched_rutid: matchedRutid,
-    match_method: 'atlas_company_name_exact',
-    metadata: {
-      ...metadata,
-      company_name: companyName,
-      atlas_original_rutid: record.rutid ?? null,
-      atlas_original_matched_rutid: record.matched_rutid ?? null,
-      atlas_company_match_key: matchKey,
-      atlas_company_match_status: 'matched',
-      atlas_company_match_name: match.razon_social_empresa ?? null,
-    },
-  }
+  })
 }
 
 function compareSignatures(expected: string, candidate: string): boolean {
@@ -209,21 +259,26 @@ function compareSignatures(expected: string, candidate: string): boolean {
 
 export function authorizeAtlasLeadBridgeRequest(args: {
   rawBody: string
+  source?: string | null
   apiKey?: string | null
   signature?: string | null
   timestamp?: string | null
 }): AtlasBridgeAuthorization {
-  const secret = getAtlasBridgeSecret()
+  const source = readString(args.source)
+  const atlas2Feedback = source === 'atlas2'
+  const secret = getAtlasBridgeSecret(source)
   if (!secret) {
     return {
       ok: false,
       status: 503,
-      error: 'ATLAS_LEAD_BRIDGE_SECRET no está configurado.',
+      error: atlas2Feedback
+        ? 'ATLAS2_FEEDBACK_BRIDGE_SECRET no está configurado.'
+        : 'ATLAS_LEAD_BRIDGE_SECRET no está configurado.',
     }
   }
 
   const apiKey = readString(args.apiKey)
-  if (apiKey && compareSignatures(secret, apiKey)) {
+  if (!atlas2Feedback && apiKey && compareSignatures(secret, apiKey)) {
     return { ok: true, mode: 'shared-secret' }
   }
 
@@ -237,8 +292,13 @@ export function authorizeAtlasLeadBridgeRequest(args: {
     }
   }
 
-  const parsedTimestamp = new Date(timestamp)
-  if (Number.isNaN(parsedTimestamp.getTime())) {
+  if (atlas2Feedback && !/^\d{10}$/.test(timestamp)) {
+    return { ok: false, status: 401, error: 'Atlas2 requiere x-atlas-timestamp en segundos UNIX.' }
+  }
+
+  const unixSeconds = /^\d{10}$/.test(timestamp) ? Number(timestamp) : null
+  const timestampMs = unixSeconds === null ? new Date(timestamp).getTime() : unixSeconds * 1000
+  if (!Number.isFinite(timestampMs)) {
     return {
       ok: false,
       status: 401,
@@ -246,7 +306,7 @@ export function authorizeAtlasLeadBridgeRequest(args: {
     }
   }
 
-  const ageMs = Math.abs(Date.now() - parsedTimestamp.getTime())
+  const ageMs = Math.abs(Date.now() - timestampMs)
   if (ageMs > ATLAS_MAX_SIGNATURE_AGE_MS) {
     return {
       ok: false,
@@ -396,4 +456,219 @@ export function parseAtlasLeadBridgePayload(payload: unknown): AtlasBridgePayloa
     campaignType,
     record,
   }
+}
+
+function isEngagementV1Payload(payload: unknown): payload is AtlasEngagementV1Payload {
+  if (!isRecord(payload)) return false
+  return payload.event_type === 'engagement.v1' || payload.event_name === 'engagement.v1'
+}
+
+function normalizeOperationOutcome(value: unknown): FeedbackOutcome {
+  const normalized = readString(value)?.toLowerCase().replace(/[\s-]+/g, '_')
+  if (!normalized) return 'unknown'
+  if (['contacted', 'answered', 'contactado', 'contacto'].includes(normalized)) return 'contacted'
+  if (['no_contact', 'no_answer', 'unanswered', 'busy', 'voicemail', 'sin_contacto'].includes(normalized)) return 'no_contact'
+  if (['interested', 'interesado', 'qualified'].includes(normalized)) return 'interested'
+  if (['callback', 'callback_requested', 'scheduled', 'agendado'].includes(normalized)) return 'callback'
+  if (['rejected', 'not_interested', 'rechazado'].includes(normalized)) return 'rejected'
+  if (['sale', 'sold', 'converted', 'venta'].includes(normalized)) return 'sale'
+  if (['do_not_contact', 'do_not_call', 'opt_out', 'blacklist'].includes(normalized)) return 'do_not_contact'
+  return 'unknown'
+}
+
+function operationFeedbackV1ToRecord(item: unknown):
+  | { ok: true; eventId: string; record: ContactCenterFeedbackInput }
+  | { ok: false; status: number; error: string } {
+  if (!isRecord(item)) return { ok: false, status: 400, error: 'operation.feedback.v1 requiere items válidos.' }
+  const typedItem = item as AtlasOperationFeedbackV1Item
+  const eventId = readString(typedItem.event_id)
+  const occurredAt = normalizeIsoDatetime(typedItem.occurred_at)
+  const payload = isRecord(typedItem.payload) ? typedItem.payload as AtlasOperationFeedbackV1Item['payload'] : null
+  const campaignKey = readString(payload?.campaign_key)
+  const externalKey = normalizeRutCandidate(payload?.external_key)
+  const endedAt = payload?.ended_at == null ? null : normalizeIsoDatetime(payload.ended_at)
+  const nextActionAt = payload?.next_action_at == null ? null : normalizeIsoDatetime(payload.next_action_at)
+  const durationSeconds = payload?.duration_seconds == null ? null : Number(payload.duration_seconds)
+
+  if (typedItem.event_type !== 'operation.feedback.v1') {
+    return { ok: false, status: 400, error: 'event_type debe ser operation.feedback.v1.' }
+  }
+  if (!eventId) return { ok: false, status: 400, error: 'operation.feedback.v1 requiere event_id estable.' }
+  if (!occurredAt) return { ok: false, status: 400, error: 'operation.feedback.v1 requiere occurred_at válido.' }
+  if (!campaignKey) return { ok: false, status: 400, error: 'operation.feedback.v1 requiere payload.campaign_key.' }
+  if (!externalKey) return { ok: false, status: 400, error: 'operation.feedback.v1 requiere payload.external_key como RUT válido.' }
+  if (payload?.ended_at != null && !endedAt) {
+    return { ok: false, status: 400, error: 'payload.ended_at es inválido.' }
+  }
+  if (payload?.next_action_at != null && !nextActionAt) {
+    return { ok: false, status: 400, error: 'payload.next_action_at es inválido.' }
+  }
+  if (durationSeconds !== null && (!Number.isInteger(durationSeconds) || durationSeconds < 0)) {
+    return { ok: false, status: 400, error: 'payload.duration_seconds debe ser un entero no negativo.' }
+  }
+
+  const outcome = normalizeOperationOutcome(payload?.outcome ?? payload?.status)
+  const managedAt = endedAt ?? occurredAt
+  return {
+    ok: true,
+    eventId,
+    record: {
+      external_source: 'atlas2_operation_feedback',
+      external_event_id: eventId,
+      external_record_type: 'operation.feedback.v1',
+      rutid: externalKey,
+      matched_rutid: externalKey,
+      match_method: 'atlas2_external_key',
+      channel: 'phone',
+      managed_at: managedAt,
+      outcome,
+      outcome_subtype: readString(payload?.status),
+      outcome_reason: readString(payload?.reason),
+      direction: 'outbound',
+      duration_seconds: durationSeconds,
+      agent_name: 'Atlas 2.0',
+      campaign_id: null,
+      campaign_name: campaignKey,
+      callback_at: nextActionAt,
+      callback_requested: Boolean(nextActionAt) || outcome === 'callback',
+      interested: outcome === 'interested',
+      contacted: ['contacted', 'interested', 'callback', 'sale'].includes(outcome),
+      effective_contact: ['contacted', 'interested', 'callback', 'sale'].includes(outcome),
+      sale: outcome === 'sale',
+      raw_payload: item,
+      metadata: {
+        source_view: 'atlas2_operation_feedback_v1',
+        source_updated_at: occurredAt,
+        campaign_key: campaignKey,
+        atlas2_status: readString(payload?.status),
+        next_action_at: nextActionAt,
+      },
+    },
+  }
+}
+
+function engagementV1ToLegacy(payload: AtlasEngagementV1Payload):
+  | { ok: true; payload: AtlasLeadBridgePayload; eventId: string }
+  | { ok: false; status: number; error: string } {
+  const eventId = readString(payload.event_id)
+  const eventAt = normalizeIsoDatetime(payload.occurred_at)
+  const engagement = isRecord(payload.engagement) ? payload.engagement as AtlasEngagementV1Payload['engagement'] : null
+  const eventType = readString(engagement?.kind) ?? readString(engagement?.type)
+  const sourceSystem = typeof payload.source === 'string'
+    ? readString(payload.source)
+    : readString(payload.source?.system)
+
+  if (payload.schema_version !== '1.0') {
+    return { ok: false, status: 400, error: 'engagement.v1 requiere schema_version 1.0.' }
+  }
+  if (!eventId) return { ok: false, status: 400, error: 'engagement.v1 requiere event_id estable.' }
+  if (!eventAt) return { ok: false, status: 400, error: 'engagement.v1 requiere occurred_at válido.' }
+  if (!sourceSystem) return { ok: false, status: 400, error: 'engagement.v1 requiere source.system.' }
+  if (!eventType) return { ok: false, status: 400, error: 'engagement.v1 requiere engagement.kind.' }
+  if (engagement?.channel && engagement.channel !== 'email') {
+    return { ok: false, status: 400, error: 'engagement.v1 solo admite channel=email en este bridge.' }
+  }
+
+  return {
+    ok: true,
+    eventId,
+    payload: {
+      source: 'atlas_lead_engine',
+      eventType,
+      eventAt,
+      campaign: engagement?.campaign ?? null,
+      outreach: engagement?.outreach ?? null,
+      lead: engagement?.lead ?? null,
+      context: {
+        ...(engagement?.context ?? {}),
+        requestId: eventId,
+      },
+    },
+  }
+}
+
+export type AtlasBridgeEnvelopeParseResult =
+  | {
+      ok: true
+      records: ContactCenterFeedbackInput[]
+      acceptedEventIds: string[]
+      ignored: Array<{ event_id: string; reason: string }>
+      contract: 'legacy' | 'engagement.v1' | 'operation.feedback.v1'
+    }
+  | { ok: false; status: number; error: string }
+
+export function parseAtlasLeadBridgeEnvelope(payload: unknown): AtlasBridgeEnvelopeParseResult {
+  if (isRecord(payload) && Array.isArray(payload.items)) {
+    if (payload.schema_version !== '1') {
+      return { ok: false, status: 400, error: 'operation.feedback.v1 requiere schema_version 1.' }
+    }
+    if (payload.items.length === 0) return { ok: false, status: 400, error: 'El lote no contiene items.' }
+    if (payload.items.length > 250) return { ok: false, status: 413, error: 'El lote excede 250 items.' }
+
+    const records: ContactCenterFeedbackInput[] = []
+    const acceptedEventIds: string[] = []
+    const seenEventIds = new Set<string>()
+    for (const item of payload.items) {
+      const parsed = operationFeedbackV1ToRecord(item)
+      if (!parsed.ok) return parsed
+      if (seenEventIds.has(parsed.eventId)) {
+        return { ok: false, status: 400, error: `event_id duplicado en el lote: ${parsed.eventId}.` }
+      }
+      seenEventIds.add(parsed.eventId)
+      records.push(parsed.record)
+      acceptedEventIds.push(parsed.eventId)
+    }
+    return { ok: true, records, acceptedEventIds, ignored: [], contract: 'operation.feedback.v1' }
+  }
+
+  const isEnvelope = isRecord(payload) && Array.isArray(payload.events)
+  const events: unknown[] = isEnvelope ? payload.events as unknown[] : [payload]
+  if (events.length === 0) return { ok: false, status: 400, error: 'El lote no contiene eventos.' }
+  if (events.length > 250) return { ok: false, status: 413, error: 'El lote excede 250 eventos.' }
+
+  const records: ContactCenterFeedbackInput[] = []
+  const acceptedEventIds: string[] = []
+  const ignored: Array<{ event_id: string; reason: string }> = []
+  let contract: 'legacy' | 'engagement.v1' = 'legacy'
+  const seenEventIds = new Set<string>()
+
+  for (const event of events) {
+    let candidate: unknown = event
+    let explicitEventId: string | null = null
+
+    if (isEngagementV1Payload(event)) {
+      contract = 'engagement.v1'
+      const converted = engagementV1ToLegacy(event)
+      if (!converted.ok) return converted
+      candidate = converted.payload
+      explicitEventId = converted.eventId
+    } else if (isEnvelope) {
+      return { ok: false, status: 400, error: 'Los lotes solo admiten eventos engagement.v1.' }
+    }
+
+    const parsed = parseAtlasLeadBridgePayload(candidate)
+    if (!parsed.ok) return parsed
+
+    const eventId = explicitEventId ?? (parsed.ignored ? null : parsed.record.external_event_id)
+    if (parsed.ignored) {
+      if (eventId) {
+        if (seenEventIds.has(eventId)) return { ok: false, status: 400, error: `event_id duplicado en el lote: ${eventId}.` }
+        seenEventIds.add(eventId)
+        acceptedEventIds.push(eventId)
+        ignored.push({ event_id: eventId, reason: parsed.reason })
+      }
+      continue
+    }
+
+    const parsedEventId = readString(parsed.record.external_event_id)
+    if (!parsedEventId) return { ok: false, status: 400, error: 'El evento no produjo external_event_id.' }
+    if (seenEventIds.has(parsedEventId)) {
+      return { ok: false, status: 400, error: `event_id duplicado en el lote: ${parsedEventId}.` }
+    }
+    seenEventIds.add(parsedEventId)
+    records.push(parsed.record)
+    acceptedEventIds.push(parsedEventId)
+  }
+
+  return { ok: true, records, acceptedEventIds, ignored, contract }
 }

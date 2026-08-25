@@ -1,4 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
+import {
+  buildPostgrestKeysetFilter,
+  buildScanStart,
+  checkpointFromRow,
+  maxCheckpoint,
+  normalizeCheckpoint,
+} from './keyset-checkpoint.mjs'
 
 const LOCAL_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
 const LOCAL_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY
@@ -217,50 +224,57 @@ function mapRow(row) {
   }
 }
 
-function buildRemoteUrl(fromIso, offset) {
+function buildRemoteUrl(cursor, inclusive) {
   const url = new URL(`/rest/v1/${SOURCE_VIEW}`, REMOTE_URL)
   url.searchParams.set('select', '*')
-  url.searchParams.set(CURSOR_COLUMN, `gte.${fromIso}`)
+  if (inclusive) {
+    url.searchParams.set(CURSOR_COLUMN, `gte.${cursor.timestamp}`)
+  } else {
+    url.searchParams.set('or', `(${buildPostgrestKeysetFilter(CURSOR_COLUMN, SOURCE_ID_COLUMN, cursor)})`)
+  }
   url.searchParams.set('order', `${CURSOR_COLUMN}.asc,${SOURCE_ID_COLUMN}.asc`)
   url.searchParams.set('limit', String(BATCH_SIZE))
-  url.searchParams.set('offset', String(offset))
   return url
 }
 
-async function getLastCursor() {
+async function getLastCheckpoint() {
   const { data, error } = await local
     .from('external_sync_runs')
-    .select('cursor_value, completed_at')
+    .select('cursor_value, completed_at, metadata')
     .eq('source_name', SOURCE_SYSTEM)
     .in('status', ['completed', 'partial'])
-    .order('completed_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .not('cursor_value', 'is', null)
+    .order('cursor_value', { ascending: false })
+    .limit(100)
 
   if (error) {
     throw new Error(`No pude leer cursor local: ${error.message}`)
   }
 
-  if (!data?.cursor_value) {
-    return new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString()
+  if (!data?.length) {
+    return normalizeCheckpoint(new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString())
   }
 
-  return new Date(new Date(data.cursor_value).getTime() - LOOKBACK_MINUTES * 60 * 1000).toISOString()
+  return data.reduce(
+    (checkpoint, run) => maxCheckpoint(checkpoint, normalizeCheckpoint(run.cursor_value, run.metadata?.cursor_id)),
+    normalizeCheckpoint(data[0].cursor_value, data[0].metadata?.cursor_id)
+  )
 }
 
-async function createRun(cursorStartedAt) {
+async function createRun(checkpoint, requestedFrom) {
   const { data, error } = await local
     .from('external_sync_runs')
     .insert({
       source_name: SOURCE_SYSTEM,
       source_kind: 'supabase_rest',
       status: 'running',
-      requested_from: cursorStartedAt,
-      cursor_value: cursorStartedAt,
+      requested_from: requestedFrom,
+      cursor_value: checkpoint.timestamp,
       metadata: {
         source_view: SOURCE_VIEW,
         cursor_column: CURSOR_COLUMN,
         source_id_column: SOURCE_ID_COLUMN,
+        cursor_id: checkpoint.id,
       },
     })
     .select('id')
@@ -284,8 +298,8 @@ async function updateRun(runId, payload) {
   }
 }
 
-async function fetchBatch(fromIso, offset) {
-  const response = await fetch(buildRemoteUrl(fromIso, offset), {
+async function fetchBatch(cursor, inclusive) {
+  const response = await fetch(buildRemoteUrl(cursor, inclusive), {
     headers: {
       apikey: REMOTE_SERVICE_KEY,
       Authorization: `Bearer ${REMOTE_SERVICE_KEY}`,
@@ -427,20 +441,34 @@ async function refreshScoresForRutids(rutids) {
 }
 
 async function main() {
-  const fromIso = await getLastCursor()
-  const runId = await createRun(fromIso)
+  const checkpointStarted = await getLastCheckpoint()
+  const scanStarted = buildScanStart(checkpointStarted, LOOKBACK_MINUTES)
+  const runId = await createRun(checkpointStarted, scanStarted.timestamp)
 
-  let offset = 0
   let fetched = 0
   let loaded = 0
   let refreshed = 0
-  let maxCursor = fromIso
+  let pageCursor = scanStarted
+  let maxCursor = checkpointStarted
+  let firstPage = true
   const affectedRuts = new Set()
 
   try {
     for (;;) {
-      const remoteRows = await fetchBatch(fromIso, offset)
+      const remoteRows = await fetchBatch(pageCursor, firstPage)
       if (!Array.isArray(remoteRows) || remoteRows.length === 0) break
+
+      const lastRemoteCursor = checkpointFromRow(
+        remoteRows[remoteRows.length - 1],
+        CURSOR_COLUMN,
+        SOURCE_ID_COLUMN
+      )
+      if (!lastRemoteCursor) {
+        throw new Error(`La página remota no trae ${CURSOR_COLUMN}/${SOURCE_ID_COLUMN} válidos.`)
+      }
+      pageCursor = lastRemoteCursor
+      firstPage = false
+      maxCursor = maxCheckpoint(maxCursor, lastRemoteCursor)
 
       const mappedRows = remoteRows
         .map(mapRow)
@@ -462,32 +490,32 @@ async function main() {
           affectedRuts.add(rutid)
         }
 
-        refreshed += await refreshScoresForRutids([...existingRuts])
-
-        for (const row of mappedRows) {
-          const rowCursor = row.metadata?.source_updated_at
-          if (rowCursor && rowCursor > maxCursor) {
-            maxCursor = rowCursor
-          }
-        }
       }
 
       fetched += remoteRows.length
-      offset += remoteRows.length
 
       await updateRun(runId, {
-        cursor_value: maxCursor,
         records_fetched: fetched,
         records_loaded: loaded,
         affected_ruts: affectedRuts.size,
+        metadata: {
+          source_view: SOURCE_VIEW,
+          cursor_column: CURSOR_COLUMN,
+          source_id_column: SOURCE_ID_COLUMN,
+          cursor_id: checkpointStarted.id,
+          scan_cursor_at: pageCursor.timestamp,
+          scan_cursor_id: pageCursor.id,
+        },
       })
 
       if (remoteRows.length < BATCH_SIZE) break
     }
 
+    refreshed = await refreshScoresForRutids([...affectedRuts])
+
     await updateRun(runId, {
-      status: loaded > 0 ? 'completed' : 'partial',
-      cursor_value: maxCursor,
+      status: 'completed',
+      cursor_value: maxCursor.timestamp,
       records_fetched: fetched,
       records_loaded: loaded,
       affected_ruts: affectedRuts.size,
@@ -496,6 +524,7 @@ async function main() {
         source_view: SOURCE_VIEW,
         cursor_column: CURSOR_COLUMN,
         source_id_column: SOURCE_ID_COLUMN,
+        cursor_id: maxCursor.id,
         refreshed_scores: refreshed,
       },
     })
@@ -508,18 +537,30 @@ async function main() {
       loaded,
       refreshed_scores: refreshed,
       affected_ruts: affectedRuts.size,
-      cursor_started_at: fromIso,
-      cursor_ended_at: maxCursor,
+      cursor_started_at: checkpointStarted.timestamp,
+      cursor_started_id: checkpointStarted.id,
+      scan_started_at: scanStarted.timestamp,
+      cursor_ended_at: maxCursor.timestamp,
+      cursor_ended_id: maxCursor.id,
     }, null, 2))
   } catch (error) {
     await updateRun(runId, {
       status: loaded > 0 ? 'partial' : 'failed',
-      cursor_value: maxCursor,
+      cursor_value: checkpointStarted.timestamp,
       records_fetched: fetched,
       records_loaded: loaded,
       affected_ruts: affectedRuts.size,
       completed_at: new Date().toISOString(),
       error_message: error instanceof Error ? error.message : 'Error desconocido',
+      metadata: {
+        source_view: SOURCE_VIEW,
+        cursor_column: CURSOR_COLUMN,
+        source_id_column: SOURCE_ID_COLUMN,
+        cursor_id: checkpointStarted.id,
+        scan_cursor_at: pageCursor.timestamp,
+        scan_cursor_id: pageCursor.id,
+        checkpoint_preserved_after_error: true,
+      },
     })
 
     throw error
