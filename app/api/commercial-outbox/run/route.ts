@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isCronSecretValid, runCommercialOutbox } from '@/lib/services/commercial-outbox'
+import { runCommercialOutbox } from '@/lib/services/commercial-outbox'
+import { isCronSecretValid } from '@/lib/services/cron-auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

@@ -13,6 +13,14 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/customer-360/run?mode=micro",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/customer-360/run?mode=daily",
+      "schedule": "15 18 * * *"
+    },
+    {
       "path": "/api/base-contact/refresh",
       "schedule": "0 16 * * *"
     },
