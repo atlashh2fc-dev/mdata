@@ -1,6 +1,6 @@
-import { enqueueCommercialDecisions } from '@/lib/services/commercial-outbox'
+import { runCommercialOutbox } from '@/lib/services/commercial-outbox'
 
-enqueueCommercialDecisions()
+runCommercialOutbox({ generate: true })
   .then(result => console.log(JSON.stringify({ ok: true, ...result }, null, 2)))
   .catch(error => {
     console.error(error)

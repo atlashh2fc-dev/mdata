@@ -21,6 +21,10 @@
       "schedule": "15 18 * * *"
     },
     {
+      "path": "/api/integration-health/run",
+      "schedule": "17 * * * *"
+    },
+    {
       "path": "/api/base-contact/refresh",
       "schedule": "0 16 * * *"
     },

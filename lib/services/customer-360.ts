@@ -31,6 +31,15 @@ export async function runCustomer360MicroBatch() {
   return { pending, events, base }
 }
 
+export async function processCustomer360Doorbell() {
+  const worker = process.env.CUSTOMER_360_WORKER ?? `customer-360-doorbell-${process.pid}-${Date.now()}`
+  return rpc('process_customer_360_pending', {
+    p_worker: worker,
+    p_limit: boundedCustomer360Env('CUSTOMER_360_DOORBELL_BATCH_SIZE', 50, 250),
+    p_lease_seconds: 120,
+  })
+}
+
 export async function runCustomer360DailyReconciliation() {
   const worker = process.env.CUSTOMER_360_WORKER ?? `customer-360-daily-${process.pid}-${Date.now()}`
   const pending = await rpc('process_customer_360_pending', {

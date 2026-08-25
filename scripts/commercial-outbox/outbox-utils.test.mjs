@@ -18,8 +18,15 @@ function row(index, extra = {}) {
       item: {
         event_id: `event-${index}`,
         event_type: 'intelligence.decision.v1',
+        event_source: 'urn:geimser:bigdata',
+        subject: `urn:geimser:campaign-lead:campaign-one:rut-${index}`,
         external_key: `rut-${index}`,
         occurred_at: '2026-08-25T12:00:00Z',
+        data_schema: 'urn:geimser:schema:intelligence.decision.v1',
+        tenant_id: 'geimser',
+        entity_version: 1,
+        correlation_id: `event-${index}`,
+        causation_id: null,
         payload: { priority_rank: 10 },
       },
       ...extra,
@@ -42,10 +49,12 @@ test('el transporte agrupa por campaign_key y usa el contrato exacto de items', 
   ])
   assert.equal(batches.length, 2)
   assert.deepEqual(JSON.parse(batches[0].body), {
+    schema_version: '2',
     campaign_key: 'campaign-one',
     items: [row(1).payload.item],
   })
   assert.deepEqual(JSON.parse(batches[1].body), {
+    schema_version: '2',
     campaign_key: 'campaign-two',
     items: [row(2).payload.item],
   })
@@ -69,6 +78,8 @@ test('la versión e idempotencia no dependen del orden de las claves', () => {
     campaignKey: 'campaign', externalKey: '1', occurredAt: '2026-08-25T13:00:00Z', decision: { b: 2, a: 1 },
   })
   assert.equal(first.idempotencyKey, second.idempotencyKey)
+  assert.equal(first.payload.item.entity_version, Date.parse('2026-08-25T12:00:00Z'))
+  assert.equal(first.payload.item.event_source, 'urn:geimser:bigdata')
 })
 
 test('la firma HMAC cubre timestamp y body', () => {

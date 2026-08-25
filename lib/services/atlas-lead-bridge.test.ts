@@ -49,6 +49,39 @@ const operationFeedback = {
   }],
 }
 
+const canonicalAtlasLead = {
+  event_id: 'atlas-lead-open-1',
+  event_type: 'engagement.event.v1',
+  event_source: 'urn:geimser:atlas-lead',
+  subject: 'urn:geimser:atlas-lead:outreach-message:message-1',
+  occurred_at: '2026-08-25T12:00:00Z',
+  data_schema: 'urn:geimser:schema:engagement.event.v1:2',
+  tenant_id: 'geimser',
+  entity_version: 1,
+  correlation_id: 'message-1',
+  causation_id: null,
+  external_key: 'lead-1',
+  payload: { external_campaign_key: 'campaign-1', email: 'uno@example.com', opened: true, clicked: false },
+}
+
+const canonicalAtlas2 = {
+  schema_version: '2',
+  items: [{
+    event_id: 'operation-v2-1',
+    event_type: 'operation.feedback.v1',
+    event_source: 'urn:geimser:atlas2',
+    subject: 'urn:geimser:atlas2:campaign-lead:campaign-1:0761234567',
+    occurred_at: '2026-08-25T12:00:00Z',
+    data_schema: 'urn:geimser:schema:operation.feedback.v1:2',
+    tenant_id: 'geimser',
+    entity_version: 2,
+    correlation_id: 'call-1',
+    causation_id: null,
+    external_key: '76.123.456-7',
+    payload: { campaign_key: 'Equifax agosto', status: 'completed', outcome: 'sale' },
+  }],
+}
+
 test('el payload legacy conserva su parser', () => {
   const parsed = parseAtlasLeadBridgePayload(legacy)
   assert.equal(parsed.ok, true)
@@ -93,6 +126,49 @@ test('operation.feedback.v1 rechaza mapeo incompleto y event_id repetido', () =>
     schema_version: '1',
     items: [operationFeedback.items[0], operationFeedback.items[0]],
   }).ok, false)
+})
+
+test('canonical v2 acepta Atlas Lead mínimo sin exigir payload legacy', () => {
+  const parsed = parseAtlasLeadBridgeEnvelope(canonicalAtlasLead)
+  assert.equal(parsed.ok, true)
+  if (!parsed.ok) return
+  assert.equal(parsed.contract, 'canonical.v2')
+  assert.deepEqual(parsed.acceptedEventIds, ['atlas-lead-open-1'])
+  assert.equal(parsed.records[0]?.external_source, 'urn:geimser:atlas-lead')
+  assert.equal(parsed.records[0]?.outcome, 'opened')
+  assert.equal(parsed.records[0]?.contact_phone, undefined)
+})
+
+test('canonical v2 acepta lote Atlas2 y valida versión/fuente', () => {
+  const parsed = parseAtlasLeadBridgeEnvelope(canonicalAtlas2)
+  assert.equal(parsed.ok, true)
+  if (!parsed.ok) return
+  assert.equal(parsed.contract, 'canonical.v2')
+  assert.equal(parsed.records[0]?.matched_rutid, '0761234567')
+  assert.equal(parsed.records[0]?.outcome, 'sale')
+
+  const staleShape = structuredClone(canonicalAtlas2)
+  staleShape.items[0].entity_version = 0
+  assert.equal(parseAtlasLeadBridgeEnvelope(staleShape).ok, false)
+
+  const badSource = structuredClone(canonicalAtlasLead)
+  badSource.event_source = 'urn:geimser:bigdata'
+  assert.equal(parseAtlasLeadBridgeEnvelope(badSource).ok, false)
+})
+
+test('canonical v2 ACKea canary sin datos comerciales', () => {
+  const parsed = parseAtlasLeadBridgeEnvelope({
+    ...canonicalAtlasLead,
+    event_id: 'canary-1',
+    event_type: 'integration.canary.v1',
+    data_schema: 'urn:geimser:schema:integration.canary.v1:1',
+    external_key: undefined,
+    payload: {},
+  })
+  assert.equal(parsed.ok, true)
+  if (!parsed.ok) return
+  assert.equal(parsed.records.length, 0)
+  assert.equal(parsed.ignored[0]?.reason, 'synthetic_canary_acknowledged')
 })
 
 test('la firma HMAC entrante acepta timestamp UNIX sin retirar timestamp ISO legacy', async () => {

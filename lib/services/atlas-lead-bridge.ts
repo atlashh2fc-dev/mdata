@@ -92,6 +92,32 @@ type AtlasOperationFeedbackV1Item = {
   }
 }
 
+type CanonicalEventV2 = {
+  event_id?: string
+  event_type?: string
+  event_source?: string
+  subject?: string
+  occurred_at?: string
+  data_schema?: string
+  tenant_id?: string
+  entity_version?: number
+  correlation_id?: string
+  causation_id?: string | null
+  external_key?: string
+  payload?: Record<string, unknown>
+}
+
+type CanonicalOrderingResult = {
+  ok: boolean
+  accepted_event_ids: string[]
+  ignored: Array<{
+    event_id: string
+    reason: string
+    entity_version?: number
+    current_entity_version?: number
+  }>
+}
+
 type AtlasBridgeAuthorization =
   | { ok: true; mode: 'shared-secret' | 'hmac' }
   | { ok: false; status: number; error: string }
@@ -476,6 +502,143 @@ function normalizeOperationOutcome(value: unknown): FeedbackOutcome {
   return 'unknown'
 }
 
+function canonicalV2ToRecord(item: unknown):
+  | { ok: true; eventId: string; record: ContactCenterFeedbackInput | null; ignoredReason?: string }
+  | { ok: false; status: number; error: string } {
+  if (!isRecord(item)) return { ok: false, status: 400, error: 'El evento canónico v2 debe ser un objeto.' }
+  const event = item as CanonicalEventV2
+  const eventId = readString(event.event_id)
+  const eventType = readString(event.event_type)
+  const eventSource = readString(event.event_source)
+  const subject = readString(event.subject)
+  const occurredAt = normalizeIsoDatetime(event.occurred_at)
+  const dataSchema = readString(event.data_schema)
+  const tenantId = readString(event.tenant_id) ?? 'geimser'
+  const correlationId = readString(event.correlation_id)
+  const causationId = event.causation_id == null ? null : readString(event.causation_id)
+  const externalKey = readString(event.external_key)
+  const entityVersion = Number(event.entity_version)
+  const payload = isRecord(event.payload) ? event.payload : {}
+
+  if (!eventId || !eventType || !eventSource || !subject || !occurredAt || !dataSchema || !correlationId) {
+    return { ok: false, status: 400, error: 'El evento canónico v2 está incompleto.' }
+  }
+  if (tenantId !== 'geimser') return { ok: false, status: 400, error: 'tenant_id no soportado.' }
+  if (!Number.isSafeInteger(entityVersion) || entityVersion < 1) {
+    return { ok: false, status: 400, error: 'entity_version debe ser un entero positivo.' }
+  }
+  if (event.causation_id != null && !causationId) {
+    return { ok: false, status: 400, error: 'causation_id debe ser string o null.' }
+  }
+
+  if (eventType === 'integration.canary.v1') {
+    if (!['urn:geimser:atlas2', 'urn:geimser:atlas-lead', 'urn:geimser:bigdata'].includes(eventSource)) {
+      return { ok: false, status: 400, error: 'event_source canary no soportado.' }
+    }
+    return { ok: true, eventId, record: null, ignoredReason: 'synthetic_canary_acknowledged' }
+  }
+
+  if (!externalKey) return { ok: false, status: 400, error: 'external_key es obligatorio en v2.' }
+
+  const canonicalMetadata = {
+    contract: 'canonical.v2',
+    tenant_id: tenantId,
+    event_source: eventSource,
+    event_subject: subject,
+    entity_version: entityVersion,
+    correlation_id: correlationId,
+    causation_id: causationId,
+    data_schema: dataSchema,
+    external_key: externalKey,
+    source_updated_at: occurredAt,
+  }
+
+  if (eventType === 'engagement.event.v1') {
+    if (eventSource !== 'urn:geimser:atlas-lead') {
+      return { ok: false, status: 400, error: 'engagement.event.v1 requiere urn:geimser:atlas-lead.' }
+    }
+    const opened = payload.opened === true
+    const clicked = payload.clicked === true
+    if (!opened && !clicked) {
+      return { ok: false, status: 400, error: 'engagement.event.v1 requiere opened=true o clicked=true.' }
+    }
+    const outcome: FeedbackOutcome = clicked ? 'clicked' : 'opened'
+    return {
+      ok: true,
+      eventId,
+      record: {
+        external_source: eventSource,
+        external_event_id: eventId,
+        external_record_type: eventType,
+        contact_email: readString(payload.email),
+        channel: 'email',
+        managed_at: occurredAt,
+        outcome,
+        direction: 'outbound',
+        agent_name: 'Atlas Lead Engine',
+        campaign_name: readString(payload.external_campaign_key) ?? 'Atlas Lead',
+        opened_at: opened || clicked ? occurredAt : null,
+        clicked_at: clicked ? occurredAt : null,
+        mail_opened: opened || clicked,
+        clicked,
+        raw_payload: item,
+        metadata: canonicalMetadata,
+      },
+    }
+  }
+
+  if (eventType === 'operation.feedback.v1') {
+    if (eventSource !== 'urn:geimser:atlas2') {
+      return { ok: false, status: 400, error: 'operation.feedback.v1 v2 requiere urn:geimser:atlas2.' }
+    }
+    const campaignKey = readString(payload.campaign_key)
+    const normalizedRutid = normalizeRutCandidate(externalKey)
+    const endedAt = payload.ended_at == null ? null : normalizeIsoDatetime(payload.ended_at)
+    const nextActionAt = payload.next_action_at == null ? null : normalizeIsoDatetime(payload.next_action_at)
+    const durationSeconds = payload.duration_seconds == null ? null : Number(payload.duration_seconds)
+    if (!campaignKey || !normalizedRutid) {
+      return { ok: false, status: 400, error: 'operation.feedback.v1 v2 requiere campaign_key y RUT válido.' }
+    }
+    if (payload.ended_at != null && !endedAt) return { ok: false, status: 400, error: 'payload.ended_at es inválido.' }
+    if (payload.next_action_at != null && !nextActionAt) return { ok: false, status: 400, error: 'payload.next_action_at es inválido.' }
+    if (durationSeconds !== null && (!Number.isInteger(durationSeconds) || durationSeconds < 0)) {
+      return { ok: false, status: 400, error: 'payload.duration_seconds debe ser entero no negativo.' }
+    }
+    const outcome = normalizeOperationOutcome(payload.outcome ?? payload.status)
+    return {
+      ok: true,
+      eventId,
+      record: {
+        external_source: eventSource,
+        external_event_id: eventId,
+        external_record_type: eventType,
+        rutid: normalizedRutid,
+        matched_rutid: normalizedRutid,
+        match_method: 'atlas2_external_key',
+        channel: 'phone',
+        managed_at: endedAt ?? occurredAt,
+        outcome,
+        outcome_subtype: readString(payload.status),
+        outcome_reason: readString(payload.reason),
+        direction: 'outbound',
+        duration_seconds: durationSeconds,
+        agent_name: 'Atlas 2.0',
+        campaign_name: campaignKey,
+        callback_at: nextActionAt,
+        callback_requested: Boolean(nextActionAt) || outcome === 'callback',
+        interested: outcome === 'interested',
+        contacted: ['contacted', 'interested', 'callback', 'sale'].includes(outcome),
+        effective_contact: ['contacted', 'interested', 'callback', 'sale'].includes(outcome),
+        sale: outcome === 'sale',
+        raw_payload: item,
+        metadata: { ...canonicalMetadata, atlas2_status: readString(payload.status) },
+      },
+    }
+  }
+
+  return { ok: false, status: 400, error: `event_type v2 no soportado: ${eventType}.` }
+}
+
 function operationFeedbackV1ToRecord(item: unknown):
   | { ok: true; eventId: string; record: ContactCenterFeedbackInput }
   | { ok: false; status: number; error: string } {
@@ -593,11 +756,50 @@ export type AtlasBridgeEnvelopeParseResult =
       records: ContactCenterFeedbackInput[]
       acceptedEventIds: string[]
       ignored: Array<{ event_id: string; reason: string }>
-      contract: 'legacy' | 'engagement.v1' | 'operation.feedback.v1'
+      contract: 'legacy' | 'engagement.v1' | 'operation.feedback.v1' | 'canonical.v2'
+      canonicalEvents?: CanonicalEventV2[]
     }
   | { ok: false; status: number; error: string }
 
 export function parseAtlasLeadBridgeEnvelope(payload: unknown): AtlasBridgeEnvelopeParseResult {
+  const isCanonicalBatch = isRecord(payload) && payload.schema_version === '2' && Array.isArray(payload.items)
+  const isCanonicalSingle = isRecord(payload)
+    && typeof payload.event_source === 'string'
+    && typeof payload.event_type === 'string'
+    && payload.event_type !== 'engagement.v1'
+
+  if (isCanonicalBatch || isCanonicalSingle) {
+    const events = isCanonicalBatch ? payload.items as unknown[] : [payload]
+    if (events.length === 0) return { ok: false, status: 400, error: 'El lote v2 no contiene items.' }
+    if (events.length > 250) return { ok: false, status: 413, error: 'El lote v2 excede 250 items.' }
+
+    const records: ContactCenterFeedbackInput[] = []
+    const acceptedEventIds: string[] = []
+    const ignored: Array<{ event_id: string; reason: string }> = []
+    const seenEventKeys = new Set<string>()
+    for (const event of events) {
+      const parsed = canonicalV2ToRecord(event)
+      if (!parsed.ok) return parsed
+      const eventSource = isRecord(event) ? readString(event.event_source) : null
+      const eventKey = `${eventSource ?? 'unknown'}:${parsed.eventId}`
+      if (seenEventKeys.has(eventKey)) {
+        return { ok: false, status: 400, error: `event_source+event_id duplicado en lote: ${eventKey}.` }
+      }
+      seenEventKeys.add(eventKey)
+      acceptedEventIds.push(parsed.eventId)
+      if (parsed.record) records.push(parsed.record)
+      else ignored.push({ event_id: parsed.eventId, reason: parsed.ignoredReason ?? 'ignored' })
+    }
+    return {
+      ok: true,
+      records,
+      acceptedEventIds,
+      ignored,
+      contract: 'canonical.v2',
+      canonicalEvents: events.filter(isRecord) as CanonicalEventV2[],
+    }
+  }
+
   if (isRecord(payload) && Array.isArray(payload.items)) {
     if (payload.schema_version !== '1') {
       return { ok: false, status: 400, error: 'operation.feedback.v1 requiere schema_version 1.' }
@@ -671,4 +873,20 @@ export function parseAtlasLeadBridgeEnvelope(payload: unknown): AtlasBridgeEnvel
   }
 
   return { ok: true, records, acceptedEventIds, ignored, contract }
+}
+
+export async function ingestCanonicalFeedbackV2(
+  records: ContactCenterFeedbackInput[],
+  canaryEvents: CanonicalEventV2[] = []
+): Promise<CanonicalOrderingResult> {
+  const events = [
+    ...records.map(record => {
+      const envelope = isRecord(record.raw_payload) ? record.raw_payload as CanonicalEventV2 : {}
+      return { ...envelope, record }
+    }),
+    ...canaryEvents.map(event => ({ ...event, record: null })),
+  ]
+  const { data, error } = await db.rpc('ingest_integration_feedback_v2', { p_events: events })
+  if (error) throw new Error(`ingest_integration_feedback_v2: ${error.message}`)
+  return data as CanonicalOrderingResult
 }
