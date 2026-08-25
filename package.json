@@ -52,7 +52,7 @@
     "ops:sync:crm-feedback": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-feedback-sync/sync-registro-intel.mjs",
     "ops:sync:crm-feedback:direct": "node --env-file=${ENV_FILE:-.env.production} scripts/feedback-sync/sync-registro-intel-calls-direct.mjs",
     "ops:sync:crm-active-leads": "node --env-file=${ENV_FILE:-.env.production} scripts/feedback-sync/sync-registro-intel-active-leads.mjs",
-    "ops:refresh:base-contact": "npm run ops:sync:crm-feedback && node --env-file=${ENV_FILE:-.env.production} scripts/feedback-sync/refresh-base-contact-dataset.mjs",
+    "ops:refresh:base-contact": "node --env-file=${ENV_FILE:-.env.production} scripts/feedback-sync/refresh-base-contact-dataset.mjs --sync-first",
     "ops:apply:crm-contract": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-contract/apply-registro-intel-contract.mjs",
     "ops:atlas:backfill-company-matches": "node --env-file=${ENV_FILE:-.env.production} scripts/commercial-intelligence/backfill-atlas-company-matches.mjs",
     "ops:crm:dedupe-active-leads": "node --env-file=${ENV_FILE:-.env.production} scripts/crm-actions-sync/dedupe-active-leads.mjs",

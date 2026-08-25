@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/base-contact/refresh",
-      "schedule": "0 16 * * *"
+      "schedule": "15 5 * * *"
     },
     {
       "path": "/api/hh/week",

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:geimser:contract:integration-event-batch:v2",
+  "title": "Geimser Integration Event Batch v2",
+  "x-contract-version": "2.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "items"],
+  "properties": {
+    "schema_version": { "const": "2" },
+    "campaign_id": { "type": ["string", "null"], "format": "uuid" },
+    "campaign_key": { "type": ["string", "null"], "minLength": 1, "maxLength": 300 },
+    "metadata": { "type": "object" },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "event_type", "event_source", "subject", "external_key", "occurred_at", "data_schema", "tenant_id", "entity_version", "correlation_id", "causation_id", "payload"],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "event_type": { "enum": ["intelligence.decision.v1", "engagement.event.v1", "integration.canary.v1"] },
+        "event_source": { "enum": ["urn:geimser:atlas2", "urn:geimser:atlas-lead", "urn:geimser:bigdata"] },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "external_key": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "data_schema": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "tenant_id": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "entity_version": { "type": "integer", "minimum": 1 },
+        "correlation_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "causation_id": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }] },
+        "payload": { "type": "object" }
+      }
+    }
+  }
+}

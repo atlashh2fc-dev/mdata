@@ -20,6 +20,9 @@ const BATCH_SIZE = Number(process.env.REGISTRO_INTEL_DIRECT_BATCH_SIZE || 250)
 const UPSERT_CHUNK_SIZE = Number(process.env.REGISTRO_INTEL_LOCAL_UPSERT_CHUNK_SIZE || 50)
 const RUT_CHUNK_SIZE = Number(process.env.REGISTRO_INTEL_LOCAL_RUT_CHUNK_SIZE || 500)
 const PROCESS_CHUNK_SIZE = Number(process.env.REGISTRO_INTEL_DIRECT_PROCESS_CHUNK_SIZE || 1000)
+const SKIP_DERIVED_REFRESH = ['1', 'true', 'yes', 'si', 'sí'].includes(
+  String(process.env.REGISTRO_INTEL_SKIP_DERIVED_REFRESH || '').trim().toLowerCase()
+)
 const DIRECT_TO = process.env.REGISTRO_INTEL_DIRECT_TO
   ? new Date(process.env.REGISTRO_INTEL_DIRECT_TO).toISOString()
   : null
@@ -576,19 +579,23 @@ async function main() {
       await upsertLocal('contact_center_feedback', records, 'external_source,external_event_id')
       loaded += records.length
 
-      const existingRuts = await fetchExistingMasterRuts(records.map(record => record.matched_rutid ?? record.rutid))
-      for (const rutid of existingRuts) affectedRuts.add(rutid)
+      if (!SKIP_DERIVED_REFRESH) {
+        const existingRuts = await fetchExistingMasterRuts(records.map(record => record.matched_rutid ?? record.rutid))
+        for (const rutid of existingRuts) affectedRuts.add(rutid)
 
-      const contactPoints = buildContactPoints(records, existingRuts)
-      await upsertLocal('persona_contact_points', contactPoints, 'rutid,contact_type,normalized_value')
-      contactPointsCount += contactPoints.length
-      refreshed += await refreshScoresForRutids([...existingRuts])
-      affectedRutsCount = affectedRuts.size
+        const contactPoints = buildContactPoints(records, existingRuts)
+        await upsertLocal('persona_contact_points', contactPoints, 'rutid,contact_type,normalized_value')
+        contactPointsCount += contactPoints.length
+        refreshed += await refreshScoresForRutids([...existingRuts])
+        affectedRutsCount = affectedRuts.size
+      }
 
       console.error(`[crm-sync-direct] lote ${index + 1}/${callChunks.length}: llamadas=${callChunk.length}, feedback=${records.length}, ruts=${affectedRutsCount}`)
     }
 
-    const dataset = await refreshBaseContactDataset()
+    const dataset = SKIP_DERIVED_REFRESH
+      ? { skipped: true, reason: 'REGISTRO_INTEL_SKIP_DERIVED_REFRESH' }
+      : await refreshBaseContactDataset()
 
     await updateRun(runId, {
       status: 'completed',

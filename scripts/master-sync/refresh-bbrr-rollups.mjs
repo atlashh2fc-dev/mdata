@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 import { Client } from 'pg'
+import {
+  forceHeavyJobOutsideWindow,
+  runGuardedHeavyJob,
+} from '../../lib/services/heavy-job-guard.mjs'
 
 function parseArgs(argv) {
   return {
@@ -43,8 +47,8 @@ function getPgConfig() {
   return {
     connectionString: sanitizeConnectionString(connectionString),
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    statement_timeout: 0,
-    query_timeout: 0,
+    statement_timeout: 15000,
+    query_timeout: 600000,
     connectionTimeoutMillis: 30000,
     keepAlive: true,
     keepAliveInitialDelayMillis: 10000,
@@ -65,9 +69,6 @@ async function trySet(client, sql) {
 }
 
 async function configureSession(client) {
-  await client.query('SET statement_timeout TO 0')
-  await client.query('SET lock_timeout TO 0')
-  await client.query('SET idle_in_transaction_session_timeout TO 0')
   await trySet(client, "SET synchronous_commit TO OFF")
   await trySet(client, "SET work_mem TO '128MB'")
   await trySet(client, "SET maintenance_work_mem TO '256MB'")
@@ -120,7 +121,13 @@ async function main() {
   await client.connect()
   try {
     await configureSession(client)
-    const schema = await inspectSchema(client)
+    const execution = await runGuardedHeavyJob(
+      client,
+      'bbrr_rollup',
+      { forceOutsideWindow: forceHeavyJobOutsideWindow() },
+      async ({ assertMayContinue }) => {
+        const schema = await inspectSchema(client)
+        await assertMayContinue()
 
     log('armando rollup temporal desde bbrr_propiedades...')
     await client.query('DROP TABLE IF EXISTS bbrr_rollup')
@@ -135,6 +142,7 @@ async function main() {
       GROUP BY 1
     `)
     await client.query('CREATE UNIQUE INDEX bbrr_rollup_rutid_idx ON bbrr_rollup (rutid)')
+    await assertMayContinue()
 
     const totals = await client.query(`
       SELECT
@@ -161,6 +169,7 @@ async function main() {
       FROM bbrr_rollup
       ON CONFLICT (rutid) DO NOTHING
     `)
+    await assertMayContinue()
 
     if (schema.hasAcumuladoResumen) {
       log('sincronizando acumulado_resumen...')
@@ -242,7 +251,21 @@ async function main() {
       await refreshStats(client)
     }
 
+    await assertMayContinue()
+    await client.query('select mdata_ops.refresh_bbrr_dashboard_usage_cache()')
+
     log('rollups BBRR completados')
+        return {
+          refresh_stats: args.refreshStats,
+          rutids: Number(totals.rows[0]?.rutids ?? 0),
+          bienes: Number(totals.rows[0]?.bienes ?? 0),
+        }
+      }
+    )
+
+    if (execution.skipped) {
+      log(`rollup omitido: ${execution.reason}`)
+    }
   } finally {
     await client.end().catch(() => {})
   }
