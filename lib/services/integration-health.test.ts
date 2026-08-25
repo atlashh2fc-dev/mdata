@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import nextConfig from '../../next.config'
 import { classifyIntegrationHealth } from './integration-health'
+
+test('Next habilita after para ejecutar el doorbell después del ACK', () => {
+  assert.equal(nextConfig.experimental?.after, true)
+})
 
 test('clasifica SLO de colas y conexiones con los mismos umbrales SQL', () => {
   assert.equal(classifyIntegrationHealth({
