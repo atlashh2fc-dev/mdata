@@ -1,0 +1,133 @@
+/* @atlas/ui 1.0.0. Visual reference: Atlas CRM, 73bf0f0. No product/auth logic. */
+:root {
+  color-scheme: light;
+  --atlas-brand-rgb: 4 157 217;
+  --atlas-accent-rgb: 121 242 230;
+  --atlas-background-rgb: 242 242 242;
+  --atlas-surface-rgb: 255 255 255;
+  --atlas-muted-rgb: 232 247 248;
+  --atlas-hover-rgb: 237 237 235;
+  --atlas-foreground-rgb: 38 37 35;
+  --atlas-secondary-rgb: 89 88 85;
+  --atlas-border-rgb: 216 221 221;
+  --atlas-action-rgb: 0 119 166;
+  --atlas-action-hover-rgb: 0 99 140;
+  --atlas-link-rgb: 0 112 157;
+  --atlas-success-rgb: 21 128 61;
+  --atlas-success-bg-rgb: 220 252 231;
+  --atlas-warning-rgb: 146 79 4;
+  --atlas-warning-bg-rgb: 254 243 199;
+  --atlas-danger-rgb: 185 28 28;
+  --atlas-danger-bg-rgb: 254 226 226;
+  --atlas-violet-rgb: 109 40 217;
+  --atlas-violet-bg-rgb: 237 233 254;
+  --atlas-auth-panel: #262523;
+  --atlas-auth-foreground: #f2f2f2;
+  --atlas-font: var(--font-outfit), "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --atlas-radius: 6px;
+  --atlas-card-radius: 8px;
+  --atlas-shadow: 0 1px 2px rgb(38 37 35 / 7%);
+  --atlas-shadow-popover: 0 8px 24px rgb(38 37 35 / 12%);
+  --atlas-header-height: 64px;
+  --atlas-sidebar-width: 256px;
+  --atlas-background: rgb(var(--atlas-background-rgb));
+  --atlas-surface: rgb(var(--atlas-surface-rgb));
+  --atlas-surface-muted: rgb(var(--atlas-muted-rgb));
+  --atlas-hover: rgb(var(--atlas-hover-rgb));
+  --atlas-foreground: rgb(var(--atlas-foreground-rgb));
+  --atlas-secondary: rgb(var(--atlas-secondary-rgb));
+  --atlas-border: rgb(var(--atlas-border-rgb));
+  --atlas-brand: rgb(var(--atlas-brand-rgb));
+  --atlas-action: rgb(var(--atlas-action-rgb));
+  --atlas-action-hover: rgb(var(--atlas-action-hover-rgb));
+  --atlas-link: rgb(var(--atlas-link-rgb));
+  --atlas-accent: rgb(var(--atlas-accent-rgb));
+  --atlas-success: rgb(var(--atlas-success-rgb));
+  --atlas-warning: rgb(var(--atlas-warning-rgb));
+  --atlas-danger: rgb(var(--atlas-danger-rgb));
+}
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --atlas-background-rgb: 31 31 29;
+  --atlas-surface-rgb: 38 37 35;
+  --atlas-muted-rgb: 50 49 47;
+  --atlas-hover-rgb: 50 49 47;
+  --atlas-foreground-rgb: 242 242 242;
+  --atlas-secondary-rgb: 185 185 185;
+  --atlas-border-rgb: 66 65 62;
+  --atlas-link-rgb: 121 242 230;
+  --atlas-success-rgb: 74 222 128;
+  --atlas-success-bg-rgb: 20 83 45;
+  --atlas-warning-rgb: 251 191 36;
+  --atlas-warning-bg-rgb: 69 26 3;
+  --atlas-danger-rgb: 248 113 113;
+  --atlas-danger-bg-rgb: 69 10 10;
+  --atlas-violet-rgb: 196 181 253;
+  --atlas-violet-bg-rgb: 46 16 101;
+  --atlas-auth-panel: #191817;
+  --atlas-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  --atlas-shadow-popover: 0 8px 24px rgb(0 0 0 / 30%);
+}
+.atlas-frame { display: grid; grid-template-columns: var(--atlas-sidebar-width) minmax(0, 1fr); height: 100dvh; overflow: hidden; background: var(--atlas-background); color: var(--atlas-foreground); font-family: var(--atlas-font); }
+.atlas-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--atlas-border); background: var(--atlas-surface); }
+.atlas-brand { display: flex; align-items: center; gap: 10px; min-height: var(--atlas-header-height); padding: 12px 16px; border-bottom: 1px solid var(--atlas-border); color: var(--atlas-foreground); }
+.atlas-brand img { width: 34px; height: 34px; object-fit: contain; border-radius: 6px; background: #fff; }
+.atlas-brand strong { display: block; font-size: 14px; font-weight: 600; }
+.atlas-brand small { display: block; margin-top: 2px; font-size: 11px; color: var(--atlas-secondary); }
+.atlas-navigation { min-height: 0; flex: 1; overflow-y: auto; padding: 8px; }
+.atlas-nav-group { margin: 16px 12px 8px; color: var(--atlas-secondary); font-size: 10px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
+.atlas-nav-link { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 6px; color: var(--atlas-secondary); font-size: 14px; font-weight: 400; text-decoration: none; transition: background 120ms, color 120ms; }
+.atlas-nav-link svg { width: 18px; height: 18px; flex-shrink: 0; }
+.atlas-nav-link:hover { background: var(--atlas-hover); color: var(--atlas-foreground); }
+.atlas-nav-link[aria-current="page"] { background: var(--atlas-hover); color: var(--atlas-foreground); font-weight: 500; }
+.atlas-nav-link[aria-current="page"] > svg { color: var(--atlas-link); }
+.atlas-sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--atlas-border); color: var(--atlas-secondary); font-size: 12px; }
+.atlas-workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.atlas-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--atlas-header-height); flex-shrink: 0; padding: 12px 24px; background: var(--atlas-surface); border-bottom: 1px solid var(--atlas-border); }
+.atlas-topbar-title { font-size: 14px; font-weight: 500; }
+.atlas-topbar-actions { display: flex; align-items: center; gap: 8px; }
+.atlas-main { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.atlas-page { padding: 24px; }
+.atlas-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; padding: 8px; border: 1px solid var(--atlas-border); border-radius: var(--atlas-radius); background: var(--atlas-surface); color: var(--atlas-foreground); cursor: pointer; }
+.atlas-icon-button:hover { background: var(--atlas-hover); }
+.atlas-icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.atlas-mobile-toggle { display: none; }
+.atlas-frame :focus-visible, .atlas-auth :focus-visible { outline: 2px solid var(--atlas-link); outline-offset: 3px; }
+.atlas-page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--atlas-border); }
+.atlas-page-header h1 { margin: 0; color: var(--atlas-foreground); font-size: 20px; line-height: 1.3; font-weight: 600; }
+.atlas-page-header p { margin: 4px 0 0; color: var(--atlas-secondary); font-size: 14px; }
+.atlas-card { border: 1px solid var(--atlas-border); border-radius: var(--atlas-card-radius); background: var(--atlas-surface); box-shadow: var(--atlas-shadow); }
+.atlas-auth { display: flex; min-height: 100dvh; font-family: var(--atlas-font); background: var(--atlas-background); color: var(--atlas-foreground); }
+.atlas-auth-brand { display: flex; flex-direction: column; justify-content: space-between; width: 400px; flex-shrink: 0; padding: 48px 40px; background: var(--atlas-auth-panel); color: var(--atlas-auth-foreground); }
+.atlas-auth-brand .atlas-brand { padding: 0; min-height: auto; border: 0; color: inherit; }
+.atlas-auth-brand .atlas-brand strong { font-size: 20px; }
+.atlas-auth-brand .atlas-brand img { width: 40px; height: 40px; padding: 4px; }
+.atlas-auth-tagline { margin-top: 48px; padding-left: 16px; border-left: 2px solid var(--atlas-brand); font-size: 24px; line-height: 1.35; }
+.atlas-auth-brand ul { display: grid; gap: 16px; margin-top: 24px; padding-left: 18px; font-size: 14px; }
+.atlas-auth-brand li::marker { color: var(--atlas-accent); }
+.atlas-auth-brand footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid rgb(255 255 255 / 20%); font-size: 12px; }
+.atlas-auth-content { position: relative; display: flex; flex: 1; align-items: center; justify-content: center; min-width: 0; padding: 72px 24px; }
+.atlas-auth-content > .atlas-icon-button { position: absolute; top: 16px; right: 16px; }
+.atlas-auth-form { width: 100%; max-width: 384px; }
+.atlas-auth-form h1 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 0; }
+.atlas-auth-description { margin: 4px 0 24px; color: var(--atlas-secondary); font-size: 14px; }
+.atlas-auth-note { margin-top: 24px; color: var(--atlas-secondary); font-size: 12px; text-align: center; }
+@media (max-width: 800px) {
+  .atlas-frame { display: flex; flex-direction: column; }
+  .atlas-sidebar { flex-shrink: 0; border-right: 0; border-bottom: 1px solid var(--atlas-border); }
+  .atlas-sidebar .atlas-brand { min-height: 56px; padding: 8px 16px; }
+  .atlas-mobile-toggle { display: inline-flex; margin-left: auto; }
+  .atlas-navigation, .atlas-sidebar-footer { display: none; }
+  .atlas-frame[data-menu-open="true"] .atlas-navigation { display: block; max-height: 50dvh; flex: none; }
+  .atlas-frame[data-menu-open="true"] .atlas-sidebar-footer { display: block; }
+  .atlas-workspace { flex: 1; }
+  .atlas-topbar { min-height: 52px; padding: 8px 16px; }
+  .atlas-page { padding: 16px; }
+  .atlas-auth { flex-direction: column; }
+  .atlas-auth-brand { width: 100%; padding: 24px; }
+  .atlas-auth-tagline { margin-top: 24px; font-size: 20px; }
+  .atlas-auth-brand ul, .atlas-auth-brand footer { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-frame *, .atlas-auth * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

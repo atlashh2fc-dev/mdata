@@ -25,10 +25,10 @@ async function DashboardContent() {
     <div className="p-6 space-y-6">
       {/* Stats refresh info */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Database className="w-3.5 h-3.5" />
           <span>Base de datos: {formatNumber(stats.total_ruts)} RUTs únicos</span>
-          <span className="text-slate-700">·</span>
+          <span className="text-muted-foreground">·</span>
           <span>Actualizado: {formatDatetime(stats.last_refreshed)}</span>
         </div>
         <form action="/api/dashboard" method="POST">

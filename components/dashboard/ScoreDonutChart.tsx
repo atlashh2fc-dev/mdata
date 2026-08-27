@@ -21,10 +21,10 @@ const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload
     return (
-      <div className="bg-[#0f172a] border border-[#334155] p-3 rounded-lg shadow-elevation-2">
-        <p className="text-sm font-semibold text-slate-200 mb-1">{LABELS[data.range] || data.range}</p>
-        <p className="text-xs text-slate-400">
-          Personas: <span className="font-medium text-slate-200">{formatNumber(data.count)}</span>
+      <div className="bg-background border border-border p-3 rounded-lg shadow-elevation-2">
+        <p className="text-sm font-semibold text-foreground mb-1">{LABELS[data.range] || data.range}</p>
+        <p className="text-xs text-muted-foreground">
+          Personas: <span className="font-medium text-foreground">{formatNumber(data.count)}</span>
         </p>
       </div>
     )
@@ -35,7 +35,7 @@ const CustomTooltip = ({ active, payload }: any) => {
 const renderLegend = (props: any) => {
   const { payload } = props
   return (
-    <ul className="flex flex-col gap-2 mt-4 text-xs text-slate-300">
+    <ul className="flex flex-col gap-2 mt-4 text-xs text-foreground">
       {payload.map((entry: any, index: number) => (
         <li key={`item-${index}`} className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -53,8 +53,8 @@ export function ScoreDonutChart({ data }: ScoreDonutChartProps) {
   return (
     <div className="card p-5">
       <div className="mb-2">
-        <h3 className="text-base font-bold text-slate-100">Distribución de Score</h3>
-        <p className="text-xs text-slate-400 mt-1">Calidad del perfil patrimonial y contacto</p>
+        <h3 className="text-base font-bold text-foreground">Distribución de Score</h3>
+        <p className="text-xs text-muted-foreground mt-1">Calidad del perfil patrimonial y contacto</p>
       </div>
 
       <div className="h-[280px] w-full flex">

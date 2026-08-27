@@ -169,7 +169,7 @@ function MappingRow({ col, mapping, onChange }: MappingRowProps) {
     <tr>
       <td>
         <div>
-          <p className="text-xs font-medium text-slate-200">{col.name}</p>
+          <p className="text-xs font-medium text-foreground">{col.name}</p>
           <div className="flex items-center gap-1 mt-0.5">
             <span className={`badge text-[9px] px-1 py-0 ${
               col.inferred_type === 'rut' ? 'badge-brand' :
@@ -178,14 +178,14 @@ function MappingRow({ col, mapping, onChange }: MappingRowProps) {
             }`}>
               {col.inferred_type}
             </span>
-            <span className="text-[9px] text-slate-600">{col.null_pct}% nulos</span>
+            <span className="text-[9px] text-muted-foreground">{col.null_pct}% nulos</span>
           </div>
         </div>
       </td>
       <td>
         <div className="flex flex-wrap gap-1">
           {col.sample_values.slice(0, 3).map((v, i) => (
-            <span key={i} className="text-[10px] bg-[#111827] px-1.5 py-0.5 rounded text-slate-400">
+            <span key={i} className="text-[10px] bg-surface px-1.5 py-0.5 rounded text-muted-foreground">
               {v}
             </span>
           ))}
@@ -197,9 +197,9 @@ function MappingRow({ col, mapping, onChange }: MappingRowProps) {
             type="checkbox"
             checked={mapping.is_rut_column}
             onChange={e => onChange({ ...mapping, is_rut_column: e.target.checked })}
-            className="w-3.5 h-3.5 accent-brand-500"
+            className="w-3.5 h-3.5 accent-primary"
           />
-          <span className="text-[10px] text-slate-500">RUT</span>
+          <span className="text-[10px] text-muted-foreground">RUT</span>
         </div>
       </td>
       <td>
@@ -445,11 +445,11 @@ export default function IngestaPage() {
       <div className="p-6 space-y-6">
         {/* Jobs List */}
         <div className="card overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-[#253357]">
-            <h3 className="text-sm font-semibold text-slate-200">
+          <div className="flex items-center justify-between p-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">
               Jobs de ingesta
               {jobsTotal > 0 && (
-                <span className="ml-2 text-xs text-slate-500">({formatNumber(jobsTotal)})</span>
+                <span className="ml-2 text-xs text-muted-foreground">({formatNumber(jobsTotal)})</span>
               )}
             </h3>
             <button onClick={loadJobs} className="btn-secondary text-xs py-1.5 px-3">
@@ -485,27 +485,27 @@ export default function IngestaPage() {
                     <tr key={job.id}>
                       <td>
                         <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-slate-500" />
-                          <span className="text-xs font-medium text-slate-200">
+                          <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span className="text-xs font-medium text-foreground">
                             {job.file_name ?? 'Sin nombre'}
                           </span>
                         </div>
                       </td>
                       <td>
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-muted-foreground">
                           {(job.data_source as DataSource)?.name ?? '—'}
                         </span>
                       </td>
                       <td><StatusBadge status={job.status} /></td>
                       <td><span className="text-xs">{formatNumber(job.total_rows)}</span></td>
                       <td>
-                        <span className="text-xs text-green-400">{formatNumber(job.valid_rows)}</span>
+                        <span className="text-xs text-success">{formatNumber(job.valid_rows)}</span>
                       </td>
                       <td>
-                        <span className="text-xs text-brand-400">{formatNumber(job.new_rows)}</span>
+                        <span className="text-xs text-primary-ink">{formatNumber(job.new_rows)}</span>
                       </td>
                       <td>
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-muted-foreground">
                           {formatDatetime(job.created_at)}
                         </span>
                       </td>
@@ -542,10 +542,10 @@ export default function IngestaPage() {
         {selectedJob && (
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-200">
-                Logs del job: <span className="font-mono text-xs text-brand-400">{selectedJob.slice(0,8)}...</span>
+              <h3 className="text-sm font-semibold text-foreground">
+                Logs del job: <span className="font-mono text-xs text-primary-ink">{selectedJob.slice(0,8)}...</span>
               </h3>
-              <button onClick={() => setSelectedJob(null)} className="text-slate-500 hover:text-white">
+              <button onClick={() => setSelectedJob(null)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -558,14 +558,14 @@ export default function IngestaPage() {
                   }`}>
                     {log.level}
                   </span>
-                  <span className="text-slate-400">{log.message}</span>
+                  <span className="text-muted-foreground">{log.message}</span>
                   {log.row_number && (
-                    <span className="text-slate-600">fila {log.row_number}</span>
+                    <span className="text-muted-foreground">fila {log.row_number}</span>
                   )}
                 </div>
               ))}
               {jobLogs.length === 0 && (
-                <p className="text-xs text-slate-600">Sin logs para este job</p>
+                <p className="text-xs text-muted-foreground">Sin logs para este job</p>
               )}
             </div>
           </div>
@@ -579,32 +579,32 @@ export default function IngestaPage() {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-start justify-center z-50 p-4 pt-8 overflow-y-auto">
           <div className="card w-full max-w-4xl animate-slide-in">
             {/* Wizard Header */}
-            <div className="flex items-center justify-between p-5 border-b border-[#253357]">
-              <h2 className="text-base font-semibold text-white">Pipeline de ingesta</h2>
-              <button onClick={resetWizard} className="text-slate-500 hover:text-white">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="text-base font-semibold text-foreground">Pipeline de ingesta</h2>
+              <button onClick={resetWizard} className="text-muted-foreground hover:text-foreground">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Steps */}
-            <div className="flex items-center gap-0 px-5 py-4 border-b border-[#253357] overflow-x-auto">
+            <div className="flex items-center gap-0 px-5 py-4 border-b border-border overflow-x-auto">
               {STEPS.map((step, i) => (
                 <div key={step.key} className="flex items-center">
                   <div className={`flex items-center gap-2 text-xs font-medium px-1 ${
-                    i < currentStepIndex ? 'text-green-400' :
-                    i === currentStepIndex ? 'text-white' : 'text-slate-600'
+                    i < currentStepIndex ? 'text-success' :
+                    i === currentStepIndex ? 'text-foreground' : 'text-muted-foreground'
                   }`}>
                     <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                      i < currentStepIndex ? 'bg-green-500 text-white' :
-                      i === currentStepIndex ? 'bg-brand-600 text-white' :
-                      'bg-[#253357] text-slate-600'
+                      i < currentStepIndex ? 'bg-success-bg text-success' :
+                      i === currentStepIndex ? 'bg-primary text-primary-foreground' :
+                      'bg-surface text-muted-foreground'
                     }`}>
                       {i < currentStepIndex ? <Check className="w-3 h-3" /> : i + 1}
                     </div>
                     <span className="hidden sm:inline">{step.label}</span>
                   </div>
                   {i < STEPS.length - 1 && (
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-700 mx-1 flex-shrink-0" />
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground mx-1 flex-shrink-0" />
                   )}
                 </div>
               ))}
@@ -616,7 +616,7 @@ export default function IngestaPage() {
               {wizardStep === 'upload' && (
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
                       Fuente de datos (opcional)
                     </label>
                     <select
@@ -635,8 +635,8 @@ export default function IngestaPage() {
                     onClick={() => fileInputRef.current?.click()}
                     className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
                       file
-                        ? 'border-green-500/50 bg-green-500/5'
-                        : 'border-[#253357] hover:border-brand-500/50 hover:bg-brand-500/5'
+                        ? 'border-success/50 bg-success-bg'
+                        : 'border-border hover:border-primary/50 hover:bg-surface-muted'
                     }`}
                   >
                     <input
@@ -648,15 +648,15 @@ export default function IngestaPage() {
                     />
                     {file ? (
                       <div className="flex flex-col items-center gap-2">
-                        <Check className="w-8 h-8 text-green-400" />
-                        <p className="text-sm font-medium text-green-400">{file.name}</p>
-                        <p className="text-xs text-slate-500">{formatFileSize(file.size)}</p>
+                        <Check className="w-8 h-8 text-success" />
+                        <p className="text-sm font-medium text-success">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-2">
-                        <Upload className="w-8 h-8 text-slate-600" />
-                        <p className="text-sm text-slate-400">Arrastra o haz click para subir</p>
-                        <p className="text-xs text-slate-600">CSV o Excel (.csv, .xlsx)</p>
+                        <Upload className="w-8 h-8 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Arrastra o haz click para subir</p>
+                        <p className="text-xs text-muted-foreground">CSV o Excel (.csv, .xlsx)</p>
                       </div>
                     )}
                   </div>
@@ -678,25 +678,25 @@ export default function IngestaPage() {
               {wizardStep === 'map' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm text-slate-300">
-                      Se detectaron <strong className="text-white">{detectedColumns.length}</strong> columnas en{' '}
-                      <strong className="text-white">{formatNumber(parsedRows.length)}</strong> filas.
+                    <p className="text-sm text-foreground">
+                      Se detectaron <strong className="text-foreground">{detectedColumns.length}</strong> columnas en{' '}
+                      <strong className="text-foreground">{formatNumber(parsedRows.length)}</strong> filas.
                       Para hacer match solo necesitas confirmar la columna RUT.
                     </p>
                   </div>
 
-                  <div className="flex items-start gap-2 p-3 bg-brand-500/10 border border-brand-500/20 rounded-lg">
-                    <Info className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-slate-300">
-                      Marca la columna <strong className="text-white">RUT</strong> y procesa.
-                      <span className="text-slate-400"> Tabla destino, columna destino y transformación son opcionales y solo se usan si quieres guardar datos extra.</span>
-                      <span className="text-slate-400"> Si el archivo viene con columnas separadas <strong className="text-white">RUT</strong> y <strong className="text-white">DV</strong>, se combinarán automáticamente al procesar.</span>
+                  <div className="flex items-start gap-2 p-3 bg-surface-muted border border-primary/20 rounded-lg">
+                    <Info className="w-4 h-4 text-primary-ink flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-foreground">
+                      Marca la columna <strong className="text-foreground">RUT</strong> y procesa.
+                      <span className="text-muted-foreground"> Tabla destino, columna destino y transformación son opcionales y solo se usan si quieres guardar datos extra.</span>
+                      <span className="text-muted-foreground"> Si el archivo viene con columnas separadas <strong className="text-foreground">RUT</strong> y <strong className="text-foreground">DV</strong>, se combinarán automáticamente al procesar.</span>
                     </p>
                   </div>
 
                   <div className="overflow-x-auto max-h-96 overflow-y-auto">
                     <table className="table-base">
-                      <thead className="sticky top-0 bg-[#111827]">
+                      <thead className="sticky top-0 bg-surface">
                         <tr>
                           <th>Columna origen</th>
                           <th>Muestra</th>
@@ -732,9 +732,9 @@ export default function IngestaPage() {
                   </div>
 
                   {!mappings.some(m => m.is_rut_column) && (
-                    <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                      <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                      <p className="text-xs text-amber-400">
+                    <div className="flex items-center gap-2 p-3 bg-warning-bg border border-warning/20 rounded-lg">
+                      <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" />
+                      <p className="text-xs text-warning">
                         Debes marcar al menos una columna como RUT para poder procesar los datos
                       </p>
                     </div>
@@ -766,25 +766,25 @@ export default function IngestaPage() {
                     {processing ? (
                       <Spinner size="sm" />
                     ) : (
-                      <Check className="w-5 h-5 text-green-400" />
+                      <Check className="w-5 h-5 text-success" />
                     )}
-                    <p className="text-sm font-medium text-white">
+                    <p className="text-sm font-medium text-foreground">
                       {processing ? 'Procesando datos...' : 'Proceso completado'}
                     </p>
                   </div>
 
-                  <div className="bg-[#0d1529] rounded-xl p-4 font-mono text-xs space-y-1 max-h-48 overflow-y-auto">
+                  <div className="bg-surface rounded-xl p-4 font-mono text-xs space-y-1 max-h-48 overflow-y-auto">
                     {processLogs.map((log, i) => (
                       <p key={i} className={`${
-                        log.includes('✓') ? 'text-green-400' :
-                        log.includes('Error') ? 'text-red-400' :
-                        'text-slate-400'
+                        log.includes('✓') ? 'text-success' :
+                        log.includes('Error') ? 'text-danger' :
+                        'text-muted-foreground'
                       }`}>
                         {log}
                       </p>
                     ))}
                     {processing && (
-                      <p className="text-brand-400 animate-pulse">█</p>
+                      <p className="text-primary-ink animate-pulse">█</p>
                     )}
                   </div>
                 </div>
@@ -793,12 +793,12 @@ export default function IngestaPage() {
               {/* STEP 5: Done */}
               {wizardStep === 'done' && (
                 <div className="text-center space-y-5 py-4">
-                  <div className="w-16 h-16 rounded-full bg-green-500/15 flex items-center justify-center mx-auto border border-green-500/20">
-                    <Check className="w-8 h-8 text-green-400" />
+                  <div className="w-16 h-16 rounded-full bg-success-bg flex items-center justify-center mx-auto border border-success/20">
+                    <Check className="w-8 h-8 text-success" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white">Ingesta completada</h3>
-                    <p className="text-sm text-slate-400 mt-1">
+                    <h3 className="text-lg font-bold text-foreground">Ingesta completada</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
                       Aquí tienes el resumen real del cruce y de los campos enviados.
                     </p>
                   </div>
@@ -807,39 +807,39 @@ export default function IngestaPage() {
                     <div className="space-y-4 max-w-3xl mx-auto">
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div className="card p-4 text-center">
-                          <p className="text-2xl font-bold text-white">
+                          <p className="text-2xl font-bold text-foreground">
                             {formatNumber(mergeResult.total)}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1">Filas subidas</p>
+                          <p className="text-xs text-muted-foreground mt-1">Filas subidas</p>
                         </div>
                         <div className="card p-4 text-center">
-                          <p className="text-2xl font-bold text-brand-400">
+                          <p className="text-2xl font-bold text-primary-ink">
                             {formatNumber(mergeResult.valid)}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1">RUTs válidos</p>
+                          <p className="text-xs text-muted-foreground mt-1">RUTs válidos</p>
                         </div>
                         <div className="card p-4 text-center">
-                          <p className="text-2xl font-bold text-green-400">
+                          <p className="text-2xl font-bold text-success">
                             {formatNumber(mergeResult.merged)}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1">Cruzaron existente</p>
+                          <p className="text-xs text-muted-foreground mt-1">Cruzaron existente</p>
                         </div>
                         <div className="card p-4 text-center">
-                          <p className="text-2xl font-bold text-cyan-400">
+                          <p className="text-2xl font-bold text-primary-ink">
                             {formatNumber(mergeResult.created)}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1">RUTs nuevos</p>
+                          <p className="text-xs text-muted-foreground mt-1">RUTs nuevos</p>
                         </div>
                         <div className="card p-4 text-center">
-                          <p className="text-2xl font-bold text-amber-400">
+                          <p className="text-2xl font-bold text-warning">
                             {formatNumber(mergeResult.invalid)}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1">Inválidos</p>
+                          <p className="text-xs text-muted-foreground mt-1">Inválidos</p>
                         </div>
                       </div>
 
                       <div className="card p-5 text-left">
-                        <p className="text-sm font-semibold text-white mb-2">
+                        <p className="text-sm font-semibold text-foreground mb-2">
                           Campos mapeados para guardar
                         </p>
                         {mergeResult.mappedFields.length > 0 ? (
@@ -854,7 +854,7 @@ export default function IngestaPage() {
                             ))}
                           </div>
                         ) : (
-                          <p className="text-sm text-slate-400">
+                          <p className="text-sm text-muted-foreground">
                             No se mapearon campos extra. En esta corrida solo se hizo cruce por RUT.
                           </p>
                         )}

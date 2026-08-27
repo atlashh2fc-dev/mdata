@@ -89,7 +89,7 @@ function ConditionRow({
 
       {showValue2 && (
         <>
-          <span className="text-xs text-slate-500">y</span>
+          <span className="text-xs text-muted-foreground">y</span>
           <input
             type="number"
             value={String(condition.value2 ?? '')}
@@ -102,7 +102,7 @@ function ConditionRow({
 
       <button
         onClick={onRemove}
-        className="p-1.5 text-slate-600 hover:text-red-400 transition-colors"
+        className="p-1.5 text-muted-foreground hover:text-danger transition-colors"
       >
         <X className="w-3.5 h-3.5" />
       </button>
@@ -220,18 +220,18 @@ export default function SegmentosPage() {
         {showBuilder && (
           <div className="card p-5 animate-slide-in">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Filter className="w-4 h-4 text-brand-400" />
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Filter className="w-4 h-4 text-primary-ink" />
                 Constructor de segmento
               </h3>
-              <button onClick={() => setShowBuilder(false)} className="text-slate-500 hover:text-white">
+              <button onClick={() => setShowBuilder(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
                   Nombre del segmento *
                 </label>
                 <input
@@ -243,7 +243,7 @@ export default function SegmentosPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
                   Descripción
                 </label>
                 <input
@@ -258,7 +258,7 @@ export default function SegmentosPage() {
 
             <div className="mb-3">
               <div className="flex items-center gap-3 mb-3">
-                <span className="text-xs text-slate-400">Lógica:</span>
+                <span className="text-xs text-muted-foreground">Lógica:</span>
                 <div className="flex gap-1">
                   {(['AND', 'OR'] as FilterLogic[]).map(l => (
                     <button
@@ -266,8 +266,8 @@ export default function SegmentosPage() {
                       onClick={() => setLogic(l)}
                       className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
                         logic === l
-                          ? 'bg-brand-600 text-white'
-                          : 'bg-[#0f172a] text-slate-400 hover:text-white border border-[#334155]'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:text-foreground border border-border'
                       }`}
                     >
                       {l}
@@ -334,32 +334,32 @@ export default function SegmentosPage() {
               <div key={seg.id} className="card-hover p-5">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-brand-500/10 flex items-center justify-center border border-brand-500/20">
-                      <Users className="w-4 h-4 text-brand-400" />
+                    <div className="w-8 h-8 rounded-lg bg-surface-muted flex items-center justify-center border border-primary/20">
+                      <Users className="w-4 h-4 text-primary-ink" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-white">{seg.name}</h3>
+                      <h3 className="text-sm font-semibold text-foreground">{seg.name}</h3>
                       {seg.description && (
-                        <p className="text-xs text-slate-500">{seg.description}</p>
+                        <p className="text-xs text-muted-foreground">{seg.description}</p>
                       )}
                     </div>
                   </div>
                   <button
                     onClick={() => deleteSegmento(seg.id)}
-                    className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                    className="text-muted-foreground hover:text-danger transition-colors p-1"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-2xl font-bold text-white">
+                  <span className="text-2xl font-bold text-foreground">
                     {seg.row_count > 0 ? formatNumber(seg.row_count) : '—'}
                   </span>
-                  <span className="text-xs text-slate-500">RUTs</span>
+                  <span className="text-xs text-muted-foreground">RUTs</span>
                 </div>
 
-                <div className="text-[10px] text-slate-600 mb-4">
+                <div className="text-[10px] text-muted-foreground mb-4">
                   {seg.last_computed
                     ? `Calculado ${formatRelativeTime(seg.last_computed)}`
                     : 'Sin calcular'}
@@ -382,18 +382,18 @@ export default function SegmentosPage() {
         {/* Segment Results */}
         {selectedSegment && (
           <div className="card overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-[#334155]">
+            <div className="flex items-center justify-between p-4 border-b border-border">
               <div>
-                <h3 className="text-sm font-semibold text-slate-200">
+                <h3 className="text-sm font-semibold text-foreground">
                   {selectedSegment.name}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   {formatNumber(segmentTotal)} RUTs encontrados
                 </p>
               </div>
               <button
                 onClick={() => setSelectedSegment(null)}
-                className="text-slate-500 hover:text-white"
+                className="text-muted-foreground hover:text-foreground"
               >
                 <X className="w-4 h-4" />
               </button>

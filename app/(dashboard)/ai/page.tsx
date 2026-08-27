@@ -180,7 +180,7 @@ export default function CerebroDeNegociosPage() {
             href={markdownHref}
             target={isExternal ? '_blank' : undefined}
             rel={isExternal ? 'noreferrer' : undefined}
-            className="text-cyan-300 underline decoration-cyan-400/50 underline-offset-2 hover:text-cyan-200"
+            className="text-primary-ink underline decoration-cyan-400/50 underline-offset-2 hover:text-primary-ink"
           >
             {match[2]}
           </a>
@@ -193,7 +193,7 @@ export default function CerebroDeNegociosPage() {
             href={plainHref}
             target={isExternal ? '_blank' : undefined}
             rel={isExternal ? 'noreferrer' : undefined}
-            className="text-cyan-300 underline decoration-cyan-400/50 underline-offset-2 hover:text-cyan-200"
+            className="text-primary-ink underline decoration-cyan-400/50 underline-offset-2 hover:text-primary-ink"
           >
             {plainHref}
           </a>
@@ -221,7 +221,7 @@ export default function CerebroDeNegociosPage() {
 
       if (line.startsWith('- ')) {
         return (
-          <li key={i} className="ml-4 list-disc marker:text-cyan-500 mb-1">
+          <li key={i} className="ml-4 list-disc marker:text-primary-ink mb-1">
             {renderInlineMarkdown(line.substring(2))}
           </li>
         )
@@ -243,28 +243,28 @@ export default function CerebroDeNegociosPage() {
       />
 
       <div className="p-6 h-[calc(100vh-5rem)] flex gap-6">
-        
+
         {/* Panel Izquierdo: Chat */}
         <div className="glass-panel flex-1 flex flex-col overflow-hidden relative group">
-          <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 to-transparent pointer-events-none" />
-          
-          <div className="p-4 border-b border-white/10 flex items-center justify-between z-10 bg-[#0f172a]/50">
+          <div className="absolute inset-0 bg-gradient-to-br from-surface-muted to-transparent pointer-events-none" />
+
+          <div className="p-4 border-b border-border flex items-center justify-between z-10 bg-background">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center border border-cyan-500/40 animate-glow">
-                  <BrainCircuit className="w-5 h-5 text-cyan-400" />
+                <div className="w-10 h-10 rounded-full bg-surface-muted flex items-center justify-center border border-primary/40 animate-glow">
+                  <BrainCircuit className="w-5 h-5 text-primary-ink" />
                 </div>
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#1e293b]" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-success rounded-full border-2 border-border" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                   Inception Analyst
                   <span className="badge-brand text-[9px] px-1.5 py-0">Mercury-2</span>
                 </h3>
-                <p className="text-xs text-slate-400">En línea • Capacidad de búsqueda web habilitada</p>
+                <p className="text-xs text-muted-foreground">En línea • Capacidad de búsqueda web habilitada</p>
               </div>
             </div>
-            <Globe className="w-4 h-4 text-slate-500" />
+            <Globe className="w-4 h-4 text-muted-foreground" />
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6 z-10 scrollbar-thin">
@@ -272,19 +272,19 @@ export default function CerebroDeNegociosPage() {
               <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 <div className="flex-shrink-0">
                   {msg.role === 'user' ? (
-                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
-                      <UserCircle2 className="w-5 h-5 text-slate-300" />
+                    <div className="w-8 h-8 rounded-full bg-surface-muted flex items-center justify-center">
+                      <UserCircle2 className="w-5 h-5 text-foreground" />
                     </div>
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                      <Bot className="w-5 h-5 text-white" />
+                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-lg shadow-elevation-1">
+                      <Bot className="w-5 h-5 text-primary-foreground" />
                     </div>
                   )}
                 </div>
                 <div className={`max-w-[80%] rounded-2xl p-4 ${
-                  msg.role === 'user' 
-                    ? 'bg-brand-600 text-white rounded-tr-sm shadow-md' 
-                    : 'bg-[#1e293b]/80 border border-slate-700/50 text-slate-200 rounded-tl-sm shadow-[0_4px_20px_rgba(0,0,0,0.2)]'
+                  msg.role === 'user'
+                    ? 'bg-primary text-primary-foreground rounded-tr-sm shadow-md'
+                    : 'bg-surface border border-border text-foreground rounded-tl-sm shadow-[0_4px_20px_rgba(0,0,0,0.2)]'
                 }`}>
                   <div className="text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
@@ -292,23 +292,23 @@ export default function CerebroDeNegociosPage() {
                 </div>
               </div>
             ))}
-            
+
             {loading && (
               <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white animate-pulse" />
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-primary-foreground animate-pulse" />
                 </div>
-                <div className="bg-[#1e293b]/80 border border-slate-700/50 text-slate-200 rounded-2xl rounded-tl-sm p-4 flex items-center gap-2 w-24">
-                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" />
-                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s'}} />
-                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s'}} />
+                <div className="bg-surface border border-border text-foreground rounded-2xl rounded-tl-sm p-4 flex items-center gap-2 w-24">
+                  <div className="w-2 h-2 bg-surface-muted rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-surface-muted rounded-full animate-bounce" style={{ animationDelay: '0.1s'}} />
+                  <div className="w-2 h-2 bg-surface-muted rounded-full animate-bounce" style={{ animationDelay: '0.2s'}} />
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
-          <form onSubmit={handleSend} className="p-4 bg-[#0f172a]/60 border-t border-white/5 z-10">
+          <form onSubmit={handleSend} className="p-4 bg-background border-t border-border z-10">
             <div className="relative flex items-center">
               <input
                 type="text"
@@ -316,20 +316,20 @@ export default function CerebroDeNegociosPage() {
                 onChange={e => setInput(e.target.value)}
                 placeholder="Ej: Busca tendencias de aseguradoras y cruza un segmento..."
                 disabled={loading}
-                className="w-full bg-[#1e293b]/80 border border-[#334155] rounded-full pl-5 pr-12 py-3.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all shadow-inner"
+                className="w-full bg-surface border border-border rounded-full pl-5 pr-12 py-3.5 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-inner"
               />
               <button
                 type="submit"
                 disabled={!input.trim() || loading}
-                className="absolute right-2 p-2 bg-cyan-500 hover:bg-cyan-400 text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(6,182,212,0.3)]"
+                className="absolute right-2 p-2 bg-primary hover:bg-primary-hover text-primary-foreground rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-elevation-1"
               >
                 <Send className="w-4 h-4 ml-0.5" />
               </button>
             </div>
-            <div className="flex justify-center gap-6 mt-3 text-[10px] text-slate-500 font-medium">
-              <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-amber-400" /> IA Contextual</span>
-              <span className="flex items-center gap-1"><Globe className="w-3 h-3 text-blue-400" /> Búsqueda Web</span>
-              <span className="flex items-center gap-1"><Database className="w-3 h-3 text-purple-400" /> {formatCompactCount(dashboardStats?.total_ruts)} registros</span>
+            <div className="flex justify-center gap-6 mt-3 text-[10px] text-muted-foreground font-medium">
+              <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-warning" /> IA Contextual</span>
+              <span className="flex items-center gap-1"><Globe className="w-3 h-3 text-primary-ink" /> Búsqueda Web</span>
+              <span className="flex items-center gap-1"><Database className="w-3 h-3 text-violet" /> {formatCompactCount(dashboardStats?.total_ruts)} registros</span>
             </div>
           </form>
         </div>
@@ -337,8 +337,8 @@ export default function CerebroDeNegociosPage() {
         {/* Panel Derecho: Sugerencias Rápidas */}
         <div className="w-80 flex flex-col gap-4">
           <div className="glass-panel p-5">
-            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2 mb-4">
-              <Target className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-2 mb-4">
+              <Target className="w-4 h-4 text-primary-ink" />
               Estrategias Sugeridas
             </h3>
             <div className="space-y-3">
@@ -347,30 +347,30 @@ export default function CerebroDeNegociosPage() {
                 { title: 'Seguros de Vida Pyme', desc: 'Dueños de empresa con patrimonio positivo.' },
                 { title: 'Renovación Automotriz', desc: 'Propietarios de vehículos en la RM.' }
               ].map((sug, i) => (
-                <button 
+                <button
                   key={i}
                   onClick={() => setInput(`Analiza el ${sug.title.toLowerCase()}: ${sug.desc}`)}
-                  className="w-full text-left p-3 rounded-lg border border-slate-700/50 bg-[#1e293b]/40 hover:bg-[#1e293b] hover:border-cyan-500/50 transition-all group"
+                  className="w-full text-left p-3 rounded-lg border border-border bg-surface hover:bg-surface hover:border-primary/50 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-semibold text-white">{sug.title}</span>
-                    <ChevronRight className="w-3 h-3 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                    <span className="text-sm font-semibold text-foreground">{sug.title}</span>
+                    <ChevronRight className="w-3 h-3 text-muted-foreground group-hover:text-primary-ink transition-colors" />
                   </div>
-                  <p className="text-[10px] text-slate-400">{sug.desc}</p>
+                  <p className="text-[10px] text-muted-foreground">{sug.desc}</p>
                 </button>
               ))}
             </div>
           </div>
 
           <div className="glass-panel p-5 flex-1 relative overflow-hidden flex flex-col justify-end">
-            <Building2 className="w-32 h-32 absolute -right-6 -bottom-6 text-slate-800/50" />
+            <Building2 className="w-32 h-32 absolute -right-6 -bottom-6 text-muted-foreground" />
             <div className="relative z-10">
-              <h4 className="text-sm font-bold text-white mb-2">Poder de los Datos</h4>
-              <p className="text-xs text-slate-400 leading-relaxed mb-4">
+              <h4 className="text-sm font-bold text-foreground mb-2">Poder de los Datos</h4>
+              <p className="text-xs text-muted-foreground leading-relaxed mb-4">
                 El motor analiza la correlación entre variables geográficas, patrimoniales y vehiculares instantáneamente antes de responder.
               </p>
-              <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div className="w-3/4 h-full bg-gradient-to-r from-cyan-600 to-cyan-400 animate-pulse-slow" />
+              <div className="w-full h-1 bg-surface-muted rounded-full overflow-hidden">
+                <div className="w-3/4 h-full bg-gradient-to-r from-primary to-primary animate-pulse-slow" />
               </div>
             </div>
           </div>

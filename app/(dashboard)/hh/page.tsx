@@ -482,11 +482,11 @@ function Pill({
   tone?: 'cyan' | 'emerald' | 'amber' | 'rose' | 'slate'
 }) {
   const classes = {
-    cyan: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200',
-    emerald: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
-    amber: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-    rose: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
-    slate: 'border-slate-700 bg-slate-800/70 text-slate-300',
+    cyan: 'border-primary/30 bg-surface-muted text-primary-ink',
+    emerald: 'border-success/30 bg-success-bg text-success',
+    amber: 'border-warning/30 bg-warning-bg text-warning',
+    rose: 'border-danger/30 bg-danger-bg text-danger',
+    slate: 'border-border bg-surface-muted text-foreground',
   }[tone]
 
   return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${classes}`}>{children}</span>
@@ -506,20 +506,20 @@ function MetricCard({
   tone?: 'cyan' | 'emerald' | 'amber' | 'rose'
 }) {
   const toneClass = {
-    cyan: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300',
-    emerald: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
-    amber: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
-    rose: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
+    cyan: 'border-primary/25 bg-surface-muted text-primary-ink',
+    emerald: 'border-success/25 bg-success-bg text-success',
+    amber: 'border-warning/25 bg-warning-bg text-warning',
+    rose: 'border-danger/25 bg-danger-bg text-danger',
   }[tone]
 
   return (
     <div className={`card min-h-[132px] p-5 ${toneClass}`}>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
+        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
         <Icon className="h-4 w-4" />
       </div>
-      <div className="mt-3 text-2xl font-semibold text-white">{value}</div>
-      <p className="mt-2 text-xs leading-5 text-slate-400">{hint}</p>
+      <div className="mt-3 text-2xl font-semibold text-foreground">{value}</div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{hint}</p>
     </div>
   )
 }
@@ -535,12 +535,12 @@ function SectionTitle({
 }) {
   return (
     <div className="mb-4 flex items-start gap-3">
-      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
-        <Icon className="h-4 w-4 text-cyan-300" />
+      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-surface-muted">
+        <Icon className="h-4 w-4 text-primary-ink" />
       </div>
       <div>
-        <h2 className="text-base font-semibold text-white">{title}</h2>
-        <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
       </div>
     </div>
   )
@@ -548,14 +548,14 @@ function SectionTitle({
 
 function ProbabilityBar({ value, tone = 'cyan' }: { value: number; tone?: 'cyan' | 'emerald' | 'amber' | 'rose' }) {
   const color = {
-    cyan: 'bg-cyan-400',
-    emerald: 'bg-emerald-400',
-    amber: 'bg-amber-400',
-    rose: 'bg-rose-400',
+    cyan: 'bg-primary',
+    emerald: 'bg-success',
+    amber: 'bg-warning',
+    rose: 'bg-danger',
   }[tone]
 
   return (
-    <div className="mt-1.5 h-1.5 w-24 overflow-hidden rounded-full bg-slate-800">
+    <div className="mt-1.5 h-1.5 w-24 overflow-hidden rounded-full bg-surface-muted">
       <div className={`${color} h-full rounded-full`} style={{ width: `${Math.max(3, Math.min(100, value))}%` }} />
     </div>
   )
@@ -580,8 +580,8 @@ function StatTable({ title, rows }: { title: string; rows: EntityStat[] }) {
             {rows.slice(0, 5).map(row => (
               <tr key={row.key}>
                 <td>
-                  <div className="font-medium text-white">{row.label}</div>
-                  {row.secondary ? <div className="text-xs text-slate-500">{row.secondary}</div> : null}
+                  <div className="font-medium text-foreground">{row.label}</div>
+                  {row.secondary ? <div className="text-xs text-muted-foreground">{row.secondary}</div> : null}
                 </td>
                 <td>{formatNumber(row.starts)}</td>
                 <td>{formatPct(row.winRate, 1)}</td>
@@ -591,7 +591,7 @@ function StatTable({ title, rows }: { title: string; rows: EntityStat[] }) {
             ))}
             {!rows.length ? (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-slate-500">Sin historico suficiente.</td>
+                <td colSpan={5} className="py-8 text-center text-muted-foreground">Sin historico suficiente.</td>
               </tr>
             ) : null}
           </tbody>
@@ -647,7 +647,7 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
       />
 
       <div className="space-y-6 p-6" data-testid="hh-dashboard">
-        <section className="overflow-hidden rounded-xl border border-slate-800 bg-[#111a31]">
+        <section className="overflow-hidden rounded-xl border border-border bg-surface">
           <div className="grid gap-0 xl:grid-cols-[1fr_360px]">
             <div className="p-6">
               <div className="flex flex-wrap gap-2">
@@ -655,40 +655,40 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
                 <Pill tone={confidence === 'Operativo' ? 'emerald' : 'amber'}>Confianza {confidence}</Pill>
                 <Pill tone="slate">Modelo {data.latestRun?.model_version ?? 'pendiente'}</Pill>
               </div>
-              <h1 className="mt-5 max-w-4xl text-3xl font-semibold leading-tight text-white">
+              <h1 className="mt-5 max-w-4xl text-3xl font-semibold leading-tight text-foreground">
                 Dashboard HH con carreras y proyecciones cargadas
               </h1>
-              <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-300">
+              <p className="mt-4 max-w-3xl text-sm leading-6 text-foreground">
                 La vista ahora lee Supabase en vivo: historico, calendario semanal, inscritos parseados,
                 probabilidades base y rankings. Cuando un programa aun no esta publicado queda marcado
                 como pendiente, sin inventar inscritos.
               </p>
             </div>
 
-            <div className="border-t border-slate-800 bg-slate-950/40 p-6 xl:border-l xl:border-t-0">
-              <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                <ShieldAlert className="h-4 w-4 text-amber-300" />
+            <div className="border-t border-border bg-background p-6 xl:border-l xl:border-t-0">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldAlert className="h-4 w-4 text-warning" />
                 Control de calidad
               </div>
-              <p className="mt-3 text-sm leading-6 text-slate-300">
+              <p className="mt-3 text-sm leading-6 text-foreground">
                 Las probabilidades son escenarios estadisticos, no certeza de apuesta. El motor queda listo
                 para backtest y calibracion; un 90% defendible exige validacion fuera de muestra.
               </p>
-              <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
-                <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Ultima corrida</div>
-                <div className="mt-1 text-sm font-medium text-white">{formatDateTime(data.latestRun?.completed_at ?? data.latestRun?.created_at)}</div>
+              <div className="mt-4 rounded-lg border border-border bg-background p-3">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Ultima corrida</div>
+                <div className="mt-1 text-sm font-medium text-foreground">{formatDateTime(data.latestRun?.completed_at ?? data.latestRun?.created_at)}</div>
               </div>
             </div>
           </div>
         </section>
 
         {data.errors.length ? (
-          <section className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">
+          <section className="rounded-xl border border-danger/30 bg-danger-bg p-4 text-sm text-danger">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
               <div>
                 <div className="font-semibold">No pude cargar todo el tablero HH.</div>
-                <div className="mt-1 text-rose-200/80">{data.errors.join(' | ')}</div>
+                <div className="mt-1 text-danger">{data.errors.join(' | ')}</div>
               </div>
             </div>
           </section>
@@ -742,15 +742,15 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
               {data.meetings.map(meeting => {
                 const entries = data.predictions.filter(row => row.race_date === meeting.meeting_date && row.hippodrome === meeting.hippodrome).length
                 return (
-                  <div key={meeting.id} className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
+                  <div key={meeting.id} className="rounded-lg border border-border bg-background p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium text-white">{formatLocalDate(meeting.meeting_date)}</span>
+                          <span className="font-medium text-foreground">{formatLocalDate(meeting.meeting_date)}</span>
                           <Pill tone="slate">{meeting.scheduled_time?.slice(0, 5) ?? '--:--'}</Pill>
                         </div>
-                        <div className="mt-2 text-sm text-slate-300">{meeting.hippodrome}</div>
-                        <div className="mt-1 text-xs text-slate-500">{meeting.description ?? 'Sin descripcion'}</div>
+                        <div className="mt-2 text-sm text-foreground">{meeting.hippodrome}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{meeting.description ?? 'Sin descripcion'}</div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Pill tone={meeting.program_status === 'available' ? 'emerald' : 'amber'}>
@@ -768,7 +768,7 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
                   </div>
                 )
               })}
-              {!data.meetings.length ? <div className="py-8 text-center text-slate-500">No hay calendario cargado.</div> : null}
+              {!data.meetings.length ? <div className="py-8 text-center text-muted-foreground">No hay calendario cargado.</div> : null}
             </div>
           </div>
 
@@ -779,24 +779,24 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
               subtitle="Carreras con mayor claridad versus carreras con incertidumbre alta."
             />
             <div className="grid gap-3 lg:grid-cols-2">
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4">
-                <div className="text-sm font-semibold text-emerald-100">Mejor senal estadistica</div>
+              <div className="rounded-lg border border-success/20 bg-success-bg p-4">
+                <div className="text-sm font-semibold text-success">Mejor senal estadistica</div>
                 <div className="mt-3 space-y-3">
                   {raceSignals.slice(0, 3).map(signal => (
                     <div key={signal.key} className="text-sm">
-                      <div className="font-medium text-white">{formatLocalDate(signal.date)} C{signal.raceNumber} - {signal.topHorse}</div>
-                      <div className="mt-1 text-xs text-emerald-100/80">{signal.hippodrome} | P(gana) {signal.topWin.toFixed(1)}% | gap {signal.gap.toFixed(1)} pts</div>
+                      <div className="font-medium text-foreground">{formatLocalDate(signal.date)} C{signal.raceNumber} - {signal.topHorse}</div>
+                      <div className="mt-1 text-xs text-success">{signal.hippodrome} | P(gana) {signal.topWin.toFixed(1)}% | gap {signal.gap.toFixed(1)} pts</div>
                     </div>
                   ))}
                 </div>
               </div>
-              <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-4">
-                <div className="text-sm font-semibold text-rose-100">Mas riesgosas</div>
+              <div className="rounded-lg border border-danger/20 bg-danger-bg p-4">
+                <div className="text-sm font-semibold text-danger">Mas riesgosas</div>
                 <div className="mt-3 space-y-3">
                   {[...raceSignals].sort((a, b) => a.clarity - b.clarity).slice(0, 3).map(signal => (
                     <div key={signal.key} className="text-sm">
-                      <div className="font-medium text-white">{formatLocalDate(signal.date)} C{signal.raceNumber} - {signal.topHorse}</div>
-                      <div className="mt-1 text-xs text-rose-100/80">{signal.hippodrome} | participantes {signal.fieldSize} | alto riesgo {signal.highRiskCount}</div>
+                      <div className="font-medium text-foreground">{formatLocalDate(signal.date)} C{signal.raceNumber} - {signal.topHorse}</div>
+                      <div className="mt-1 text-xs text-danger">{signal.hippodrome} | participantes {signal.fieldSize} | alto riesgo {signal.highRiskCount}</div>
                     </div>
                   ))}
                 </div>
@@ -810,13 +810,13 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
             <SectionTitle icon={Trophy} title="Top 5 Ganar" subtitle="Ranking de probabilidad estimada de victoria en la ultima corrida." />
             <div className="space-y-3">
               {topWin.map(row => (
-                <div key={row.id} className="flex items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div key={row.id} className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background p-3">
                   <div>
-                    <div className="font-medium text-white">#{row.saddle_number ?? '--'} {row.horse}</div>
-                    <div className="mt-1 text-xs text-slate-500">{formatLocalDate(row.race_date)} | {row.hippodrome} | Carrera {row.race_number}</div>
+                    <div className="font-medium text-foreground">#{row.saddle_number ?? '--'} {row.horse}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatLocalDate(row.race_date)} | {row.hippodrome} | Carrera {row.race_number}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-mono text-sm text-cyan-300">{formatPct(row.win_probability)}</div>
+                    <div className="font-mono text-sm text-primary-ink">{formatPct(row.win_probability)}</div>
                     <ProbabilityBar value={probabilityPct(row.win_probability)} />
                   </div>
                 </div>
@@ -828,13 +828,13 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
             <SectionTitle icon={CheckCircle2} title="Top 5 Podio" subtitle="Escenario conservador: mayor probabilidad de entrar 1-2-3." />
             <div className="space-y-3">
               {topPodium.map(row => (
-                <div key={row.id} className="flex items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div key={row.id} className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background p-3">
                   <div>
-                    <div className="font-medium text-white">#{row.saddle_number ?? '--'} {row.horse}</div>
-                    <div className="mt-1 text-xs text-slate-500">{formatLocalDate(row.race_date)} | {row.hippodrome} | Carrera {row.race_number}</div>
+                    <div className="font-medium text-foreground">#{row.saddle_number ?? '--'} {row.horse}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatLocalDate(row.race_date)} | {row.hippodrome} | Carrera {row.race_number}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-mono text-sm text-emerald-300">{formatPct(row.podium_probability)}</div>
+                    <div className="font-mono text-sm text-success">{formatPct(row.podium_probability)}</div>
                     <ProbabilityBar value={probabilityPct(row.podium_probability)} tone="emerald" />
                   </div>
                 </div>
@@ -849,7 +849,7 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
             title="Proyeccion Por Carrera"
             subtitle={`${formatNumber(data.filteredPredictions.length)} inscritos filtrados desde la corrida vigente.`}
           />
-          <div className="overflow-x-auto rounded-lg border border-slate-800">
+          <div className="overflow-x-auto rounded-lg border border-border">
             <table className="table-base">
               <thead>
                 <tr>
@@ -876,26 +876,26 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
                       <td>{formatLocalDate(row.race_date)}</td>
                       <td className="min-w-[180px]">{row.hippodrome}</td>
                       <td>
-                        <div className="font-mono text-white">C{row.race_number}</div>
-                        <div className="text-xs text-slate-500">{entry?.scheduled_time ?? '--:--'}</div>
+                        <div className="font-mono text-foreground">C{row.race_number}</div>
+                        <div className="text-xs text-muted-foreground">{entry?.scheduled_time ?? '--:--'}</div>
                       </td>
                       <td className="min-w-[180px]">
-                        <div className="font-medium text-white">#{row.saddle_number ?? '--'} {row.horse}</div>
-                        <div className="text-xs text-slate-500">Ultimas: {recent.length ? recent.join('-') : 'sin dato'}</div>
+                        <div className="font-medium text-foreground">#{row.saddle_number ?? '--'} {row.horse}</div>
+                        <div className="text-xs text-muted-foreground">Ultimas: {recent.length ? recent.join('-') : 'sin dato'}</div>
                       </td>
                       <td>{row.jockey ?? 'sin dato'}</td>
                       <td>{row.trainer ?? 'sin dato'}</td>
                       <td>
-                        <div className="font-mono text-cyan-300">{formatPct(row.win_probability)}</div>
+                        <div className="font-mono text-primary-ink">{formatPct(row.win_probability)}</div>
                         <ProbabilityBar value={probabilityPct(row.win_probability)} />
                       </td>
                       <td>
-                        <div className="font-mono text-emerald-300">{formatPct(row.podium_probability)}</div>
+                        <div className="font-mono text-success">{formatPct(row.podium_probability)}</div>
                         <ProbabilityBar value={probabilityPct(row.podium_probability)} tone="emerald" />
                       </td>
                       <td className="font-mono">{formatScore(row.score)}</td>
                       <td><Pill tone={riskTone(row.risk)}>{row.risk}</Pill></td>
-                      <td className="min-w-[260px] text-xs leading-5 text-slate-400">
+                      <td className="min-w-[260px] text-xs leading-5 text-muted-foreground">
                         OPC {formatScore(row.signal?.option as number | string | null)} | forma {formatScore(row.signal?.recent as number | string | null)} | mercado {formatScore(row.signal?.market as number | string | null)}
                         {dividend ? ` | ult. div ${dividend}` : ''}
                       </td>
@@ -904,7 +904,7 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
                 })}
                 {!data.filteredPredictions.length ? (
                   <tr>
-                    <td colSpan={11} className="py-10 text-center text-slate-500">
+                    <td colSpan={11} className="py-10 text-center text-muted-foreground">
                       No hay proyecciones para los filtros seleccionados.
                     </td>
                   </tr>
@@ -926,16 +926,16 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
             <SectionTitle icon={Database} title="Fuentes HH" subtitle="Adapters y fuentes registradas en Supabase." />
             <div className="space-y-3">
               {data.sources.map(source => (
-                <div key={source.id} className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
+                <div key={source.id} className="rounded-lg border border-border bg-background p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <div className="font-medium text-white">{source.name}</div>
-                      <div className="mt-1 text-xs text-slate-500">{source.notes ?? 'Sin notas'}</div>
+                      <div className="font-medium text-foreground">{source.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{source.notes ?? 'Sin notas'}</div>
                     </div>
                     <Pill tone={source.adapter_status.includes('pending') ? 'amber' : 'cyan'}>{source.adapter_status}</Pill>
                   </div>
                   {source.base_url ? (
-                    <a href={source.base_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200">
+                    <a href={source.base_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-primary-ink hover:text-primary-ink">
                       Abrir fuente <ExternalLink className="h-3 w-3" />
                     </a>
                   ) : null}
@@ -947,25 +947,25 @@ export default async function HHPage({ searchParams }: { searchParams?: Promise<
           <div className="card p-5">
             <SectionTitle icon={FileText} title="Operacion" subtitle="Comandos que alimentan este tablero en produccion." />
             <div className="space-y-3">
-              <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                  <Clock className="h-4 w-4 text-cyan-300" />
+              <div className="rounded-lg border border-border bg-background p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Clock className="h-4 w-4 text-primary-ink" />
                   Historico anual
                 </div>
-                <code className="mt-3 block rounded-md bg-black/30 p-3 text-xs text-slate-300">
+                <code className="mt-3 block rounded-md bg-black/30 p-3 text-xs text-foreground">
                   npm run ops:hh:pipeline -- --from=2025-05-05 --to=2026-05-03 --target-from=2026-05-04 --target-to=2026-05-10
                 </code>
               </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                  <Activity className="h-4 w-4 text-emerald-300" />
+              <div className="rounded-lg border border-border bg-background p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Activity className="h-4 w-4 text-success" />
                   Semana objetivo
                 </div>
-                <code className="mt-3 block rounded-md bg-black/30 p-3 text-xs text-slate-300">
+                <code className="mt-3 block rounded-md bg-black/30 p-3 text-xs text-foreground">
                   npm run ops:hh:week -- --from=2026-05-04 --to=2026-05-10 --year=2026 --month=5
                 </code>
               </div>
-              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+              <div className="rounded-lg border border-warning/20 bg-warning-bg p-4 text-sm leading-6 text-warning">
                 Programas pendientes se mantienen como pendientes hasta que Teletrak o el hipodromo publique PDF oficial.
               </div>
             </div>

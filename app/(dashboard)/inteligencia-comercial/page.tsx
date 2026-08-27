@@ -34,17 +34,17 @@ function StatCard({
   accent?: 'cyan' | 'emerald' | 'amber' | 'rose'
 }) {
   const accentClasses = {
-    cyan: 'from-cyan-500/15 border-cyan-500/20 text-cyan-300',
-    emerald: 'from-emerald-500/15 border-emerald-500/20 text-emerald-300',
-    amber: 'from-amber-500/15 border-amber-500/20 text-amber-300',
-    rose: 'from-rose-500/15 border-rose-500/20 text-rose-300',
+    cyan: 'from-surface-muted border-primary/20 text-primary-ink',
+    emerald: 'from-surface-muted border-success/20 text-success',
+    amber: 'from-surface-muted border-warning/20 text-warning',
+    rose: 'from-surface-muted border-danger/20 text-danger',
   }[accent]
 
   return (
     <div className={`card overflow-hidden border bg-gradient-to-br to-transparent p-5 ${accentClasses}`}>
-      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <div className="mt-3 text-3xl font-semibold text-white">{value}</div>
-      <p className="mt-2 text-xs text-slate-400">{hint}</p>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <div className="mt-3 text-3xl font-semibold text-foreground">{value}</div>
+      <p className="mt-2 text-xs text-muted-foreground">{hint}</p>
     </div>
   )
 }
@@ -82,8 +82,8 @@ function DeltaChip({
   return (
     <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
       positive
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-        : 'border-rose-500/20 bg-rose-500/10 text-rose-300'
+        ? 'border-success/20 bg-success-bg text-success'
+        : 'border-danger/20 bg-danger-bg text-danger'
     }`}>
       {positive ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
       <span>{label}: {positive ? '+' : ''}{delta.toFixed(1)} pts vs baseline</span>
@@ -93,10 +93,10 @@ function DeltaChip({
 
 function ProgressRail({ value, tone = 'cyan' }: { value: number; tone?: 'cyan' | 'emerald' | 'amber' | 'rose' }) {
   const toneClass = {
-    cyan: 'bg-cyan-400',
-    emerald: 'bg-emerald-400',
-    amber: 'bg-amber-400',
-    rose: 'bg-rose-400',
+    cyan: 'bg-primary',
+    emerald: 'bg-success',
+    amber: 'bg-warning',
+    rose: 'bg-danger',
   }[tone]
 
   return (
@@ -108,10 +108,10 @@ function ProgressRail({ value, tone = 'cyan' }: { value: number; tone?: 'cyan' |
 
 function PropensityBadge({ color }: { color: 'green' | 'yellow' | 'red' | 'sin_score' }) {
   const classes = {
-    green: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
-    yellow: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-    red: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
-    sin_score: 'border-slate-700 bg-slate-800/60 text-slate-300',
+    green: 'border-success/30 bg-success-bg text-success',
+    yellow: 'border-warning/30 bg-warning-bg text-warning',
+    red: 'border-danger/30 bg-danger-bg text-danger',
+    sin_score: 'border-border bg-surface-muted text-foreground',
   }[color]
 
   const label = {
@@ -138,10 +138,10 @@ function CampaignCard({ campaign }: { campaign: CampaignHealthCard }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-white">{campaign.campaign_name}</h3>
+            <h3 className="text-base font-semibold text-foreground">{campaign.campaign_name}</h3>
             <SeverityBadge severity={campaign.severity} />
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             {campaign.underperformance_hours >= 3
               ? 'La regla crítica de 3 horas ya fue activada.'
               : 'Monitoreo intradía con baseline histórico por campaña y hora.'}
@@ -149,28 +149,28 @@ function CampaignCard({ campaign }: { campaign: CampaignHealthCard }) {
         </div>
 
         <div className="text-right">
-          <div className="text-2xl font-semibold text-white">{campaign.health_score}</div>
-          <div className="text-xs text-slate-500">Health score</div>
+          <div className="text-2xl font-semibold text-foreground">{campaign.health_score}</div>
+          <div className="text-xs text-muted-foreground">Health score</div>
         </div>
       </div>
 
       <ProgressRail value={campaign.health_score} tone={tone} />
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3">
-          <div className="text-[11px] uppercase tracking-wider text-slate-500">Contactabilidad 3h</div>
-          <div className="mt-1 text-lg font-semibold text-white">{formatPercentage(campaign.current_contact_rate)}</div>
-          <div className="text-xs text-slate-500">Esperado {formatPercentage(campaign.baseline_contact_rate)}</div>
+        <div className="rounded-2xl border border-border bg-background p-3">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Contactabilidad 3h</div>
+          <div className="mt-1 text-lg font-semibold text-foreground">{formatPercentage(campaign.current_contact_rate)}</div>
+          <div className="text-xs text-muted-foreground">Esperado {formatPercentage(campaign.baseline_contact_rate)}</div>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3">
-          <div className="text-[11px] uppercase tracking-wider text-slate-500">Conversión 3h</div>
-          <div className="mt-1 text-lg font-semibold text-white">{formatPercentage(campaign.current_conversion_rate)}</div>
-          <div className="text-xs text-slate-500">Esperado {formatPercentage(campaign.baseline_conversion_rate)}</div>
+        <div className="rounded-2xl border border-border bg-background p-3">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Conversión 3h</div>
+          <div className="mt-1 text-lg font-semibold text-foreground">{formatPercentage(campaign.current_conversion_rate)}</div>
+          <div className="text-xs text-muted-foreground">Esperado {formatPercentage(campaign.baseline_conversion_rate)}</div>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3">
-          <div className="text-[11px] uppercase tracking-wider text-slate-500">Fatiga</div>
-          <div className="mt-1 text-lg font-semibold text-white">{campaign.fatigue_score}</div>
-          <div className="text-xs text-slate-500">{formatNumber(campaign.attempts_3h)} intentos en 3h</div>
+        <div className="rounded-2xl border border-border bg-background p-3">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Fatiga</div>
+          <div className="mt-1 text-lg font-semibold text-foreground">{campaign.fatigue_score}</div>
+          <div className="text-xs text-muted-foreground">{formatNumber(campaign.attempts_3h)} intentos en 3h</div>
         </div>
       </div>
 
@@ -180,29 +180,29 @@ function CampaignCard({ campaign }: { campaign: CampaignHealthCard }) {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Causas probables</div>
-          <div className="space-y-2 text-sm text-slate-300">
+        <div className="rounded-2xl border border-border bg-background p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Causas probables</div>
+          <div className="space-y-2 text-sm text-foreground">
             {campaign.probable_causes.map(cause => (
               <div key={cause} className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" />
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" />
                 <span>{cause}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Ajuste táctico</div>
-          <div className="text-sm font-medium text-white">{campaign.recommended_action}</div>
-          <div className="mt-3 space-y-2 text-xs text-slate-400">
-            <div>Canal dominante: <span className="text-slate-200">{campaign.top_channel ?? 'Sin señal'}</span></div>
-            <div>Ventana sugerida: <span className="text-slate-200">{campaign.best_next_window}</span></div>
-            <div>Leads únicos 3h: <span className="text-slate-200">{formatNumber(campaign.unique_leads_3h)}</span></div>
+        <div className="rounded-2xl border border-border bg-background p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Ajuste táctico</div>
+          <div className="text-sm font-medium text-foreground">{campaign.recommended_action}</div>
+          <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+            <div>Canal dominante: <span className="text-foreground">{campaign.top_channel ?? 'Sin señal'}</span></div>
+            <div>Ventana sugerida: <span className="text-foreground">{campaign.best_next_window}</span></div>
+            <div>Leads únicos 3h: <span className="text-foreground">{formatNumber(campaign.unique_leads_3h)}</span></div>
           </div>
-          <div className="mt-3 space-y-2 text-xs text-slate-300">
+          <div className="mt-3 space-y-2 text-xs text-foreground">
             {campaign.recommended_adjustments.slice(0, 2).map(item => (
-              <div key={item} className="rounded-xl border border-cyan-500/10 bg-cyan-500/5 px-3 py-2">
+              <div key={item} className="rounded-xl border border-primary/10 bg-surface-muted px-3 py-2">
                 {item}
               </div>
             ))}
@@ -217,21 +217,21 @@ function RecommendationList({ items }: { items: TacticalRecommendation[] }) {
   return (
     <div className="card p-5">
       <div className="mb-4 flex items-center gap-2">
-        <Zap className="h-4 w-4 text-amber-400" />
-        <h3 className="text-sm font-semibold text-white">Acciones del motor</h3>
+        <Zap className="h-4 w-4 text-warning" />
+        <h3 className="text-sm font-semibold text-foreground">Acciones del motor</h3>
       </div>
       <div className="space-y-3">
         {items.map(item => (
-          <div key={`${item.scope}-${item.title}`} className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+          <div key={`${item.scope}-${item.title}`} className="rounded-2xl border border-border bg-background p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-white">{item.title}</div>
+              <div className="text-sm font-medium text-foreground">{item.title}</div>
               <span className={item.priority === 'high' ? 'badge-danger' : item.priority === 'medium' ? 'badge-warning' : 'badge-neutral'}>
                 {item.priority}
               </span>
             </div>
-            <p className="mt-2 text-xs text-slate-400">{item.rationale}</p>
-            <p className="mt-3 text-sm text-slate-200">{item.action}</p>
-            <p className="mt-2 text-xs text-cyan-300">{item.impact}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{item.rationale}</p>
+            <p className="mt-3 text-sm text-foreground">{item.action}</p>
+            <p className="mt-2 text-xs text-primary-ink">{item.impact}</p>
           </div>
         ))}
       </div>
@@ -243,28 +243,28 @@ function WindowList({ windows }: { windows: WindowPerformance[] }) {
   return (
     <div className="card p-5">
       <div className="mb-4 flex items-center gap-2">
-        <Clock3 className="h-4 w-4 text-cyan-400" />
-        <h3 className="text-sm font-semibold text-white">Ventanas óptimas</h3>
+        <Clock3 className="h-4 w-4 text-primary-ink" />
+        <h3 className="text-sm font-semibold text-foreground">Ventanas óptimas</h3>
       </div>
       <div className="space-y-3">
         {windows.map(window => (
-          <div key={window.label} className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+          <div key={window.label} className="rounded-2xl border border-border bg-background p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">{window.label}</div>
-                <div className="text-xs text-slate-500">{formatNumber(window.attempts)} intentos históricos útiles</div>
+                <div className="text-sm font-semibold text-foreground">{window.label}</div>
+                <div className="text-xs text-muted-foreground">{formatNumber(window.attempts)} intentos históricos útiles</div>
               </div>
               <div className="text-right">
-                <div className="text-lg font-semibold text-white">{window.score}</div>
-                <div className="text-xs text-slate-500">window score</div>
+                <div className="text-lg font-semibold text-foreground">{window.score}</div>
+                <div className="text-xs text-muted-foreground">window score</div>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-300">
+            <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-foreground">
               <div>Contacto {formatPercentage(window.contact_rate)}</div>
               <div>Venta {formatPercentage(window.conversion_rate)}</div>
               <div>Interés {formatPercentage(window.interest_rate)}</div>
             </div>
-            <p className="mt-3 text-xs text-slate-400">{window.recommendation}</p>
+            <p className="mt-3 text-xs text-muted-foreground">{window.recommendation}</p>
           </div>
         ))}
       </div>
@@ -287,28 +287,28 @@ function SegmentColumn({
     <div className="card p-5">
       <div className="mb-4 flex items-center gap-2">
         {icon}
-        <h3 className="text-sm font-semibold text-white">{title}</h3>
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
 
       <div className="space-y-3">
         {items.map(item => (
-          <div key={`${item.segment_type}-${item.segment_label}`} className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+          <div key={`${item.segment_type}-${item.segment_label}`} className="rounded-2xl border border-border bg-background p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">{item.segment_label}</div>
-                <div className="text-xs text-slate-500">{item.segment_type} · {formatNumber(item.volume)} intentos</div>
+                <div className="text-sm font-semibold text-foreground">{item.segment_label}</div>
+                <div className="text-xs text-muted-foreground">{item.segment_type} · {formatNumber(item.volume)} intentos</div>
               </div>
-              <div className={`text-sm font-semibold ${tone === 'emerald' ? 'text-emerald-300' : 'text-rose-300'}`}>
+              <div className={`text-sm font-semibold ${tone === 'emerald' ? 'text-success' : 'text-danger'}`}>
                 {item.health_delta > 0 ? '+' : ''}{item.health_delta}
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-foreground">
               <div>Contacto {formatPercentage(item.current_contact_rate)}</div>
               <div>Base {formatPercentage(item.baseline_contact_rate)}</div>
               <div>Conversión {formatPercentage(item.current_conversion_rate)}</div>
               <div>Base {formatPercentage(item.baseline_conversion_rate)}</div>
             </div>
-            <p className="mt-3 text-xs text-slate-400">{item.recommendation}</p>
+            <p className="mt-3 text-xs text-muted-foreground">{item.recommendation}</p>
           </div>
         ))}
       </div>
@@ -320,8 +320,8 @@ function LeadTable({ leads }: { leads: LeadActionItem[] }) {
   return (
     <div className="card p-5">
       <div className="mb-4 flex items-center gap-2">
-        <Target className="h-4 w-4 text-cyan-400" />
-        <h3 className="text-sm font-semibold text-white">Priorización dinámica</h3>
+        <Target className="h-4 w-4 text-primary-ink" />
+        <h3 className="text-sm font-semibold text-foreground">Priorización dinámica</h3>
       </div>
 
       <div className="overflow-x-auto">
@@ -343,22 +343,22 @@ function LeadTable({ leads }: { leads: LeadActionItem[] }) {
             {leads.map(lead => (
               <tr key={lead.rutid}>
                 <td>
-                  <div className="font-medium text-white">{lead.nombre_completo ?? lead.rutid}</div>
-                  <div className="text-xs text-slate-500">{lead.rutid}</div>
-                  <div className="text-xs text-slate-500">{lead.region ?? 'Sin región'} · {lead.comuna ?? 'Sin comuna'}</div>
+                  <div className="font-medium text-foreground">{lead.nombre_completo ?? lead.rutid}</div>
+                  <div className="text-xs text-muted-foreground">{lead.rutid}</div>
+                  <div className="text-xs text-muted-foreground">{lead.region ?? 'Sin región'} · {lead.comuna ?? 'Sin comuna'}</div>
                 </td>
                 <td>{lead.campaign_name ?? 'Asignación dinámica'}</td>
-                <td className="font-semibold text-cyan-300">{lead.dynamic_priority_score}</td>
+                <td className="font-semibold text-primary-ink">{lead.dynamic_priority_score}</td>
                 <td>{lead.contact_probability}</td>
                 <td>{lead.conversion_probability}</td>
                 <td>{lead.fatigue_score}</td>
                 <td>{lead.optimal_window}</td>
                 <td className="capitalize">{lead.recommended_channel}</td>
                 <td>
-                  <div className="text-sm text-slate-200">{lead.next_best_action}</div>
+                  <div className="text-sm text-foreground">{lead.next_best_action}</div>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {lead.reason_tags.map(tag => (
-                      <span key={tag} className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                      <span key={tag} className="rounded-full bg-surface-muted px-2 py-0.5 text-[10px] text-muted-foreground">
                         {tag}
                       </span>
                     ))}
@@ -380,8 +380,8 @@ async function UnifiedUntouchedUniverse() {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2">
-          <Layers3 className="h-4 w-4 text-emerald-400" />
-          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Base unificada sin contacto y no tocada</h2>
+          <Layers3 className="h-4 w-4 text-success" />
+          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">Base unificada sin contacto y no tocada</h2>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
@@ -429,29 +429,29 @@ async function UnifiedUntouchedUniverse() {
           />
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400">
+        <div className="rounded-2xl border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
           Bases Dicom desde {summary.bases_from}: {formatNumber(summary.crm_base_rows)} filas revisadas. Se excluyeron {formatNumber(summary.excluded_contacted_rows)} filas contactadas, {formatNumber(summary.excluded_bad_number_rows)} por número malo y {formatNumber(summary.excluded_exception_rows)} por excepción.
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
           <div className="card p-5">
             <div className="mb-4 flex items-center gap-2">
-              <Target className="h-4 w-4 text-cyan-400" />
-              <h3 className="text-sm font-semibold text-white">Resultado por semáforo</h3>
+              <Target className="h-4 w-4 text-primary-ink" />
+              <h3 className="text-sm font-semibold text-foreground">Resultado por semáforo</h3>
             </div>
             <div className="space-y-3">
               {summary.by_color.map(bucket => (
-                <div key={bucket.color} className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <div key={bucket.color} className="rounded-2xl border border-border bg-background p-4">
                   <div className="flex items-center justify-between gap-3">
                     <PropensityBadge color={bucket.color} />
-                    <div className="text-lg font-semibold text-white">{formatNumber(bucket.total)}</div>
+                    <div className="text-lg font-semibold text-foreground">{formatNumber(bucket.total)}</div>
                   </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-300">
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-foreground">
                     <div>Score {bucket.avg_lead_score}</div>
                     <div>Contacto {bucket.avg_contact_probability}</div>
                     <div>Compra {bucket.avg_purchase_probability}</div>
                   </div>
-                  <div className="mt-2 text-xs text-slate-500">
+                  <div className="mt-2 text-xs text-muted-foreground">
                     No tocados: {formatNumber(bucket.untouched)} · Recorridos sin contacto: {formatNumber(bucket.recorridos_sin_contacto)}
                   </div>
                 </div>
@@ -461,8 +461,8 @@ async function UnifiedUntouchedUniverse() {
 
           <div className="card p-5">
             <div className="mb-4 flex items-center gap-2">
-              <Activity className="h-4 w-4 text-amber-400" />
-              <h3 className="text-sm font-semibold text-white">Desglose por base origen</h3>
+              <Activity className="h-4 w-4 text-warning" />
+              <h3 className="text-sm font-semibold text-foreground">Desglose por base origen</h3>
             </div>
             <div className="overflow-x-auto">
               <table className="table-base">
@@ -481,11 +481,11 @@ async function UnifiedUntouchedUniverse() {
                 <tbody>
                   {summary.by_base.slice(0, 12).map(row => (
                     <tr key={row.base_name}>
-                      <td className="font-medium text-white">{row.base_name}</td>
+                      <td className="font-medium text-foreground">{row.base_name}</td>
                       <td>{formatNumber(row.total)}</td>
-                      <td className="text-emerald-300">{formatNumber(row.green)}</td>
-                      <td className="text-amber-300">{formatNumber(row.yellow)}</td>
-                      <td className="text-rose-300">{formatNumber(row.red)}</td>
+                      <td className="text-success">{formatNumber(row.green)}</td>
+                      <td className="text-warning">{formatNumber(row.yellow)}</td>
+                      <td className="text-danger">{formatNumber(row.red)}</td>
                       <td>{formatNumber(row.sin_score)}</td>
                       <td>{formatNumber(row.untouched)}</td>
                       <td>{formatNumber(row.recorridos_sin_contacto)}</td>
@@ -494,7 +494,7 @@ async function UnifiedUntouchedUniverse() {
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted-foreground">
               Generado: {formatDatetime(summary.generated_at)}. El cruce deduplica por RUT y excluye contactos efectivos previos.
             </p>
           </div>
@@ -504,8 +504,8 @@ async function UnifiedUntouchedUniverse() {
   } catch (error) {
     return (
       <div className="card p-5">
-        <div className="text-sm font-semibold text-white">Base unificada sin contacto y no tocada</div>
-        <p className="mt-2 text-sm text-slate-400">
+        <div className="text-sm font-semibold text-foreground">Base unificada sin contacto y no tocada</div>
+        <p className="mt-2 text-sm text-muted-foreground">
           {error instanceof Error ? error.message : 'No fue posible calcular el universo unificado.'}
         </p>
       </div>
@@ -527,17 +527,17 @@ export default async function InteligenciaComercialPage() {
       />
 
       <div className="space-y-6 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-cyan-500/10 bg-gradient-to-r from-cyan-500/10 via-slate-950/20 to-transparent px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-primary/10 bg-gradient-to-r from-surface-muted via-surface to-transparent px-5 py-4">
           <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-white">
-              <BrainCircuit className="h-4 w-4 text-cyan-400" />
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <BrainCircuit className="h-4 w-4 text-primary-ink" />
               Loop unificado de inteligencia comercial
             </div>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-muted-foreground">
               Este proyecto scorea, aprende, detecta deterioro temprano y le entrega al CRM decisiones livianas para ejecutar.
             </p>
           </div>
-          <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span>Último sync: {overview.last_feedback_sync ? formatDatetime(overview.last_feedback_sync) : 'sin sync'}</span>
             <span>Última señal: {brain.snapshot.last_feedback_at ? formatDatetime(brain.snapshot.last_feedback_at) : 'sin feedback'}</span>
             <span>Generado: {formatDatetime(brain.generated_at)}</span>
@@ -578,26 +578,26 @@ export default async function InteligenciaComercialPage() {
         </div>
 
         {brain.ai_executive_summary ? (
-          <div className="card overflow-hidden border border-emerald-500/10 bg-gradient-to-r from-emerald-500/10 via-slate-950/10 to-transparent p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Sparkles className="h-4 w-4 text-emerald-400" />
+          <div className="card overflow-hidden border border-success/10 bg-gradient-to-r from-surface-muted via-surface to-transparent p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Sparkles className="h-4 w-4 text-success" />
               Lectura ejecutiva de Inception
             </div>
-            <p className="mt-3 max-w-5xl text-sm leading-6 text-slate-200">{brain.ai_executive_summary}</p>
+            <p className="mt-3 max-w-5xl text-sm leading-6 text-foreground">{brain.ai_executive_summary}</p>
           </div>
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <Gauge className="h-4 w-4 text-cyan-400" />
-              <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Campañas bajo control táctico</h2>
+              <Gauge className="h-4 w-4 text-primary-ink" />
+              <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">Campañas bajo control táctico</h2>
             </div>
 
             {brain.campaigns.length > 0 ? brain.campaigns.map(campaign => (
               <CampaignCard key={campaign.campaign_name} campaign={campaign} />
             )) : (
-              <div className="card p-6 text-sm text-slate-400">
+              <div className="card p-6 text-sm text-muted-foreground">
                 Aún no hay campañas activas suficientes para construir vigilancia táctica.
               </div>
             )}
@@ -612,13 +612,13 @@ export default async function InteligenciaComercialPage() {
         <div className="grid gap-4 xl:grid-cols-2">
           <SegmentColumn
             title="Segmentos fuertes"
-            icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
+            icon={<TrendingUp className="h-4 w-4 text-success" />}
             items={brain.strong_segments}
             tone="emerald"
           />
           <SegmentColumn
             title="Segmentos débiles"
-            icon={<TrendingDown className="h-4 w-4 text-rose-400" />}
+            icon={<TrendingDown className="h-4 w-4 text-danger" />}
             items={brain.weak_segments}
             tone="rose"
           />
@@ -630,11 +630,11 @@ export default async function InteligenciaComercialPage() {
 
         <div className="grid gap-4 xl:grid-cols-3">
           <div className="card p-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-              <Layers3 className="h-4 w-4 text-cyan-400" />
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Layers3 className="h-4 w-4 text-primary-ink" />
               Qué entrega al CRM
             </div>
-            <div className="space-y-2 text-sm text-slate-300">
+            <div className="space-y-2 text-sm text-foreground">
               <div>Scores multidimensionales por lead, segmento y campaña.</div>
               <div>Alertas tempranas cuando una campaña rompe su baseline operativo.</div>
               <div>Ranking dinámico por bloque horario y recomendaciones concretas de secuencia, intensidad y ventana.</div>
@@ -642,11 +642,11 @@ export default async function InteligenciaComercialPage() {
           </div>
 
           <div className="card p-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-              <Activity className="h-4 w-4 text-amber-400" />
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Activity className="h-4 w-4 text-warning" />
               Variables centrales del loop
             </div>
-            <div className="space-y-2 text-sm text-slate-300">
+            <div className="space-y-2 text-sm text-foreground">
               <div>Probabilidad de contacto, probabilidad de conversión y afinidad operativa.</div>
               <div>Fatiga o desgaste, mejor ventana, mejor canal y feedback histórico real.</div>
               <div>Contexto interpretado por IA y diagnóstico de desvíos para no reaccionar tarde.</div>
@@ -654,11 +654,11 @@ export default async function InteligenciaComercialPage() {
           </div>
 
           <div className="card p-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-              <ArrowUpRight className="h-4 w-4 text-emerald-400" />
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <ArrowUpRight className="h-4 w-4 text-success" />
               Siguiente evolución natural
             </div>
-            <div className="space-y-2 text-sm text-slate-300">
+            <div className="space-y-2 text-sm text-foreground">
               <div>Persistir snapshots tácticos por bloque para backtesting y aprendizaje continuo.</div>
               <div>Incorporar afinidad agente-estrategia y elasticidad de intensidad por cohorte.</div>
               <div>Publicar recomendaciones al CRM como feed operacional listo para ejecución.</div>

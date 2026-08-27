@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Header } from '@/components/layout/Header'
 import { LoadingState } from '@/components/ui/Spinner'
-import { 
+import {
   Dna,
   Users,
   Car,
@@ -144,12 +144,12 @@ const ENTITY_GROUPS: Array<{
   border: string
   bg: string
 }> = [
-  { key: 'todos', label: 'Todos', description: 'Base consolidada completa', tone: 'text-slate-300', border: 'border-slate-600/60', bg: 'bg-slate-800/70' },
-  { key: 'persona_natural', label: 'Naturales', description: 'RUTs con nombre de persona', tone: 'text-cyan-300', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
-  { key: 'persona_juridica', label: 'Jurídicas', description: 'Empresas e instituciones', tone: 'text-violet-300', border: 'border-violet-500/50', bg: 'bg-violet-500/10' },
-  { key: 'indeterminado', label: 'Indeterminados', description: 'Canónicos sin nombre ni razón social', tone: 'text-amber-300', border: 'border-amber-500/50', bg: 'bg-amber-500/10' },
-  { key: 'rut_recuperable', label: 'Recuperables', description: 'RUTs útiles pero mal normalizados', tone: 'text-emerald-300', border: 'border-emerald-500/50', bg: 'bg-emerald-500/10' },
-  { key: 'basura', label: 'Basura', description: 'RUTs vacíos, cero o no recuperables', tone: 'text-rose-300', border: 'border-rose-500/50', bg: 'bg-rose-500/10' },
+  { key: 'todos', label: 'Todos', description: 'Base consolidada completa', tone: 'text-foreground', border: 'border-border', bg: 'bg-surface-muted' },
+  { key: 'persona_natural', label: 'Naturales', description: 'RUTs con nombre de persona', tone: 'text-primary-ink', border: 'border-primary/50', bg: 'bg-surface-muted' },
+  { key: 'persona_juridica', label: 'Jurídicas', description: 'Empresas e instituciones', tone: 'text-violet', border: 'border-violet/50', bg: 'bg-violet-bg' },
+  { key: 'indeterminado', label: 'Indeterminados', description: 'Canónicos sin nombre ni razón social', tone: 'text-warning', border: 'border-warning/50', bg: 'bg-warning-bg' },
+  { key: 'rut_recuperable', label: 'Recuperables', description: 'RUTs útiles pero mal normalizados', tone: 'text-success', border: 'border-success/50', bg: 'bg-success-bg' },
+  { key: 'basura', label: 'Basura', description: 'RUTs vacíos, cero o no recuperables', tone: 'text-danger', border: 'border-danger/50', bg: 'bg-danger-bg' },
 ]
 
 const DEFAULT_DIMENSIONS: UniverseDimension[] = [
@@ -165,8 +165,8 @@ const DEFAULT_DIMENSIONS: UniverseDimension[] = [
 // Render a compact boolean badge for the breakdown table
 function BoolBadge({ val }: { val: boolean }) {
   return val
-    ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400"><Check className="w-3 h-3" /></span>
-    : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-700/50 text-slate-600"><X className="w-3 h-3" /></span>
+    ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-surface-muted text-primary-ink"><Check className="w-3 h-3" /></span>
+    : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-surface-muted text-muted-foreground"><X className="w-3 h-3" /></span>
 }
 
 const DIM_SHORT: Record<string, string> = {
@@ -180,17 +180,17 @@ const DIM_SHORT: Record<string, string> = {
 }
 
 const DIM_STYLES = [
-  { icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', borderActive: 'border-blue-400', glowActive: 'shadow-[0_0_18px_rgba(96,165,250,0.15)]' },
-  { icon: Phone, color: 'text-green-400', bg: 'bg-green-400/10', borderActive: 'border-green-400', glowActive: 'shadow-[0_0_18px_rgba(74,222,128,0.15)]' },
-  { icon: Mail, color: 'text-yellow-400', bg: 'bg-yellow-400/10', borderActive: 'border-yellow-400', glowActive: 'shadow-[0_0_18px_rgba(250,204,21,0.15)]' },
-  { icon: Home, color: 'text-orange-400', bg: 'bg-orange-400/10', borderActive: 'border-orange-400', glowActive: 'shadow-[0_0_18px_rgba(251,146,60,0.15)]' },
-  { icon: Car, color: 'text-cyan-400', bg: 'bg-cyan-400/10', borderActive: 'border-cyan-400', glowActive: 'shadow-[0_0_18px_rgba(34,211,238,0.15)]' },
-  { icon: Building2, color: 'text-indigo-400', bg: 'bg-indigo-400/10', borderActive: 'border-indigo-400', glowActive: 'shadow-[0_0_18px_rgba(129,140,248,0.15)]' },
-  { icon: Dna, color: 'text-purple-400', bg: 'bg-purple-400/10', borderActive: 'border-purple-400', glowActive: 'shadow-[0_0_18px_rgba(192,132,252,0.15)]' },
-  { icon: Database, color: 'text-teal-300', bg: 'bg-teal-400/10', borderActive: 'border-teal-300', glowActive: 'shadow-[0_0_18px_rgba(45,212,191,0.15)]' },
-  { icon: ShieldX, color: 'text-rose-300', bg: 'bg-rose-400/10', borderActive: 'border-rose-300', glowActive: 'shadow-[0_0_18px_rgba(253,164,175,0.15)]' },
-  { icon: BriefcaseBusiness, color: 'text-sky-300', bg: 'bg-sky-400/10', borderActive: 'border-sky-300', glowActive: 'shadow-[0_0_18px_rgba(125,211,252,0.15)]' },
-  { icon: TrendingUp, color: 'text-lime-300', bg: 'bg-lime-400/10', borderActive: 'border-lime-300', glowActive: 'shadow-[0_0_18px_rgba(190,242,100,0.15)]' },
+  { icon: Users, color: 'text-primary-ink', bg: 'bg-surface-muted', borderActive: 'border-primary', glowActive: 'shadow-elevation-1' },
+  { icon: Phone, color: 'text-success', bg: 'bg-success-bg', borderActive: 'border-success', glowActive: 'shadow-elevation-1' },
+  { icon: Mail, color: 'text-warning', bg: 'bg-warning-bg', borderActive: 'border-warning', glowActive: 'shadow-elevation-1' },
+  { icon: Home, color: 'text-warning', bg: 'bg-warning-bg', borderActive: 'border-warning', glowActive: 'shadow-elevation-1' },
+  { icon: Car, color: 'text-primary-ink', bg: 'bg-surface-muted', borderActive: 'border-primary', glowActive: 'shadow-elevation-1' },
+  { icon: Building2, color: 'text-violet', bg: 'bg-violet-bg', borderActive: 'border-violet', glowActive: 'shadow-elevation-1' },
+  { icon: Dna, color: 'text-violet', bg: 'bg-violet-bg', borderActive: 'border-violet', glowActive: 'shadow-elevation-1' },
+  { icon: Database, color: 'text-teal-300', bg: 'bg-teal-400/10', borderActive: 'border-teal-300', glowActive: 'shadow-elevation-1' },
+  { icon: ShieldX, color: 'text-danger', bg: 'bg-danger-bg', borderActive: 'border-danger', glowActive: 'shadow-elevation-1' },
+  { icon: BriefcaseBusiness, color: 'text-primary-ink', bg: 'bg-surface-muted', borderActive: 'border-primary', glowActive: 'shadow-elevation-1' },
+  { icon: TrendingUp, color: 'text-success', bg: 'bg-success-bg', borderActive: 'border-success', glowActive: 'shadow-elevation-1' },
 ]
 
 function shortLabel(dim: UniverseDimension) {
@@ -418,7 +418,7 @@ export default function UniversosPage() {
       let next: FilterState = null
       if (current === null) next = true
       else if (current === true) next = false
-      
+
       return { ...prev, [key]: next }
     })
   }
@@ -515,13 +515,13 @@ export default function UniversosPage() {
       />
 
       <div className="p-6 flex flex-col xl:flex-row gap-6 overflow-x-hidden" style={{ minHeight: 'calc(100vh - 5rem)' }}>
-        
+
         {/* COLUMNA IZQUIERDA: CONTROLES */}
         <div className="min-w-0 flex-1 flex flex-col gap-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-300">Dimensiones de Datos</h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <h3 className="text-sm font-semibold text-foreground">Dimensiones de Datos</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
                 Primero elige el universo base; luego incluye ✓ o excluye ✗ cada dimensión
                 {datasetDimensionCount > 0 ? ` · ${datasetDimensionCount} filtros sincronizados desde datasets` : ''}
               </p>
@@ -530,12 +530,12 @@ export default function UniversosPage() {
               <button
                 onClick={refreshUniversos}
                 disabled={refreshing}
-                className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 disabled:opacity-60 disabled:cursor-wait transition-all"
+                className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-muted hover:bg-surface-muted text-primary-ink disabled:opacity-60 disabled:cursor-wait transition-all"
               >
                 <RefreshCcw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
                 {refreshing ? 'Actualizando' : 'Actualizar matriz'}
               </button>
-              <button onClick={resetFilters} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/50 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
+              <button onClick={resetFilters} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-muted hover:bg-surface-muted text-muted-foreground hover:text-foreground transition-all">
                 <RefreshCcw className="w-3 h-3" />
                 Restablecer
               </button>
@@ -550,30 +550,30 @@ export default function UniversosPage() {
                 <button
                   key={group.key}
                   onClick={() => setEntityFilter(group.key)}
-                  className={`min-w-0 rounded-xl border p-4 text-left transition-all ${isActive ? `${group.border} ${group.bg} shadow-[0_0_18px_rgba(15,23,42,0.35)]` : 'border-slate-700/50 bg-[#1e293b]/40 hover:bg-[#1e293b]/70'}`}
+                  className={`min-w-0 rounded-xl border p-4 text-left transition-all ${isActive ? `${group.border} ${group.bg} shadow-elevation-1` : 'border-border bg-surface hover:bg-surface'}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <h4 className={`text-sm font-semibold ${isActive ? group.tone : 'text-white'}`}>{group.label}</h4>
-                      <p className="mt-1 text-[10px] text-slate-500 leading-relaxed">{group.description}</p>
+                      <h4 className={`text-sm font-semibold ${isActive ? group.tone : 'text-foreground'}`}>{group.label}</h4>
+                      <p className="mt-1 text-[10px] text-muted-foreground leading-relaxed">{group.description}</p>
                     </div>
                     {isActive && <Check className={`w-4 h-4 ${group.tone}`} />}
                   </div>
-                  <div className="mt-4 text-xl font-black text-white">{formatNumber(total)}</div>
-                  <div className="text-[10px] text-slate-500 mt-1">registros en este universo</div>
+                  <div className="mt-4 text-xl font-semibold text-foreground">{formatNumber(total)}</div>
+                  <div className="text-[10px] text-muted-foreground mt-1">registros en este universo</div>
                 </button>
               )
             })}
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-700/60 bg-[#1e293b]/70 p-4 shadow-elevation-1">
+          <div className="overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-elevation-1">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-cyan-300" />
-                  <h3 className="text-sm font-semibold text-slate-200">Filtros comerciales avanzados</h3>
+                  <SlidersHorizontal className="h-4 w-4 text-primary-ink" />
+                  <h3 className="text-sm font-semibold text-foreground">Filtros comerciales avanzados</h3>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-500">
+                <p className="mt-1 text-[11px] text-muted-foreground">
                   Segmenta empresas y personas por dotación, facturación, tendencia, patrimonio y territorio sin recalcular la base completa.
                 </p>
               </div>
@@ -581,28 +581,28 @@ export default function UniversosPage() {
                 <button
                   type="button"
                   onClick={applyContactableCompaniesPreset}
-                  className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-200 transition hover:border-cyan-400/60"
+                  className="rounded-lg border border-primary/30 bg-surface-muted px-3 py-2 text-xs font-medium text-primary-ink transition hover:border-primary/60"
                 >
                   Empresas contactables
                 </button>
                 <button
                   type="button"
                   onClick={applyMipymePreset}
-                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-200 transition hover:border-emerald-400/60"
+                  className="rounded-lg border border-success/30 bg-success-bg px-3 py-2 text-xs font-medium text-success transition hover:border-success/60"
                 >
                   MiPYME rápida
                 </button>
                 <button
                   type="button"
                   onClick={applyGrowthPreset}
-                  className="rounded-lg border border-lime-500/30 bg-lime-500/10 px-3 py-2 text-xs font-medium text-lime-200 transition hover:border-lime-400/60"
+                  className="rounded-lg border border-success/30 bg-success-bg px-3 py-2 text-xs font-medium text-success transition hover:border-success/60"
                 >
                   Creciendo
                 </button>
                 <button
                   type="button"
                   onClick={applyHighPatrimonyPreset}
-                  className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200 transition hover:border-amber-400/60"
+                  className="rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs font-medium text-warning transition hover:border-warning/60"
                 >
                   Alto patrimonio
                 </button>
@@ -614,9 +614,9 @@ export default function UniversosPage() {
                 const options = advancedOptions[config.key]
                 const selected = advancedFilters[config.key]
                 return (
-                  <div key={config.key} className="min-w-0 overflow-hidden rounded-xl border border-slate-700/50 bg-[#0f172a]/60 p-3">
-                    <label className="mb-1 block text-xs font-semibold text-slate-300">{config.label}</label>
-                    <p className="mb-2 min-h-[28px] text-[10px] leading-relaxed text-slate-500">{config.description}</p>
+                  <div key={config.key} className="min-w-0 overflow-hidden rounded-xl border border-border bg-background p-3">
+                    <label className="mb-1 block text-xs font-semibold text-foreground">{config.label}</label>
+                    <p className="mb-2 min-h-[28px] text-[10px] leading-relaxed text-muted-foreground">{config.description}</p>
                     <select
                       value={selected}
                       onChange={event => setAdvancedFilter(config.key, event.target.value)}
@@ -630,7 +630,7 @@ export default function UniversosPage() {
                       ))}
                     </select>
                     {options.length === 0 && (
-                      <p className="mt-2 text-[10px] text-amber-300">
+                      <p className="mt-2 text-[10px] text-warning">
                         Sin valores comerciales cargados. Usa Actualizar matriz.
                       </p>
                     )}
@@ -647,21 +647,21 @@ export default function UniversosPage() {
                const Icon = dimStyle.icon
                const dimTotal = dimTotals[dim.key] || 0
                const dimPct = totalBase > 0 ? (dimTotal / totalBase) * 100 : 0
-               
-               let stateClass = "border-slate-700/50 bg-[#1e293b]/50"
+
+               let stateClass = "border-border bg-surface"
                let StateIcon = Minus
-               let stateColor = "text-slate-500"
+               let stateColor = "text-muted-foreground"
                let stateLabel = 'Cualquiera'
-               
+
                if (state === true) {
-                 stateClass = `${dimStyle.borderActive} border bg-[#1e293b]/80 ${dimStyle.glowActive}`
+                 stateClass = `${dimStyle.borderActive} border bg-surface ${dimStyle.glowActive}`
                  StateIcon = Check
                  stateColor = dimStyle.color
                  stateLabel = 'Requerido'
                } else if (state === false) {
-                 stateClass = "border-red-500/40 bg-red-950/30"
+                 stateClass = "border-danger/40 bg-danger-bg"
                  StateIcon = X
-                 stateColor = "text-red-400"
+                 stateColor = "text-danger"
                  stateLabel = 'Excluido'
                }
 
@@ -677,13 +677,13 @@ export default function UniversosPage() {
                           <Icon className={`w-4.5 h-4.5 ${dimStyle.color}`} />
                         </div>
                         <div className="min-w-0">
-                          <h4 className="text-sm font-semibold text-white leading-tight">{dim.label}</h4>
+                          <h4 className="text-sm font-semibold text-foreground leading-tight">{dim.label}</h4>
                           <p className={`text-[10px] mt-0.5 uppercase tracking-wider font-medium ${stateColor}`}>
                             {stateLabel}{dim.source === 'dataset' ? ' · Dataset' : ''}
                           </p>
                         </div>
                      </div>
-                     <div className={`w-5 h-5 rounded-full flex items-center justify-center bg-black/20 border border-white/5 flex-shrink-0 ${stateColor}`}>
+                     <div className={`w-5 h-5 rounded-full flex items-center justify-center bg-black/20 border border-border flex-shrink-0 ${stateColor}`}>
                        <StateIcon className="w-3 h-3" />
                      </div>
                    </div>
@@ -691,12 +691,12 @@ export default function UniversosPage() {
                    {/* Individual total + mini progress bar */}
                    <div className="w-full">
                      <div className="flex items-center justify-between mb-1">
-                       <span className="text-[10px] text-slate-500">Universo propio</span>
+                       <span className="text-[10px] text-muted-foreground">Universo propio</span>
                        <span className={`text-[11px] font-mono font-semibold ${dimStyle.color}`}>
                          {loading ? '…' : formatNumber(dimTotal)} ({dimPct.toFixed(1)}%)
                        </span>
                      </div>
-                     <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                     <div className="w-full h-1 bg-surface-muted rounded-full overflow-hidden">
                        <div
                          className={`h-full rounded-full transition-all duration-500 ${dimStyle.bg.replace('/10', '/60')}`}
                          style={{ width: `${Math.min(dimPct, 100)}%` }}
@@ -712,35 +712,35 @@ export default function UniversosPage() {
           {!loading && totalActiveCount > 0 && (
             <div className="mt-2">
               <div className="flex items-center gap-2 mb-2">
-                <Info className="w-3.5 h-3.5 text-slate-500" />
-                <span className="text-[11px] text-slate-500">
+                <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-[11px] text-muted-foreground">
                   {result.matchingRows.length} combinación{result.matchingRows.length !== 1 ? 'es' : ''} que componen el resultado
                 </span>
               </div>
-              <div className="rounded-xl border border-slate-700/50 overflow-hidden">
+              <div className="rounded-xl border border-border overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="bg-slate-800/80 border-b border-slate-700/50">
+                      <tr className="bg-surface-muted border-b border-border">
                         {dimensions.map(d => (
-                          <th key={d.key} className="px-2 py-2 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                          <th key={d.key} className="px-2 py-2 text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
                             {shortLabel(d)}
                           </th>
                         ))}
                         {ADVANCED_FILTER_CONFIG.map(config => (
-                          <th key={config.key} className="px-2 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                          <th key={config.key} className="px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
                             {config.label}
                           </th>
                         ))}
-                        <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Registros</th>
-                        <th className="px-3 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wider">%</th>
+                        <th className="px-3 py-2 text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Registros</th>
+                        <th className="px-3 py-2 text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">%</th>
                       </tr>
                     </thead>
                     <tbody>
                       {result.matchingRows.map((row, i) => (
                         <tr
                           key={i}
-                          className={`border-b border-slate-800/50 ${i % 2 === 0 ? 'bg-[#1e293b]/30' : 'bg-transparent'} hover:bg-slate-800/30 transition-colors`}
+                          className={`border-b border-border ${i % 2 === 0 ? 'bg-surface' : 'bg-transparent'} hover:bg-surface-muted transition-colors`}
                         >
                           {dimensions.map(d => (
                             <td key={d.key} className="px-2 py-2 text-center">
@@ -748,28 +748,28 @@ export default function UniversosPage() {
                             </td>
                           ))}
                           {ADVANCED_FILTER_CONFIG.map(config => (
-                            <td key={config.key} className="px-2 py-2 text-left text-[10px] text-slate-400 whitespace-nowrap">
+                            <td key={config.key} className="px-2 py-2 text-left text-[10px] text-muted-foreground whitespace-nowrap">
                               {formatBucketOption(getAdvancedValue(row, config.key), config.key)}
                             </td>
                           ))}
-                          <td className="px-3 py-2 text-right font-mono font-semibold text-white">
+                          <td className="px-3 py-2 text-right font-mono font-semibold text-foreground">
                             {formatNumber(row.total)}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-slate-400 text-[10px]">
+                          <td className="px-3 py-2 text-right font-mono text-muted-foreground text-[10px]">
                             {totalBase > 0 ? (row.total / totalBase * 100).toFixed(2) : '0'}%
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr className="bg-slate-800/60 border-t border-slate-600/50">
-                        <td colSpan={dimensions.length + ADVANCED_FILTER_CONFIG.length} className="px-3 py-2 text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                      <tr className="bg-surface-muted border-t border-border">
+                        <td colSpan={dimensions.length + ADVANCED_FILTER_CONFIG.length} className="px-3 py-2 text-right text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
                           Total
                         </td>
-                        <td className="px-3 py-2 text-right font-mono font-bold text-cyan-400">
+                        <td className="px-3 py-2 text-right font-mono font-bold text-primary-ink">
                           {formatNumber(result.count)}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-cyan-400 text-[10px]">
+                        <td className="px-3 py-2 text-right font-mono text-primary-ink text-[10px]">
                           {pct.toFixed(2)}%
                         </td>
                       </tr>
@@ -784,32 +784,32 @@ export default function UniversosPage() {
         {/* COLUMNA DERECHA: RESULTADO EN VIVO */}
         <div className="min-w-0 flex flex-col gap-4 xl:w-[400px] xl:min-w-[360px]">
           <div className="glass-panel flex flex-col justify-center items-center text-center p-8 relative overflow-hidden" style={{ minHeight: 320 }}>
-             
+
              {/* Background glow animated */}
-             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-cyan-500/10 rounded-full blur-[80px] animate-pulse-slow pointer-events-none" />
+             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-surface-muted rounded-full blur-[80px] animate-pulse-slow pointer-events-none" />
 
              {loading ? (
                <LoadingState text="Cargando matriz…" />
              ) : (
                <>
-                 <h2 className="text-base font-bold text-slate-300 mb-1">Universo Resultante</h2>
-                 <p className="text-[10px] text-slate-500 mb-6">
+                 <h2 className="text-base font-bold text-foreground mb-1">Universo Resultante</h2>
+                 <p className="text-[10px] text-muted-foreground mb-6">
                    {ENTITY_GROUPS.find(group => group.key === entityFilter)?.label ?? 'Todos'} · {totalActiveCount === 0 ? 'sin filtros adicionales' : `${totalActiveCount} filtro${totalActiveCount > 1 ? 's' : ''} activo${totalActiveCount > 1 ? 's' : ''}`}
                  </p>
-                 
+
                  <div className="my-4">
-                   <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400 drop-shadow-lg tracking-tight">
+                   <div className="text-5xl font-semibold text-foreground tracking-tight">
                      {formatNumber(result.count)}
                    </div>
-                   <p className="text-sm text-cyan-400 font-medium mt-3 bg-cyan-500/10 inline-flex px-4 py-1 rounded-full border border-cyan-500/20">
+                   <p className="text-sm text-primary-ink font-medium mt-3 bg-surface-muted inline-flex px-4 py-1 rounded-full border border-primary/20">
                     {pct.toFixed(2)}% del total
                    </p>
                  </div>
 
                  {/* Filtros activos */}
                  {totalActiveCount > 0 && (
-                   <div className="w-full bg-slate-800/50 rounded-xl p-3 mt-4 border border-white/5 text-left">
-                     <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Filtros aplicados</p>
+                   <div className="w-full bg-surface-muted rounded-xl p-3 mt-4 border border-border text-left">
+                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Filtros aplicados</p>
                      <div className="flex flex-wrap gap-1.5">
                        {activeFilters.map(([key, val]) => {
                          const dim = dimensions.find(d => d.key === key)
@@ -818,7 +818,7 @@ export default function UniversosPage() {
                          return (
                            <span
                              key={key}
-                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${val === true ? `${dimStyle.color} border-current bg-current/10` : 'text-red-400 border-red-500/40 bg-red-950/30'}`}
+                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${val === true ? `${dimStyle.color} border-current bg-current/10` : 'text-danger border-danger/40 bg-danger-bg'}`}
                            >
                              {val === true ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
                              {dim ? shortLabel(dim) : key}
@@ -830,7 +830,7 @@ export default function UniversosPage() {
                          return (
                            <span
                              key={key}
-                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-primary/40 bg-surface-muted text-primary-ink"
                            >
                              <SlidersHorizontal className="w-2.5 h-2.5" />
                              {config?.label ?? key}: {formatBucketOption(value, key)}
@@ -841,28 +841,28 @@ export default function UniversosPage() {
                    </div>
                  )}
 
-                 <div className="w-full bg-slate-800/50 rounded-xl p-3 mt-3 border border-white/5">
-                   <div className="flex justify-between items-center text-xs text-slate-400 mb-1.5">
+                 <div className="w-full bg-surface-muted rounded-xl p-3 mt-3 border border-border">
+                   <div className="flex justify-between items-center text-xs text-muted-foreground mb-1.5">
                      <span>Combinaciones sumadas:</span>
-                     <span className="font-mono text-cyan-400">{result.matchingRows.length} de {scopedData.length}</span>
+                     <span className="font-mono text-primary-ink">{result.matchingRows.length} de {scopedData.length}</span>
                    </div>
-                   <div className="flex justify-between items-center text-xs text-slate-400">
+                   <div className="flex justify-between items-center text-xs text-muted-foreground">
                      <span>Base total:</span>
-                     <span className="font-mono text-white">{formatNumber(totalBase)}</span>
+                     <span className="font-mono text-foreground">{formatNumber(totalBase)}</span>
                    </div>
                  </div>
-                 
+
                  <button
                   type="button"
                   onClick={exportCurrentSegment}
                   disabled={totalActiveCount === 0 || exporting}
-                  className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all inline-flex items-center justify-center gap-2 ${totalActiveCount > 0 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/25 disabled:opacity-60 disabled:cursor-wait' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                  className={`mt-4 w-full py-3 rounded-lg font-bold text-sm transition-all inline-flex items-center justify-center gap-2 ${totalActiveCount > 0 ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-lg shadow-elevation-1 disabled:opacity-60 disabled:cursor-wait' : 'bg-surface-muted text-muted-foreground cursor-not-allowed'}`}
                  >
                     <Download className="w-4 h-4" />
                     {exporting ? 'Exportando...' : totalActiveCount > 0 ? 'Exportar este segmento exacto' : 'Aplica filtros para exportar'}
                  </button>
                  {exportError && (
-                  <p className="mt-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                  <p className="mt-2 text-xs text-danger bg-danger-bg border border-danger/20 rounded-lg px-3 py-2">
                     {exportError}
                   </p>
                  )}
@@ -872,13 +872,13 @@ export default function UniversosPage() {
 
           {/* Info de contexto */}
           {!loading && (
-            <div className="glass-panel p-4 text-xs text-slate-400 space-y-2">
-              <p className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">Cómo funciona</p>
-              <p>Primero eliges el <span className="text-white">tipo de entidad</span>: naturales, jurídicas, indeterminados, recuperables o basura. Luego cada dimensión muestra su universo propio dentro de ese grupo.</p>
-              <p>Al combinar dos dimensiones, el resultado es la <span className="text-cyan-400">intersección</span> (personas que tienen ambas), por lo que el número puede bajar respecto a cada dimensión individual.</p>
-              <p className="text-slate-500">Base activa: <span className="font-mono text-white">{formatNumber(totalBase)}</span> registros en {scopedData.length} combinaciones únicas.</p>
+            <div className="glass-panel p-4 text-xs text-muted-foreground space-y-2">
+              <p className="font-semibold text-foreground text-[11px] uppercase tracking-wider">Cómo funciona</p>
+              <p>Primero eliges el <span className="text-foreground">tipo de entidad</span>: naturales, jurídicas, indeterminados, recuperables o basura. Luego cada dimensión muestra su universo propio dentro de ese grupo.</p>
+              <p>Al combinar dos dimensiones, el resultado es la <span className="text-primary-ink">intersección</span> (personas que tienen ambas), por lo que el número puede bajar respecto a cada dimensión individual.</p>
+              <p className="text-muted-foreground">Base activa: <span className="font-mono text-foreground">{formatNumber(totalBase)}</span> registros en {scopedData.length} combinaciones únicas.</p>
               {datasetDimensionCount > 0 && (
-                <p className="text-slate-500">Datasets sincronizados como filtros: <span className="font-mono text-white">{datasetDimensionCount}</span>.</p>
+                <p className="text-muted-foreground">Datasets sincronizados como filtros: <span className="font-mono text-foreground">{datasetDimensionCount}</span>.</p>
               )}
             </div>
           )}

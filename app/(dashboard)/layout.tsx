@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient, hasSupabasePublicEnv } from '@/lib/db/supabase'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { AtlasShell } from '@/vendor/atlas-ui/shell'
+import { LogoutButton } from '@/components/layout/LogoutButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,12 +26,11 @@ export default async function DashboardLayout({
     }
 
     return (
-      <div className="flex h-screen bg-[#0a1024]">
-        <Sidebar userEmail={user.email ?? null} />
-        <main className="flex-1 ml-64 overflow-y-auto">
-          {children}
-        </main>
-      </div>
+      <AtlasShell product="Datos" subtitle="Inteligencia de datos"
+        navigation={<Sidebar userEmail={user.email ?? null} />}
+        actions={<LogoutButton />} footer={user.email}>
+        {children}
+      </AtlasShell>
     )
   } catch (error) {
     console.error('[dashboard/layout] Supabase auth check failed', error)

@@ -1,0 +1,8 @@
+{
+  "name": "@atlas/ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Atlas CRM visual contract for Lead and Data; framework-independent CSS and React 18/19 shells",
+  "exports": { "./styles.css": "./styles.css", "./shell": "./shell.tsx", "./theme-toggle": "./theme-toggle.tsx", "./auth-shell": "./auth-shell.tsx" },
+  "peerDependencies": { "react": ">=18 <20" }
+}

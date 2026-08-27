@@ -12,8 +12,6 @@ import {
   Download,
   ChevronRight,
   Activity,
-  Zap,
-  LogOut,
   BrainCircuit,
   Target,
   WandSparkles,
@@ -22,8 +20,6 @@ import {
   Trophy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils/formatters'
-import { supabaseBrowser } from '@/lib/db/client'
-import { useRouter } from 'next/navigation'
 
 const HH_ALLOWED_EMAIL = 'hh2fc24@gmail.com'
 
@@ -65,7 +61,6 @@ const NAV_ITEMS = [
 
 export function Sidebar({ userEmail }: { userEmail?: string | null }) {
   const pathname = usePathname()
-  const router = useRouter()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
   const normalizedUserEmail = userEmail?.toLowerCase() ?? null
 
@@ -73,29 +68,11 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
     setPendingHref(null)
   }, [pathname])
 
-  async function handleLogout() {
-    await supabaseBrowser.auth.signOut()
-    router.push('/login')
-  }
-
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 flex flex-col bg-[#0f172a] border-r border-[#334155] z-30">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-5 h-16 border-b border-[#334155]">
-        <div className="w-8 h-8 rounded-lg bg-[#06b6d4] flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
-          <Zap className="w-4 h-4 text-white" />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-white leading-none">RUT Intelligence</p>
-          <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wider">Data Platform</p>
-        </div>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3">
+      <nav aria-label="Módulos de Datos">
         {NAV_ITEMS.map(group => (
-          <div key={group.group} className="mb-6">
-            <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-600">
+          <div key={group.group} className="mb-4">
+            <p className="atlas-nav-group">
               {group.group}
             </p>
             <div className="space-y-0.5">
@@ -121,27 +98,22 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
                     onClick={() => {
                       if (!isActive) setPendingHref(item.href)
                     }}
-                    className={cn(
-                      'sidebar-item relative overflow-hidden transition-all duration-300',
-                      isActive ? 'active shadow-[0_0_10px_rgba(6,182,212,0.15)] bg-[#1e293b]/50 border border-slate-700/50' : 'hover:bg-slate-800/40',
-                      isPending ? 'text-white bg-slate-800/50' : ''
-                    )}
+                    aria-current={isActive ? 'page' : undefined}
+                    aria-busy={isPending || undefined}
+                    className="atlas-nav-link"
                   >
-                    {isActive && (
-                      <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-transparent pointer-events-none" />
-                    )}
                     {isPending ? (
-                      <LoaderCircle className="w-4 h-4 flex-shrink-0 relative z-10 animate-spin text-cyan-300" />
+                      <LoaderCircle className="w-4 h-4 flex-shrink-0 relative z-10 animate-spin text-primary-ink" />
                     ) : (
-                      <Icon className={cn("w-4 h-4 flex-shrink-0 relative z-10", isActive ? "text-cyan-400" : "")} />
+                      <Icon className={cn("w-4 h-4 flex-shrink-0 relative z-10", isActive ? "text-primary-ink" : "")} />
                     )}
                     <span className="flex-1 relative z-10">{item.label}</span>
                     {isPending ? (
-                      <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-cyan-300 relative z-10">
+                      <span className="text-[10px] font-medium text-primary-ink relative z-10">
                         abriendo
                       </span>
                     ) : isActive ? (
-                      <ChevronRight className="w-3 h-3 opacity-80 text-cyan-500 relative z-10 animate-pulse" />
+                      <ChevronRight className="w-3 h-3 opacity-80 text-primary-ink relative z-10" />
                     ) : null}
                   </Link>
                 )
@@ -151,16 +123,5 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-3 py-4 border-t border-[#1e2d4a] space-y-1">
-        <button
-          onClick={handleLogout}
-          className="sidebar-item w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Cerrar sesión</span>
-        </button>
-      </div>
-    </aside>
   )
 }

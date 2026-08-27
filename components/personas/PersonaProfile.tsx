@@ -34,17 +34,17 @@ interface ScoreMeterProps {
 function ScoreMeter({ score, max = 100, label }: ScoreMeterProps) {
   const pct = Math.min((score / max) * 100, 100)
   const color =
-    pct >= 70 ? 'bg-green-500' :
-    pct >= 40 ? 'bg-amber-500' :
-    pct >= 20 ? 'bg-orange-500' : 'bg-red-500'
+    pct >= 70 ? 'bg-success' :
+    pct >= 40 ? 'bg-warning' :
+    pct >= 20 ? 'bg-warning' : 'bg-danger'
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs text-slate-400">{label}</span>
-        <span className="text-xs font-bold text-white">{score}</span>
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="text-xs font-bold text-foreground">{score}</span>
       </div>
-      <div className="h-2 bg-[#334155] rounded-full overflow-hidden">
+      <div className="h-2 bg-surface rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-700 ${color}`}
           style={{ width: `${pct}%` }}
@@ -63,12 +63,12 @@ interface DataRowProps {
 
 function DataRow({ label, value, icon: Icon, highlight }: DataRowProps) {
   return (
-    <div className="flex items-center justify-between py-2.5 border-b border-[#334155]/50 last:border-0">
+    <div className="flex items-center justify-between py-2.5 border-b border-border last:border-0">
       <div className="flex min-w-0 items-center gap-2.5">
-        {Icon && <Icon className="w-3.5 h-3.5 text-slate-500" />}
-        <span className="text-xs text-slate-400">{label}</span>
+        {Icon && <Icon className="w-3.5 h-3.5 text-muted-foreground" />}
+        <span className="text-xs text-muted-foreground">{label}</span>
       </div>
-      <span className={`ml-3 max-w-[65%] break-words text-right text-xs font-medium ${highlight ? 'text-brand-400' : 'text-slate-300'}`}>
+      <span className={`ml-3 max-w-[65%] break-words text-right text-xs font-medium ${highlight ? 'text-primary-ink' : 'text-foreground'}`}>
         {value ?? '—'}
       </span>
     </div>
@@ -77,9 +77,9 @@ function DataRow({ label, value, icon: Icon, highlight }: DataRowProps) {
 
 function DetailCount({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-slate-700/60 bg-slate-950/30 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="mt-1 text-lg font-bold text-white">{formatNumber(value)}</div>
+    <div className="rounded-md border border-border bg-background px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-bold text-foreground">{formatNumber(value)}</div>
     </div>
   )
 }
@@ -94,12 +94,12 @@ function DetailItem({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-md border border-slate-800 bg-slate-950/35 p-3">
+    <div className="rounded-md border border-border bg-background p-3">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 text-sm font-semibold text-white">{title}</div>
-        {meta && <div className="flex-shrink-0 text-right text-xs text-brand-400">{meta}</div>}
+        <div className="min-w-0 text-sm font-semibold text-foreground">{title}</div>
+        {meta && <div className="flex-shrink-0 text-right text-xs text-primary-ink">{meta}</div>}
       </div>
-      <div className="mt-2 space-y-1 text-xs text-slate-400">{children}</div>
+      <div className="mt-2 space-y-1 text-xs text-muted-foreground">{children}</div>
     </div>
   )
 }
@@ -141,7 +141,7 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
   if (loading) {
     return (
       <div className="card p-5">
-        <div className="text-sm text-slate-400">Cargando detalle máximo...</div>
+        <div className="text-sm text-muted-foreground">Cargando detalle máximo...</div>
       </div>
     )
   }
@@ -149,7 +149,7 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
   if (error || !detail) {
     return (
       <div className="card p-5">
-        <div className="text-sm text-slate-400">{error ?? 'Sin detalle adicional para este RUT.'}</div>
+        <div className="text-sm text-muted-foreground">{error ?? 'Sin detalle adicional para este RUT.'}</div>
       </div>
     )
   }
@@ -158,8 +158,8 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
     <div className="card p-5">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Shield className="h-4 w-4 text-cyan-400" />
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Shield className="h-4 w-4 text-primary-ink" />
             Detalle 360 interno
           </h3>
         </div>
@@ -174,12 +174,12 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
 
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <div>
-          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <MapPin className="h-3.5 w-3.5" />
             Direcciones
           </h4>
           <div className="space-y-2">
-            {detail.addresses.length === 0 && <div className="text-sm text-slate-500">Sin dirección granular.</div>}
+            {detail.addresses.length === 0 && <div className="text-sm text-muted-foreground">Sin dirección granular.</div>}
             {detail.addresses.map((address, index) => (
               <DetailItem
                 key={`${address.source}-${index}`}
@@ -194,12 +194,12 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
         </div>
 
         <div>
-          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <Car className="h-3.5 w-3.5" />
             Vehículos
           </h4>
           <div className="space-y-2">
-            {detail.vehicles.length === 0 && <div className="text-sm text-slate-500">Sin vehículos detallados.</div>}
+            {detail.vehicles.length === 0 && <div className="text-sm text-muted-foreground">Sin vehículos detallados.</div>}
             {detail.vehicles.map(vehicle => (
               <DetailItem
                 key={vehicle.id}
@@ -207,7 +207,7 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
                 meta={vehicle.ppu ? `${vehicle.ppu}${vehicle.ppu_dv ? `-${vehicle.ppu_dv}` : ''}` : null}
               >
                 <div className="flex items-center gap-2">
-                  <CalendarDays className="h-3.5 w-3.5 text-slate-600" />
+                  <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
                   <span>{vehicle.anio_fabricacion ?? 'Año s/d'} · {vehicle.tipo_vehiculo ?? 'Tipo s/d'} · {vehicle.color ?? 'Color s/d'}</span>
                 </div>
                 <div>Avalúo fiscal: {formatCurrency(vehicle.avaluo_fiscal)}</div>
@@ -218,12 +218,12 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
         </div>
 
         <div>
-          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <Landmark className="h-3.5 w-3.5" />
             Propiedades
           </h4>
           <div className="space-y-2">
-            {detail.properties.length === 0 && <div className="text-sm text-slate-500">Sin propiedades detalladas.</div>}
+            {detail.properties.length === 0 && <div className="text-sm text-muted-foreground">Sin propiedades detalladas.</div>}
             {detail.properties.map((property, index) => (
               <DetailItem
                 key={property.id || property.rol || property.direccion || `property-${index}`}
@@ -241,7 +241,7 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
         </div>
 
         <div>
-          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <Phone className="h-3.5 w-3.5" />
             Contactos
           </h4>
@@ -257,7 +257,7 @@ function PersonaDetail360Panel({ rut }: { rut: string }) {
               </DetailItem>
             )}
             {detail.contact_points.length === 0 && !detail.executive_contact && (
-              <div className="text-sm text-slate-500">Sin contactos adicionales.</div>
+              <div className="text-sm text-muted-foreground">Sin contactos adicionales.</div>
             )}
             {detail.contact_points.map(point => (
               <DetailItem
@@ -292,14 +292,14 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
       {/* Header Card */}
       <div className="card p-6">
         <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-brand-500/20 flex items-center justify-center border border-brand-500/30 flex-shrink-0">
-            <User className="w-7 h-7 text-brand-400" />
+          <div className="w-14 h-14 rounded-2xl bg-surface-muted flex items-center justify-center border border-primary/30 flex-shrink-0">
+            <User className="w-7 h-7 text-primary-ink" />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-xl font-bold text-white truncate">
+            <h2 className="text-xl font-bold text-foreground truncate">
               {persona.nombre_completo?.trim() || 'Sin nombre registrado'}
             </h2>
-            <p className="text-sm font-mono text-brand-400 mt-0.5">
+            <p className="text-sm font-mono text-primary-ink mt-0.5">
               {safeDisplayRut(persona.rutid)}
             </p>
             <div className="flex items-center gap-3 mt-2">
@@ -332,9 +332,9 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
 
           {/* Score */}
           <div className="text-right flex-shrink-0">
-            <div className="text-3xl font-bold text-white">{scorePatrimonial}</div>
-            <div className="text-xs text-slate-500 mt-0.5">Score patrimonial</div>
-            <div className="text-xs text-slate-600 mt-1">Cobertura: {coberturaPct}%</div>
+            <div className="text-3xl font-bold text-foreground">{scorePatrimonial}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Score patrimonial</div>
+            <div className="text-xs text-muted-foreground mt-1">Cobertura: {coberturaPct}%</div>
           </div>
         </div>
       </div>
@@ -342,7 +342,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Datos Personales */}
         <div className="card p-5">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
             <User className="w-3.5 h-3.5" />
             Datos personales
           </h3>
@@ -359,7 +359,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
 
         {/* Patrimonio */}
         <div className="card p-5">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
             <Landmark className="w-3.5 h-3.5" />
             Patrimonio
           </h3>
@@ -435,7 +435,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
             />
           )}
 
-          <div className="mt-4 pt-4 border-t border-[#334155]/50 space-y-3">
+          <div className="mt-4 pt-4 border-t border-border space-y-3">
             <ScoreMeter
               score={persona.score_patrimonial ?? 0}
               max={100}
@@ -451,7 +451,7 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
 
         {/* Domicilio */}
         <div className="card p-5">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
             <MapPin className="w-3.5 h-3.5" />
             Domicilio registrado
           </h3>
@@ -459,8 +459,8 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
           <DataRow label="Región" value={persona.domicilio_region} />
 
           {/* Datos de contactabilidad */}
-          <div className="mt-4 pt-4 border-t border-[#334155]/50">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-600 mb-3">
+          <div className="mt-4 pt-4 border-t border-border">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
               Contactabilidad
             </h4>
             <div className="grid grid-cols-2 gap-2">
@@ -475,11 +475,11 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
                   key={c.label}
                   className={`flex items-center gap-1.5 text-xs rounded-md px-2 py-1.5
                     ${c.ok
-                      ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                      : 'bg-slate-500/10 text-slate-600 border border-slate-500/10'
+                      ? 'bg-success-bg text-success border border-success/20'
+                      : 'bg-surface-muted text-muted-foreground border border-border'
                     }`}
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${c.ok ? 'bg-green-500' : 'bg-slate-600'}`} />
+                  <span className={`w-1.5 h-1.5 rounded-full ${c.ok ? 'bg-success' : 'bg-surface-muted'}`} />
                   {c.label}
                 </div>
               ))}
@@ -496,20 +496,20 @@ export function PersonaProfile({ persona }: PersonaProfileProps) {
       <div className="card overflow-hidden">
         <button
           onClick={() => setShowRawData(!showRawData)}
-          className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors"
+          className="w-full flex items-center justify-between p-4 hover:bg-surface-muted transition-colors"
         >
-          <span className="text-xs font-semibold text-slate-400 flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
             <BarChart3 className="w-3.5 h-3.5" />
             Datos crudos JSON
           </span>
           {showRawData ? (
-            <ChevronUp className="w-4 h-4 text-slate-500" />
+            <ChevronUp className="w-4 h-4 text-muted-foreground" />
           ) : (
-            <ChevronDown className="w-4 h-4 text-slate-500" />
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
           )}
         </button>
         {showRawData && (
-          <pre className="p-4 pt-0 text-[10px] font-mono text-slate-400 overflow-x-auto">
+          <pre className="p-4 pt-0 text-[10px] font-mono text-muted-foreground overflow-x-auto">
             {JSON.stringify(persona, null, 2)}
           </pre>
         )}

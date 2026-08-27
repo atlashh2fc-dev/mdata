@@ -11,7 +11,7 @@ export function Spinner({ size = 'md', className }: SpinnerProps) {
     <div
       className={cn(
         sizeClass,
-        'border-2 border-brand-500/20 border-t-brand-500 rounded-full animate-spin',
+        'border-2 border-primary/20 border-t-primary rounded-full animate-spin',
         className
       )}
     />
@@ -22,7 +22,7 @@ export function LoadingState({ text = 'Cargando...' }: { text?: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 gap-4">
       <Spinner size="lg" />
-      <p className="text-sm text-slate-500">{text}</p>
+      <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   )
 }
@@ -38,12 +38,12 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-      <div className="w-12 h-12 rounded-full bg-surface-800 flex items-center justify-center">
+      <div className="w-12 h-12 rounded-full bg-surface-muted flex items-center justify-center">
         <span className="text-2xl">◦</span>
       </div>
       <div>
-        <p className="text-sm font-medium text-slate-300">{title}</p>
-        {description && <p className="text-xs text-slate-500 mt-1">{description}</p>}
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        {description && <p className="text-xs text-muted-foreground mt-1">{description}</p>}
       </div>
       {action}
     </div>

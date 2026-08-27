@@ -910,9 +910,9 @@ function getExportBaseName(fileName?: string | null): string {
 }
 
 function getCoverageTone(pct: number): string {
-  if (pct >= 70) return 'text-green-300'
-  if (pct >= 40) return 'text-amber-300'
-  return 'text-slate-300'
+  if (pct >= 70) return 'text-success'
+  if (pct >= 40) return 'text-warning'
+  return 'text-foreground'
 }
 
 function rowHasValue(row: BaseBuilderExportRow, labelMap: Map<BaseBuilderFieldKey, string>, field: BaseBuilderFieldKey): boolean {
@@ -1587,24 +1587,24 @@ export function PoblarBasePage() {
           <div className="xl:col-span-2 card p-5">
             <div className="flex items-center justify-between gap-4 mb-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-200">
+                <h3 className="text-sm font-semibold text-foreground">
                   Poblamiento desde maestro
                 </h3>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Conservamos tus columnas originales y agregamos las variables que elijas del maestro.
                 </p>
               </div>
               {uploadedFile && (
                 <div className="text-right">
-                  <p className="text-xs text-slate-400">{uploadedFile.name}</p>
-                  <p className="text-[11px] text-brand-400">
+                  <p className="text-xs text-muted-foreground">{uploadedFile.name}</p>
+                  <p className="text-[11px] text-primary-ink">
                     {formatNumber(parsedUpload.rows.length)} filas, {formatNumber(parsedUpload.headers.length)} columnas
                   </p>
                 </div>
               )}
             </div>
 
-            <label className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-[#334155] bg-[#0b1328] px-4 py-8 text-center hover:border-brand-500/40 hover:bg-white/[0.02] transition-all cursor-pointer">
+            <label className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-surface px-4 py-8 text-center hover:border-primary/40 hover:bg-surface-muted transition-all cursor-pointer">
               <input
                 type="file"
                 accept=".csv,.txt,.xlsx,.xls"
@@ -1614,21 +1614,21 @@ export function PoblarBasePage() {
               {loadingFile ? (
                 <Spinner size="sm" />
               ) : (
-                <Upload className="w-5 h-5 text-brand-400" />
+                <Upload className="w-5 h-5 text-primary-ink" />
               )}
               <div>
-                <p className="text-sm font-medium text-white">
+                <p className="text-sm font-medium text-foreground">
                   {loadingFile ? 'Leyendo archivo...' : 'Subir base para poblar'}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   CSV o Excel. Puedes cruzar por RUT, nombre de persona o razón social y luego elegir qué traer del maestro.
                 </p>
               </div>
             </label>
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
-                <p className="text-xs font-medium text-slate-400 mb-3">Cómo quieres cruzar</p>
+              <div className="rounded-xl border border-border bg-surface p-4">
+                <p className="text-xs font-medium text-muted-foreground mb-3">Cómo quieres cruzar</p>
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { value: 'rut', label: 'Por RUT' },
@@ -1642,15 +1642,15 @@ export function PoblarBasePage() {
                       className={cn(
                         'rounded-lg border px-3 py-2 text-sm transition-all',
                         selectedMatchMode === option.value
-                          ? 'border-brand-500/50 bg-brand-500/10 text-white'
-                          : 'border-[#253357] text-slate-400 hover:border-brand-500/30'
+                          ? 'border-primary/50 bg-surface-muted text-foreground'
+                          : 'border-border text-muted-foreground hover:border-primary/30'
                       )}
                     >
                       {option.label}
                     </button>
                   ))}
                 </div>
-                <p className="text-xs font-medium text-slate-400 mt-4 mb-2">
+                <p className="text-xs font-medium text-muted-foreground mt-4 mb-2">
                   {selectedMatchMode === 'rut'
                     ? 'Columna RUT detectada'
                     : selectedMatchMode === 'nombre_persona'
@@ -1674,7 +1674,7 @@ export function PoblarBasePage() {
                     ))
                   )}
                 </select>
-                <p className="text-xs text-slate-500 mt-2">
+                <p className="text-xs text-muted-foreground mt-2">
                   {detectedColumnForMode
                     ? `Sugerencia automática: ${detectedColumnForMode}`
                     : selectedMatchMode === 'rut'
@@ -1684,17 +1684,17 @@ export function PoblarBasePage() {
                         : 'Si tu archivo no trae una razón social clara, cambia la columna o usa cruce por RUT.'}
                 </p>
                 {selectedMatchMode === 'nombre_persona' && (
-                  <p className="text-xs text-slate-500 mt-2">
+                  <p className="text-xs text-muted-foreground mt-2">
                     El cruce por nombre normaliza tildes y mayúsculas. Si un nombre aparece en más de un RUT, queda como ambiguo.
                   </p>
                 )}
                 {selectedMatchMode === 'razon_social' && (
-                  <p className="text-xs text-slate-500 mt-2">
+                  <p className="text-xs text-muted-foreground mt-2">
                     El cruce por razón social normaliza tildes, mayúsculas y sufijos como SpA o Ltda.
                   </p>
                 )}
                 {selectedMatchColumn && !selectedColumnIsValid && (
-                  <p className="text-xs text-amber-300 mt-2">
+                  <p className="text-xs text-warning mt-2">
                     {selectedMatchMode === 'rut'
                       ? 'La columna elegida no parece ser RUT.'
                       : selectedMatchMode === 'nombre_persona'
@@ -1703,15 +1703,15 @@ export function PoblarBasePage() {
                   </p>
                 )}
                 {selectedMatchMode === 'rut' && selectedDvColumn && selectedColumnLooksLikeRut && (
-                  <p className="text-xs text-emerald-300 mt-2">
+                  <p className="text-xs text-success mt-2">
                     Detectamos también la columna DV: {selectedDvColumn}
                   </p>
                 )}
               </div>
 
-              <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
-                <p className="text-xs font-medium text-slate-400 mb-2">Qué va a salir</p>
-                <p className="text-sm text-slate-200">
+              <div className="rounded-xl border border-border bg-surface p-4">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Qué va a salir</p>
+                <p className="text-sm text-foreground">
                   Se exporta tu archivo original más:
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1734,10 +1734,10 @@ export function PoblarBasePage() {
             <div className="mt-5">
               <div className="flex flex-col gap-3 mb-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-200">
+                  <h4 className="text-sm font-semibold text-foreground">
                     Campos a poblar desde maestro
                   </h4>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     Elige qué columnas quieres agregar a tu base al exportar.
                   </p>
                 </div>
@@ -1745,31 +1745,31 @@ export function PoblarBasePage() {
                   <button
                     type="button"
                     onClick={applyUsefulTemplate}
-                    className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-xs font-medium text-brand-200 transition hover:border-brand-400/60 hover:bg-brand-500/15"
+                    className="rounded-lg border border-primary/40 bg-surface-muted px-3 py-2 text-xs font-medium text-primary-ink transition hover:border-primary/60 hover:bg-surface-muted"
                   >
                     Plantilla útil
                   </button>
                   <button
                     type="button"
                     onClick={restoreRecommendedTemplate}
-                    className="rounded-lg border border-[#253357] px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-brand-500/30 hover:bg-white/[0.03]"
+                    className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:border-primary/30 hover:bg-surface-muted"
                   >
                     Recomendado
                   </button>
                   <button
                     type="button"
                     onClick={() => applyFieldSelection([])}
-                    className="rounded-lg border border-[#253357] px-3 py-2 text-xs font-medium text-slate-400 transition hover:border-rose-500/30 hover:text-rose-200"
+                    className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition hover:border-danger/30 hover:text-danger"
                   >
                     Limpiar
                   </button>
-                  <span className="text-xs text-brand-400">
+                  <span className="text-xs text-primary-ink">
                     {formatNumber(selectedFields.length)} campos
                   </span>
                 </div>
               </div>
 
-              <div className="mb-4 rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+              <div className="mb-4 rounded-xl border border-border bg-surface p-4">
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1782,20 +1782,20 @@ export function PoblarBasePage() {
                     className="mt-1"
                   />
                   <div>
-                    <p className="text-sm font-medium text-white">
+                    <p className="text-sm font-medium text-foreground">
                       Opcional: buscar mails y teléfonos faltantes en la web
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       Usa búsqueda web + IA para intentar encontrar contactos cuando el maestro no los trae.
                       En RUT y razón social, la búsqueda usa la empresa detectada y avanza en tandas automáticas.
                     </p>
                     {!webEnrichmentAvailable && (
-                      <p className="text-xs text-amber-300 mt-2">
+                      <p className="text-xs text-warning mt-2">
                         El cruce por nombre pobla datos desde el maestro; la búsqueda web queda reservada para empresas.
                       </p>
                     )}
                     {!contactFieldSelected && (
-                      <p className="text-xs text-amber-300 mt-2">
+                      <p className="text-xs text-warning mt-2">
                         Esta opción solo aplica si seleccionas Email o Teléfono celular.
                       </p>
                     )}
@@ -1807,11 +1807,11 @@ export function PoblarBasePage() {
                 {FIELD_CATEGORIES.map(category => (
                   <div key={category}>
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-600">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                         {CATEGORY_LABELS[category]}
                       </p>
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-slate-500">
+                        <span className="text-[11px] text-muted-foreground">
                           {formatNumber(BASE_BUILDER_FIELDS.filter(field => (
                             field.category === category && selectedFieldSet.has(field.key)
                           )).length)} / {formatNumber(BASE_BUILDER_FIELDS.filter(field => field.category === category).length)}
@@ -1819,14 +1819,14 @@ export function PoblarBasePage() {
                         <button
                           type="button"
                           onClick={() => selectCategory(category)}
-                          className="rounded-md border border-[#253357] px-2 py-1 text-[11px] font-medium text-slate-300 transition hover:border-brand-500/40 hover:text-brand-200"
+                          className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground transition hover:border-primary/40 hover:text-primary-ink"
                         >
                           Todo
                         </button>
                         <button
                           type="button"
                           onClick={() => clearCategory(category)}
-                          className="rounded-md border border-[#253357] px-2 py-1 text-[11px] font-medium text-slate-500 transition hover:border-rose-500/30 hover:text-rose-200"
+                          className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:border-danger/30 hover:text-danger"
                         >
                           Limpiar
                         </button>
@@ -1844,16 +1844,16 @@ export function PoblarBasePage() {
                               className={cn(
                                 'text-left rounded-xl border p-3 transition-all',
                                 active
-                                  ? 'border-brand-500/40 bg-brand-500/10'
-                                  : 'border-[#253357] hover:border-brand-500/30 hover:bg-white/[0.02]'
+                                  ? 'border-primary/40 bg-surface-muted'
+                                  : 'border-border hover:border-primary/30 hover:bg-surface-muted'
                               )}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div>
-                                  <p className="text-sm font-medium text-white">{field.label}</p>
-                                  <p className="text-xs text-slate-500 mt-1">{field.description}</p>
+                                  <p className="text-sm font-medium text-foreground">{field.label}</p>
+                                  <p className="text-xs text-muted-foreground mt-1">{field.description}</p>
                                 </div>
-                                {active && <Check className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />}
+                                {active && <Check className="w-4 h-4 text-primary-ink flex-shrink-0 mt-0.5" />}
                               </div>
                             </button>
                           )
@@ -1866,54 +1866,54 @@ export function PoblarBasePage() {
           </div>
 
           <div className="card p-5">
-            <h3 className="text-sm font-semibold text-slate-200 mb-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">
               Cruce y exportación
             </h3>
 
             <div className="space-y-4">
-              <div className="p-3 bg-[#111827] rounded-lg border border-[#253357]">
-                <p className="text-xs text-slate-400 mb-1">Archivo cargado</p>
-                <p className="text-sm font-medium text-white">
+              <div className="p-3 bg-surface rounded-lg border border-border">
+                <p className="text-xs text-muted-foreground mb-1">Archivo cargado</p>
+                <p className="text-sm font-medium text-foreground">
                   {uploadedFile?.name ?? 'Aún no subes un archivo'}
                 </p>
-                <p className="text-xs text-brand-400 mt-1">
+                <p className="text-xs text-primary-ink mt-1">
                   {formatNumber(parsedUpload.rows.length)} filas listas para poblar
                 </p>
               </div>
 
-              <div className="p-3 bg-[#111827] rounded-lg border border-[#253357]">
+              <div className="p-3 bg-surface rounded-lg border border-border">
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-medium text-slate-300">Poblamiento web masivo</p>
-                    <p className="mt-1 text-[11px] text-slate-500">
+                    <p className="text-xs font-medium text-foreground">Poblamiento web masivo</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
                       Motor principal: Open WebSearch con Startpage primero. Cron semanal habilitado.
                     </p>
                   </div>
-                  <Clock className="h-4 w-4 flex-shrink-0 text-brand-400" />
+                  <Clock className="h-4 w-4 flex-shrink-0 text-primary-ink" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
-                    <p className="text-slate-500">En cola</p>
-                    <p className="mt-1 text-base font-semibold text-white">
+                  <div className="rounded-md border border-border bg-surface p-2">
+                    <p className="text-muted-foreground">En cola</p>
+                    <p className="mt-1 text-base font-semibold text-foreground">
                       {formatNumber(toCount(webOpsProgress?.queue?.queued))}
                     </p>
                   </div>
-                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
-                    <p className="text-slate-500">Completadas</p>
-                    <p className="mt-1 text-base font-semibold text-white">
+                  <div className="rounded-md border border-border bg-surface p-2">
+                    <p className="text-muted-foreground">Completadas</p>
+                    <p className="mt-1 text-base font-semibold text-foreground">
                       {formatNumber(toCount(webOpsProgress?.queue?.completed))}
                     </p>
                   </div>
-                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
-                    <p className="text-slate-500">Con email</p>
-                    <p className="mt-1 text-base font-semibold text-white">
+                  <div className="rounded-md border border-border bg-surface p-2">
+                    <p className="text-muted-foreground">Con email</p>
+                    <p className="mt-1 text-base font-semibold text-foreground">
                       {formatNumber(toCount(webOpsProgress?.results?.with_email))}
                     </p>
                   </div>
-                  <div className="rounded-md border border-[#253357] bg-[#0b1328] p-2">
-                    <p className="text-slate-500">Con teléfono</p>
-                    <p className="mt-1 text-base font-semibold text-white">
+                  <div className="rounded-md border border-border bg-surface p-2">
+                    <p className="text-muted-foreground">Con teléfono</p>
+                    <p className="mt-1 text-base font-semibold text-foreground">
                       {formatNumber(toCount(webOpsProgress?.results?.with_phone))}
                     </p>
                   </div>
@@ -1924,7 +1924,7 @@ export function PoblarBasePage() {
                     type="button"
                     onClick={() => handleWebOps('progress')}
                     disabled={webOpsRunning}
-                    className="rounded-lg border border-[#253357] px-2 py-2 text-xs font-medium text-slate-300 transition hover:border-brand-500/40 disabled:opacity-50"
+                    className="rounded-lg border border-border px-2 py-2 text-xs font-medium text-foreground transition hover:border-primary/40 disabled:opacity-50"
                   >
                     <RefreshCw className="mx-auto h-4 w-4" />
                   </button>
@@ -1932,7 +1932,7 @@ export function PoblarBasePage() {
                     type="button"
                     onClick={() => handleWebOps('enqueue')}
                     disabled={webOpsRunning}
-                    className="rounded-lg border border-[#253357] px-2 py-2 text-xs font-medium text-slate-300 transition hover:border-brand-500/40 disabled:opacity-50"
+                    className="rounded-lg border border-border px-2 py-2 text-xs font-medium text-foreground transition hover:border-primary/40 disabled:opacity-50"
                   >
                     Encolar
                   </button>
@@ -1940,19 +1940,19 @@ export function PoblarBasePage() {
                     type="button"
                     onClick={() => handleWebOps('run')}
                     disabled={webOpsRunning}
-                    className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-2 py-2 text-xs font-medium text-brand-200 transition hover:border-brand-400/60 disabled:opacity-50"
+                    className="rounded-lg border border-primary/40 bg-surface-muted px-2 py-2 text-xs font-medium text-primary-ink transition hover:border-primary/60 disabled:opacity-50"
                   >
                     {webOpsRunning ? <Spinner size="sm" /> : <Play className="mx-auto h-4 w-4" />}
                   </button>
                 </div>
 
                 {webOpsStatus && (
-                  <p className="mt-2 text-[11px] text-slate-400">{webOpsStatus}</p>
+                  <p className="mt-2 text-[11px] text-muted-foreground">{webOpsStatus}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">
+                <label className="block text-xs font-medium text-muted-foreground mb-2">
                   Formato de salida
                 </label>
                 <div className="space-y-2">
@@ -1976,17 +1976,17 @@ export function PoblarBasePage() {
                         className={cn(
                           'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
                           exportFormat === option.value
-                            ? 'border-brand-500/50 bg-brand-500/10'
-                            : 'border-[#253357] hover:border-brand-500/30'
+                            ? 'border-primary/50 bg-surface-muted'
+                            : 'border-border hover:border-primary/30'
                         )}
                       >
                         <Icon className={cn(
                           'w-4 h-4',
-                          exportFormat === option.value ? 'text-brand-400' : 'text-slate-500'
+                          exportFormat === option.value ? 'text-primary-ink' : 'text-muted-foreground'
                         )} />
                         <div className="text-left">
-                          <p className="text-sm font-medium text-white">{option.label}</p>
-                          <p className="text-xs text-slate-500">{option.desc}</p>
+                          <p className="text-sm font-medium text-foreground">{option.label}</p>
+                          <p className="text-xs text-muted-foreground">{option.desc}</p>
                         </div>
                       </button>
                     )
@@ -1995,7 +1995,7 @@ export function PoblarBasePage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">
+                <label className="block text-xs font-medium text-muted-foreground mb-2">
                   Plantilla de salida
                 </label>
                 <div className="space-y-2">
@@ -2028,20 +2028,20 @@ export function PoblarBasePage() {
                         className={cn(
                           'w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left',
                           exportTemplate === option.value
-                            ? 'border-brand-500/50 bg-brand-500/10'
-                            : 'border-[#253357] hover:border-brand-500/30',
-                          disabled && 'opacity-50 cursor-not-allowed hover:border-[#253357]'
+                            ? 'border-primary/50 bg-surface-muted'
+                            : 'border-border hover:border-primary/30',
+                          disabled && 'opacity-50 cursor-not-allowed hover:border-border'
                         )}
                       >
                         <Table2 className={cn(
                           'w-4 h-4',
-                          exportTemplate === option.value ? 'text-brand-400' : 'text-slate-500'
+                          exportTemplate === option.value ? 'text-primary-ink' : 'text-muted-foreground'
                         )} />
                         <div>
-                          <p className="text-sm font-medium text-white">{option.label}</p>
-                          <p className="text-xs text-slate-500">{option.desc}</p>
+                          <p className="text-sm font-medium text-foreground">{option.label}</p>
+                          <p className="text-xs text-muted-foreground">{option.desc}</p>
                           {option.value === 'infobusiness' && !infobusinessAvailable && (
-                            <p className="text-xs text-amber-300 mt-1">
+                            <p className="text-xs text-warning mt-1">
                               Disponible sólo para Excel con cruce por RUT.
                             </p>
                           )}
@@ -2076,23 +2076,23 @@ export function PoblarBasePage() {
               </button>
 
               {analyzing && (
-                <div className="rounded-lg border border-[#253357] bg-[#111827] p-3 space-y-2">
+                <div className="rounded-lg border border-border bg-surface p-3 space-y-2">
                   <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="text-slate-400">Progreso del poblamiento</span>
-                    <span className="text-brand-300 font-medium">{analyzeStatus}</span>
+                    <span className="text-muted-foreground">Progreso del poblamiento</span>
+                    <span className="text-primary-ink font-medium">{analyzeStatus}</span>
                   </div>
 
                   {analyzeProgress && analyzeProgress.totalCandidates !== null ? (
                     <>
-                      <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                         <span>Empresas web procesadas</span>
-                        <span className="text-slate-200">
+                        <span className="text-foreground">
                           {formatNumber(analyzeProgress.processed)} de {formatNumber(analyzeProgress.totalCandidates)}
                         </span>
                       </div>
-                      <div className="h-2 rounded-full bg-[#0b1328] overflow-hidden">
+                      <div className="h-2 rounded-full bg-surface overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-cyan-500 to-brand-500 transition-all"
+                          className="h-full bg-gradient-to-r from-primary to-primary transition-all"
                           style={{
                             width: `${analyzeProgress.totalCandidates > 0
                               ? Math.max(6, Math.min(100, (analyzeProgress.processed / analyzeProgress.totalCandidates) * 100))
@@ -2100,7 +2100,7 @@ export function PoblarBasePage() {
                           }}
                         />
                       </div>
-                      <div className="flex items-center justify-between gap-3 text-[11px] text-slate-500">
+                      <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
                         <span>Lote actual: {formatNumber(analyzeProgress.attempted)}</span>
                         <span>Desde cache: {formatNumber(analyzeProgress.fromCache)}</span>
                         <span>Pasada: {formatNumber(analyzeProgress.pass)}</span>
@@ -2108,10 +2108,10 @@ export function PoblarBasePage() {
                     </>
                   ) : (
                     <div className="space-y-2">
-                      <div className="h-2 rounded-full bg-[#0b1328] overflow-hidden">
-                        <div className="h-full w-1/3 bg-gradient-to-r from-cyan-500 to-brand-500 animate-pulse" />
+                      <div className="h-2 rounded-full bg-surface overflow-hidden">
+                        <div className="h-full w-1/3 bg-gradient-to-r from-primary to-primary animate-pulse" />
                       </div>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Preparando cruce y estimando empresas candidatas para búsqueda web.
                       </p>
                     </div>
@@ -2122,37 +2122,37 @@ export function PoblarBasePage() {
               {analysis && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
-                      <p className="text-[11px] text-slate-500">Cruce exitoso</p>
-                      <p className="text-lg font-semibold text-white mt-1">
+                    <div className="rounded-lg border border-border bg-surface p-3">
+                      <p className="text-[11px] text-muted-foreground">Cruce exitoso</p>
+                      <p className="text-lg font-semibold text-foreground mt-1">
                         {formatPercentage(analysis.match_rate)}
                       </p>
                     </div>
-                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
-                      <p className="text-[11px] text-slate-500">
+                    <div className="rounded-lg border border-border bg-surface p-3">
+                      <p className="text-[11px] text-muted-foreground">
                         {analysis.match_mode === 'rut'
                           ? 'Con RUT válido'
                           : analysis.match_mode === 'nombre_persona'
                             ? 'Con nombre útil'
                             : 'Con razón social útil'}
                       </p>
-                      <p className="text-lg font-semibold text-white mt-1">
+                      <p className="text-lg font-semibold text-foreground mt-1">
                         {formatNumber(analysis.valid_input_count)}
                       </p>
                     </div>
                   </div>
-                  <div className="rounded-lg border border-[#253357] bg-[#111827] p-3 text-xs text-slate-400 space-y-1">
+                  <div className="rounded-lg border border-border bg-surface p-3 text-xs text-muted-foreground space-y-1">
                     <div className="flex items-center justify-between">
                       <span>Filas subidas</span>
-                      <span className="text-slate-200">{formatNumber(analysis.requested_count)}</span>
+                      <span className="text-foreground">{formatNumber(analysis.requested_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Cruzaron con maestro</span>
-                      <span className="text-slate-200">{formatNumber(analysis.matched_count)}</span>
+                      <span className="text-foreground">{formatNumber(analysis.matched_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>No cruzaron</span>
-                      <span className="text-slate-200">{formatNumber(analysis.unmatched_count)}</span>
+                      <span className="text-foreground">{formatNumber(analysis.unmatched_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>
@@ -2162,49 +2162,49 @@ export function PoblarBasePage() {
                             ? 'Sin nombre útil'
                             : 'Sin razón social útil'}
                       </span>
-                      <span className="text-slate-200">{formatNumber(analysis.invalid_input_count)}</span>
+                      <span className="text-foreground">{formatNumber(analysis.invalid_input_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Ambiguos</span>
-                      <span className="text-slate-200">{formatNumber(analysis.ambiguous_count)}</span>
+                      <span className="text-foreground">{formatNumber(analysis.ambiguous_count)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Duplicados</span>
-                      <span className="text-slate-200">{formatNumber(analysis.duplicate_count)}</span>
+                      <span className="text-foreground">{formatNumber(analysis.duplicate_count)}</span>
                     </div>
                   </div>
 
                   {infobusinessStructure ? (
-                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
-                      <p className="text-xs font-medium text-slate-300 mb-2">
+                    <div className="rounded-lg border border-border bg-surface p-3">
+                      <p className="text-xs font-medium text-foreground mb-2">
                         Estructura Plantilla Infobusiness
                       </p>
-                      <div className="mb-3 space-y-1.5 border-b border-[#253357] pb-3 text-xs">
+                      <div className="mb-3 space-y-1.5 border-b border-border pb-3 text-xs">
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-slate-400">EMPRESA exportables</span>
-                          <span className="text-slate-200">
+                          <span className="text-muted-foreground">EMPRESA exportables</span>
+                          <span className="text-foreground">
                             {formatNumber(infobusinessStructure.companyRows)} de {formatNumber(infobusinessStructure.uniqueMatchedRows)}
                           </span>
                         </div>
                         {infobusinessStructure.duplicateRows > 0 && (
                           <>
                             <div className="flex items-center justify-between gap-3">
-                              <span className="text-slate-400">RUTs duplicados omitidos</span>
-                              <span className="font-medium text-amber-300">
+                              <span className="text-muted-foreground">RUTs duplicados omitidos</span>
+                              <span className="font-medium text-warning">
                                 {formatNumber(infobusinessStructure.duplicateRows)}
                               </span>
                             </div>
-                            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] text-slate-300">
-                              <p className="mb-1 font-medium text-amber-200">Duplicados detectados</p>
+                            <div className="rounded-md border border-warning/20 bg-warning-bg px-2.5 py-2 text-[11px] text-foreground">
+                              <p className="mb-1 font-medium text-warning">Duplicados detectados</p>
                               <div className="max-h-28 space-y-1 overflow-y-auto pr-1">
                                 {infobusinessStructure.duplicateGroups.slice(0, 20).map(group => (
                                   <div key={group.rutid} className="flex items-center justify-between gap-3">
                                     <span>{group.rutid}</span>
-                                    <span className="text-slate-400">{formatNumber(group.count)} veces</span>
+                                    <span className="text-muted-foreground">{formatNumber(group.count)} veces</span>
                                   </div>
                                 ))}
                                 {infobusinessStructure.duplicateGroups.length > 20 && (
-                                  <p className="text-slate-500">
+                                  <p className="text-muted-foreground">
                                     +{formatNumber(infobusinessStructure.duplicateGroups.length - 20)} RUTs repetidos más
                                   </p>
                                 )}
@@ -2214,8 +2214,8 @@ export function PoblarBasePage() {
                         )}
                         {infobusinessStructure.excludedRows > 0 && (
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-slate-400">RUTs sin empresa omitidos</span>
-                            <span className="font-medium text-amber-300">
+                            <span className="text-muted-foreground">RUTs sin empresa omitidos</span>
+                            <span className="font-medium text-warning">
                               {formatNumber(infobusinessStructure.excludedRows)}
                             </span>
                           </div>
@@ -2227,12 +2227,12 @@ export function PoblarBasePage() {
                             key={item.label}
                             className="flex items-center justify-between gap-3 text-xs"
                           >
-                            <span className="text-slate-400">{item.label}</span>
+                            <span className="text-muted-foreground">{item.label}</span>
                             <div className="text-right">
                               <span className={cn('font-medium', getCoverageTone(item.pct))}>
                                 {formatNumber(item.count)}
                               </span>
-                              <span className="text-slate-500">
+                              <span className="text-muted-foreground">
                                 {' '}de {formatNumber(item.total)} ({formatPercentage(item.pct)})
                               </span>
                             </div>
@@ -2241,8 +2241,8 @@ export function PoblarBasePage() {
                       </div>
                     </div>
                   ) : analysis.coverage.length > 0 && (
-                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3">
-                      <p className="text-xs font-medium text-slate-300 mb-2">
+                    <div className="rounded-lg border border-border bg-surface p-3">
+                      <p className="text-xs font-medium text-foreground mb-2">
                         Qué pudimos poblar de lo pedido
                       </p>
                       <div className="space-y-1.5">
@@ -2251,12 +2251,12 @@ export function PoblarBasePage() {
                             key={item.field}
                             className="flex items-center justify-between gap-3 text-xs"
                           >
-                            <span className="text-slate-400">{item.label}</span>
+                            <span className="text-muted-foreground">{item.label}</span>
                             <div className="text-right">
                               <span className={cn('font-medium', getCoverageTone(item.pct))}>
                                 {formatNumber(item.count)}
                               </span>
-                              <span className="text-slate-500">
+                              <span className="text-muted-foreground">
                                 {' '}de {formatNumber(analysis.requested_count)} ({formatPercentage(item.pct)})
                               </span>
                             </div>
@@ -2267,73 +2267,73 @@ export function PoblarBasePage() {
                   )}
 
                   {analysis.web_enrichment?.enabled && (
-                    <div className="rounded-lg border border-[#253357] bg-[#111827] p-3 text-xs text-slate-400 space-y-1">
+                    <div className="rounded-lg border border-border bg-surface p-3 text-xs text-muted-foreground space-y-1">
                       <div className="flex items-center justify-between">
                         <span>Ejecución web</span>
-                        <span className="text-emerald-300 font-medium">Sí, ejecutada</span>
+                        <span className="text-success font-medium">Sí, ejecutada</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Empresas candidatas</span>
-                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.candidates)}</span>
+                        <span className="text-foreground">{formatNumber(analysis.web_enrichment.candidates)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Web scraping intentado</span>
-                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.attempted)}</span>
+                        <span className="text-foreground">{formatNumber(analysis.web_enrichment.attempted)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Resultados desde cache</span>
-                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.from_cache)}</span>
+                        <span className="text-foreground">{formatNumber(analysis.web_enrichment.from_cache)}</span>
                       </div>
                       {analysis.web_enrichment.providers && (
                         <>
                           <div className="flex items-center justify-between">
                             <span>Motor gratis Open WebSearch</span>
-                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.open_websearch ?? 0)}</span>
+                            <span className="text-foreground">{formatNumber(analysis.web_enrichment.providers.open_websearch ?? 0)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>Busquedas con Brave</span>
-                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.brave)}</span>
+                            <span className="text-foreground">{formatNumber(analysis.web_enrichment.providers.brave)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>Fallback DuckDuckGo</span>
-                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.duckduckgo)}</span>
+                            <span className="text-foreground">{formatNumber(analysis.web_enrichment.providers.duckduckgo)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>Fallback Bing</span>
-                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.bing)}</span>
+                            <span className="text-foreground">{formatNumber(analysis.web_enrichment.providers.bing)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>Errores de busqueda</span>
-                            <span className="text-slate-200">{formatNumber(analysis.web_enrichment.providers.error)}</span>
+                            <span className="text-foreground">{formatNumber(analysis.web_enrichment.providers.error)}</span>
                           </div>
                         </>
                       )}
                       <div className="flex items-center justify-between">
                         <span>Email encontrado en web</span>
-                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.email_found)}</span>
+                        <span className="text-foreground">{formatNumber(analysis.web_enrichment.email_found)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Teléfono encontrado en web</span>
-                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.phone_found)}</span>
+                        <span className="text-foreground">{formatNumber(analysis.web_enrichment.phone_found)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Sin hallazgo usable</span>
-                        <span className="text-slate-200">{formatNumber(analysis.web_enrichment.without_result)}</span>
+                        <span className="text-foreground">{formatNumber(analysis.web_enrichment.without_result)}</span>
                       </div>
                       {analysis.web_enrichment.limited && (
-                        <p className="text-amber-300 pt-1">
+                        <p className="text-warning pt-1">
                           Quedaron empresas nuevas pendientes de búsqueda web para próximas corridas.
                         </p>
                       )}
                       {analysis.web_enrichment.candidates === 0 && (
-                        <p className="text-slate-500 pt-1">
+                        <p className="text-muted-foreground pt-1">
                           Esta corrida no tenía empresas cruzadas con faltantes de contacto para buscar.
                         </p>
                       )}
                       {analysis.web_enrichment.candidates > 0 &&
                         analysis.web_enrichment.email_found === 0 &&
                         analysis.web_enrichment.phone_found === 0 && (
-                        <p className="text-slate-500 pt-1">
+                        <p className="text-muted-foreground pt-1">
                           Sí se ejecutó, pero en esta corrida no encontró mails o teléfonos nuevos utilizables.
                         </p>
                       )}
@@ -2343,16 +2343,16 @@ export function PoblarBasePage() {
               )}
 
               {error && (
-                <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                  <CircleAlert className="w-4 h-4 text-amber-400 mt-0.5" />
-                  <p className="text-xs text-amber-300">{error}</p>
+                <div className="flex items-start gap-2 p-3 bg-warning-bg border border-warning/20 rounded-lg">
+                  <CircleAlert className="w-4 h-4 text-warning mt-0.5" />
+                  <p className="text-xs text-warning">{error}</p>
                 </div>
               )}
 
               {exportDone && (
-                <div className="flex items-center gap-2 p-2.5 bg-green-500/10 border border-green-500/20 rounded-lg">
-                  <Check className="w-4 h-4 text-green-400" />
-                  <p className="text-xs text-green-400">Descarga iniciada</p>
+                <div className="flex items-center gap-2 p-2.5 bg-success-bg border border-success/20 rounded-lg">
+                  <Check className="w-4 h-4 text-success" />
+                  <p className="text-xs text-success">Descarga iniciada</p>
                 </div>
               )}
 
@@ -2382,16 +2382,16 @@ export function PoblarBasePage() {
             <div className="card p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-200">
+                  <h3 className="text-sm font-semibold text-foreground">
                     {infobusinessStructure ? 'Estructura Plantilla Infobusiness' : 'Cobertura del poblamiento'}
                   </h3>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     {infobusinessStructure
                       ? 'Qué columnas de EMPRESA y EJECUTIVO vienen con información para esta salida.'
                       : 'Qué tanto pudimos completar de los campos elegidos sobre tu base.'}
                   </p>
                 </div>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Cruce por {getMatchModeLabel(analysis.match_mode)} en: {analysis.match_column ?? '—'}
                 </p>
               </div>
@@ -2399,23 +2399,23 @@ export function PoblarBasePage() {
               {infobusinessStructure ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
-                      <p className="text-xs text-slate-500">RUTs cruzados</p>
-                      <p className="text-lg font-semibold text-white mt-1">
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs text-muted-foreground">RUTs cruzados</p>
+                      <p className="text-lg font-semibold text-foreground mt-1">
                         {formatNumber(infobusinessStructure.matchedRows)}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
-                      <p className="text-xs text-slate-500">EMPRESA exportables</p>
-                      <p className="text-lg font-semibold text-emerald-300 mt-1">
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs text-muted-foreground">EMPRESA exportables</p>
+                      <p className="text-lg font-semibold text-success mt-1">
                         {formatNumber(infobusinessStructure.companyRows)}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
-                      <p className="text-xs text-slate-500">Omitidos sin empresa</p>
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs text-muted-foreground">Omitidos sin empresa</p>
                       <p className={cn(
                         'text-lg font-semibold mt-1',
-                        infobusinessStructure.excludedRows > 0 ? 'text-amber-300' : 'text-slate-200'
+                        infobusinessStructure.excludedRows > 0 ? 'text-warning' : 'text-foreground'
                       )}>
                         {formatNumber(infobusinessStructure.excludedRows)}
                       </p>
@@ -2424,11 +2424,11 @@ export function PoblarBasePage() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {infobusinessStructure.coverage.map(item => (
-                      <div key={item.label} className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                      <div key={item.label} className="rounded-xl border border-border bg-surface p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-white">{item.label}</p>
-                            <p className="text-xs text-slate-500 mt-1">
+                            <p className="text-sm font-medium text-foreground">{item.label}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
                               {formatNumber(item.count)} filas con dato
                             </p>
                           </div>
@@ -2436,13 +2436,13 @@ export function PoblarBasePage() {
                             {formatPercentage(item.pct)}
                           </span>
                         </div>
-                        <div className="mt-3 h-2 rounded-full bg-[#111827] overflow-hidden">
+                        <div className="mt-3 h-2 rounded-full bg-surface overflow-hidden">
                           <div
-                            className="h-full bg-gradient-to-r from-cyan-500 to-brand-500"
+                            className="h-full bg-gradient-to-r from-primary to-primary"
                             style={{ width: `${Math.min(item.pct, 100)}%` }}
                           />
                         </div>
-                        <div className="mt-3 text-[11px] text-slate-500">
+                        <div className="mt-3 text-[11px] text-muted-foreground">
                           <div className="flex items-center justify-between">
                             <span>Sobre plantilla</span>
                             <span>{formatNumber(item.count)} / {formatNumber(item.total)}</span>
@@ -2460,25 +2460,25 @@ export function PoblarBasePage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {analysis.coverage.map(item => (
-                    <div key={item.field} className="rounded-xl border border-[#253357] bg-[#0b1328] p-4">
+                    <div key={item.field} className="rounded-xl border border-border bg-surface p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-medium text-white">{item.label}</p>
-                          <p className="text-xs text-slate-500 mt-1">
+                          <p className="text-sm font-medium text-foreground">{item.label}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
                             {formatNumber(item.count)} filas pobladas
                           </p>
                         </div>
-                        <span className="text-sm font-semibold text-brand-400">
+                        <span className="text-sm font-semibold text-primary-ink">
                           {formatPercentage(item.pct)}
                         </span>
                       </div>
-                      <div className="mt-3 h-2 rounded-full bg-[#111827] overflow-hidden">
+                      <div className="mt-3 h-2 rounded-full bg-surface overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-cyan-500 to-brand-500"
+                          className="h-full bg-gradient-to-r from-primary to-primary"
                           style={{ width: `${Math.min(item.pct, 100)}%` }}
                         />
                       </div>
-                      <div className="mt-3 text-[11px] text-slate-500 space-y-1">
+                      <div className="mt-3 text-[11px] text-muted-foreground space-y-1">
                         <div className="flex items-center justify-between">
                           <span>Sobre válidos</span>
                           <span>{formatNumber(item.count)} / {formatNumber(item.total)}</span>
@@ -2497,12 +2497,12 @@ export function PoblarBasePage() {
             <div className="card p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-200">Previsualización de salida</h3>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <h3 className="text-sm font-semibold text-foreground">Previsualización de salida</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
                     Vista rápida de cómo sale tu base ya poblada.
                   </p>
                 </div>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   {formatNumber(analysis.rows.length)} filas exportables
                 </p>
               </div>
@@ -2510,7 +2510,7 @@ export function PoblarBasePage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-slate-500 border-b border-[#253357]">
+                    <tr className="text-left text-muted-foreground border-b border-border">
                       {previewOriginalColumns.map(column => (
                         <th key={column} className="py-2 pr-3 font-medium">{column}</th>
                       ))}
@@ -2522,9 +2522,9 @@ export function PoblarBasePage() {
                   </thead>
                   <tbody>
                     {analysis.rows.slice(0, 20).map((row, index) => (
-                      <tr key={`${row.rut_input}-${index}`} className="border-b border-[#13203d]">
+                      <tr key={`${row.rut_input}-${index}`} className="border-b border-border">
                         {previewOriginalColumns.map(column => (
-                          <td key={column} className="py-2 pr-3 text-slate-200">
+                          <td key={column} className="py-2 pr-3 text-foreground">
                             {String(row[column] ?? '—')}
                           </td>
                         ))}
@@ -2533,12 +2533,12 @@ export function PoblarBasePage() {
                             className={cn(
                               'inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium',
                               row.match_status === 'matched'
-                                ? 'bg-green-500/10 text-green-300'
+                                ? 'bg-success-bg text-success'
                                 : row.match_status === 'ambiguous'
-                                  ? 'bg-orange-500/10 text-orange-300'
+                                  ? 'bg-warning-bg text-warning'
                                 : row.match_status === 'not_found'
-                                  ? 'bg-amber-500/10 text-amber-300'
-                                  : 'bg-rose-500/10 text-rose-300'
+                                  ? 'bg-warning-bg text-warning'
+                                  : 'bg-danger-bg text-danger'
                             )}
                           >
                             {row.match_status === 'matched'
@@ -2551,7 +2551,7 @@ export function PoblarBasePage() {
                           </span>
                         </td>
                         {previewEnrichedColumns.map(column => (
-                          <td key={column} className="py-2 pr-3 text-slate-400">
+                          <td key={column} className="py-2 pr-3 text-muted-foreground">
                             {column === 'Maestro - Total avalúos'
                               ? formatCurrency(row[column] !== null && row[column] !== undefined ? Number(row[column]) : null)
                               : typeof row[column] === 'boolean'
@@ -2565,7 +2565,7 @@ export function PoblarBasePage() {
                 </table>
               </div>
               {analysis.original_columns.length > previewOriginalColumns.length && (
-                <p className="text-xs text-slate-500 mt-3">
+                <p className="text-xs text-muted-foreground mt-3">
                   La previsualización muestra {previewOriginalColumns.length} columnas originales de {analysis.original_columns.length}. La descarga incluye todas.
                 </p>
               )}

@@ -1,188 +1,56 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
+@import '../vendor/atlas-ui/styles.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --bg-base: #0f172a;
-    --bg-surface: #1e293b;
-    --bg-card: #1e293b;
-    --border: #334155;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --brand: #06b6d4;
-    --brand-light: #22d3ee;
-    --success: #10b981;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --info: #0ea5e9;
-  }
-
-  * {
-    @apply border-[#334155];
-  }
-
-  html {
-    @apply bg-[#0f172a] text-slate-100;
-    scrollbar-width: thin;
-    scrollbar-color: #334155 transparent;
-  }
-
-  body {
-    @apply bg-[#0f172a] text-slate-100 antialiased;
-    font-feature-settings: "ss01", "cv01";
-  }
-
+  * { border-color: var(--atlas-border); }
+  html { background: var(--atlas-background); color: var(--atlas-foreground); scrollbar-width: thin; scrollbar-color: var(--atlas-border) transparent; }
+  body { margin: 0; background: var(--atlas-background); color: var(--atlas-foreground); font-family: var(--atlas-font); font-size: 14px; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--atlas-accent); color: #262523; }
+  :focus-visible { outline: 2px solid var(--atlas-link); outline-offset: 2px; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  ::-webkit-scrollbar-thumb { background: var(--atlas-border); border-radius: 3px; }
 }
-
 @layer components {
-  .card {
-    @apply bg-[#1e293b]/80 backdrop-blur-md border border-[#334155]/80 rounded-xl shadow-elevation-1;
-  }
-
-  .card-hover {
-    @apply card transition-all duration-300 hover:border-brand-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:bg-[#1e293b];
-  }
-
-  .glass-panel {
-    @apply bg-[#0f172a]/70 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl;
-  }
-
-  .input-base {
-    @apply w-full bg-[#0f172a] border border-[#334155] rounded-lg px-3 py-2
-           text-sm text-slate-100 placeholder-slate-500
-           focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500
-           transition-all duration-150;
-  }
-
-  .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
-           bg-brand-600 hover:bg-brand-500 active:bg-brand-700
-           text-white text-sm font-medium
-           transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/50
-           disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
-           bg-surface-800 hover:bg-surface-700 active:bg-surface-900
-           border border-[#334155] hover:border-brand-500/30
-           text-slate-300 hover:text-white text-sm font-medium
-           transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/30;
-  }
-
-  .btn-danger {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
-           bg-red-600/20 hover:bg-red-600/30
-           border border-red-500/30 hover:border-red-500/50
-           text-red-400 hover:text-red-300 text-sm font-medium
-           transition-all duration-150;
-  }
-
-  .badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success { @apply badge bg-green-500/15 text-green-400 border border-green-500/20; }
-  .badge-warning { @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/20; }
-  .badge-danger  { @apply badge bg-red-500/15 text-red-400 border border-red-500/20; }
-  .badge-info    { @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/20; }
-  .badge-neutral { @apply badge bg-slate-500/15 text-slate-400 border border-slate-500/20; }
-  .badge-brand   { @apply badge bg-brand-500/15 text-brand-400 border border-brand-500/20; }
-
-  .table-base {
-    @apply w-full text-sm;
-  }
-  .table-base thead tr {
-    @apply border-b border-[#334155];
-  }
-  .table-base thead th {
-    @apply px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider bg-[#0f172a]/50;
-  }
-  .table-base tbody tr {
-    @apply border-b border-[#334155]/50 hover:bg-white/[0.02] transition-colors duration-100;
-  }
-  .table-base tbody td {
-    @apply px-4 py-3 text-slate-300;
-  }
-
-  .stat-card {
-    @apply card p-5 flex flex-col gap-3;
-  }
-
-  .progress-bar {
-    @apply h-1.5 bg-[#334155] rounded-full overflow-hidden;
-  }
-  .progress-fill {
-    @apply h-full rounded-full transition-all duration-500;
-  }
-
-  .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold
-           text-slate-400 hover:text-white hover:bg-[#334155]/50
-           transition-all duration-150 cursor-pointer;
-  }
-  .sidebar-item.active {
-    @apply text-brand-400 bg-brand-500/10 border-l-4 border-brand-500 rounded-l-none pl-2;
-  }
-
-  .section-title {
-    @apply text-xl font-bold text-slate-100;
-  }
-
-  .section-subtitle {
-    @apply text-sm text-slate-400;
-  }
-
-  .divider {
-    @apply border-t border-[#334155];
-  }
+  .card { background: var(--atlas-surface); border: 1px solid var(--atlas-border); border-radius: var(--atlas-card-radius); box-shadow: var(--atlas-shadow); }
+  .card-hover { @apply card transition-colors; }
+  .card-hover:hover { border-color: var(--atlas-link); }
+  .glass-panel { @apply card; }
+  .input-base { @apply w-full border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder-muted-foreground; background: var(--atlas-surface); }
+  .input-base:focus { border-color: var(--atlas-link); outline: 2px solid var(--atlas-link); outline-offset: 1px; }
+  .btn-primary, .btn-secondary, .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; min-height: 34px; }
+  .btn-primary { background: var(--atlas-action); color: #fff; border: 1px solid var(--atlas-action); box-shadow: var(--atlas-shadow); }
+  .btn-primary:hover { background: var(--atlas-action-hover); }
+  .btn-secondary { background: var(--atlas-surface); color: var(--atlas-foreground); border: 1px solid var(--atlas-border); }
+  .btn-secondary:hover { background: var(--atlas-hover); }
+  .btn-danger { @apply bg-danger-bg text-danger border border-danger/30; }
+  .badge { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium; }
+  .badge-success { @apply badge bg-success-bg text-success; }
+  .badge-warning { @apply badge bg-warning-bg text-warning; }
+  .badge-danger { @apply badge bg-danger-bg text-danger; }
+  .badge-info, .badge-brand { @apply badge bg-surface-muted text-primary-ink; }
+  .badge-neutral { @apply badge bg-background text-muted-foreground; }
+  .table-base { @apply w-full text-sm; font-variant-numeric: tabular-nums; }
+  .table-base thead tr { @apply border-b border-border; }
+  .table-base thead th { @apply px-4 py-3 text-left text-xs font-medium text-muted-foreground bg-background; }
+  .table-base tbody tr { @apply border-b border-border transition-colors; }
+  .table-base tbody tr:hover { background: var(--atlas-hover); }
+  .table-base tbody td { @apply px-4 py-3 text-foreground; }
+  .stat-card { @apply card p-5 flex flex-col gap-3; }
+  .progress-bar { @apply h-1.5 bg-border rounded-full overflow-hidden; }
+  .progress-fill { @apply h-full rounded-full transition-all duration-500; }
+  .section-title { @apply text-xl font-semibold text-foreground; }
+  .section-subtitle { @apply text-sm text-muted-foreground; }
+  .divider { @apply border-t border-border; }
 }
-
 @layer utilities {
-  .text-gradient {
-    @apply bg-gradient-to-r from-brand-400 to-blue-400 bg-clip-text text-transparent;
-  }
-
-  .glow-brand {
-    box-shadow: 0 0 20px rgba(97, 113, 243, 0.2);
-  }
-
-  .animate-slide-in {
-    animation: slideIn 0.2s ease-out;
-  }
-
-  .animate-fade-in {
-    animation: fadeIn 0.3s ease-out;
-  }
-
-  .animate-pulse-slow {
-    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  .animate-glow {
-    animation: glowPulse 2s ease-in-out infinite alternate;
-  }
+  .text-gradient { color: var(--atlas-link); }
+  .glow-brand { box-shadow: var(--atlas-shadow); }
 }
-
-@keyframes slideIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes glowPulse {
-  from { box-shadow: 0 0 10px rgba(6, 182, 212, 0.2); }
-  to { box-shadow: 0 0 20px rgba(6, 182, 212, 0.6); }
+@keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 800px) {
+  .atlas-main > div > .p-6, .atlas-main > div > .px-6 { padding-left: 16px; padding-right: 16px; }
 }

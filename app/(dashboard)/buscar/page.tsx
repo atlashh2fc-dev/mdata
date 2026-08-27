@@ -223,7 +223,7 @@ export default function BuscarPage() {
         {showFilters && (
           <div className="card p-4 animate-slide-in">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Filter className="w-3.5 h-3.5" />
                 Filtros avanzados
                 {hasActiveFilters && (
@@ -232,7 +232,7 @@ export default function BuscarPage() {
               </h3>
               <button
                 onClick={() => setFilters(DEFAULT_FILTERS)}
-                className="text-xs text-slate-500 hover:text-white flex items-center gap-1"
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
               >
                 <X className="w-3 h-3" />
                 Limpiar
@@ -241,7 +241,7 @@ export default function BuscarPage() {
 
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Región</label>
+                <label className="block text-xs text-muted-foreground mb-1">Región</label>
                 <input
                   type="text"
                   value={filters.region}
@@ -252,7 +252,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Score mín.</label>
+                <label className="block text-xs text-muted-foreground mb-1">Score mín.</label>
                 <input
                   type="number"
                   value={filters.score_min}
@@ -263,7 +263,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Score máx.</label>
+                <label className="block text-xs text-muted-foreground mb-1">Score máx.</label>
                 <input
                   type="number"
                   value={filters.score_max}
@@ -274,7 +274,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Tiene autos</label>
+                <label className="block text-xs text-muted-foreground mb-1">Tiene autos</label>
                 <select
                   value={String(filters.tiene_autos)}
                   onChange={e => setFilters(f => ({
@@ -290,7 +290,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Tiene empresa</label>
+                <label className="block text-xs text-muted-foreground mb-1">Tiene empresa</label>
                 <select
                   value={String(filters.tiene_empresa)}
                   onChange={e => setFilters(f => ({
@@ -306,7 +306,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Bienes raíces</label>
+                <label className="block text-xs text-muted-foreground mb-1">Bienes raíces</label>
                 <select
                   value={String(filters.tiene_bienes_raices)}
                   onChange={e => setFilters(f => ({
@@ -322,7 +322,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Uso propiedad</label>
+                <label className="block text-xs text-muted-foreground mb-1">Uso propiedad</label>
                 <select
                   value={filters.uso_propiedad}
                   onChange={e => setFilters(f => ({
@@ -340,7 +340,7 @@ export default function BuscarPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Subtipo propiedad</label>
+                <label className="block text-xs text-muted-foreground mb-1">Subtipo propiedad</label>
                 <select
                   value={filters.destino_propiedad}
                   onChange={e => setFilters(f => ({
@@ -363,13 +363,13 @@ export default function BuscarPage() {
             </div>
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-4">
-              <div className="text-xs text-slate-400">
+              <div className="text-xs text-muted-foreground">
                 {hasActiveFilters ? (
                   previewLoading ? (
                     <span>Calculando universo disponible…</span>
                   ) : (
                     <span>
-                      Quedan <span className="font-semibold text-cyan-300">{formatNumber(currentTotal ?? 0)}</span> registros con estos filtros
+                      Quedan <span className="font-semibold text-primary-ink">{formatNumber(currentTotal ?? 0)}</span> registros con estos filtros
                     </span>
                   )
                 ) : (
@@ -395,9 +395,9 @@ export default function BuscarPage() {
 
         {/* Error */}
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-            <X className="w-4 h-4 text-red-400" />
-            <p className="text-sm text-red-400">{error}</p>
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-danger-bg border border-danger/20">
+            <X className="w-4 h-4 text-danger" />
+            <p className="text-sm text-danger">{error}</p>
           </div>
         )}
 
@@ -415,8 +415,8 @@ export default function BuscarPage() {
         {/* Tabla de resultados */}
         {!loading && tableData && !singleProfile && (
           <div className="card overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-[#253357]">
-              <p className="text-sm font-semibold text-slate-200">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <p className="text-sm font-semibold text-foreground">
                 {tableData.total.toLocaleString('es-CL')} resultados encontrados
               </p>
             </div>
@@ -436,12 +436,12 @@ export default function BuscarPage() {
         {/* Empty state inicial */}
         {!loading && !singleProfile && !tableData && !error && (
           <div className="flex flex-col items-center justify-center py-24 gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-brand-500/10 flex items-center justify-center border border-brand-500/20">
+            <div className="w-16 h-16 rounded-2xl bg-surface-muted flex items-center justify-center border border-primary/20">
               <span className="text-3xl">🔍</span>
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-slate-300">Comienza una búsqueda</p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-sm font-medium text-foreground">Comienza una búsqueda</p>
+              <p className="text-xs text-muted-foreground mt-1">
                 Ingresa un RUT, nombre, email, empresa o rubro. También puedes usar filtros avanzados.
               </p>
             </div>

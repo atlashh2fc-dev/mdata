@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { AtlasAuthShell } from '@/vendor/atlas-ui/auth-shell'
 import { useRouter } from 'next/navigation'
 import { hasSupabasePublicEnv } from '@/lib/db/client'
-import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -56,38 +57,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a1024] flex items-center justify-center p-4">
-      {/* Background gradient */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-brand-600/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" />
-      </div>
-
-      <div className="relative w-full max-w-md">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-brand-600 flex items-center justify-center glow-brand mb-4">
-            <Zap className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-white">RUT Intelligence</h1>
-          <p className="text-sm text-slate-500 mt-1">Plataforma de datos — Chile</p>
-        </div>
-
-        {/* Form */}
-        <div className="card p-8 shadow-elevation-4">
-          <h2 className="text-lg font-semibold text-white mb-6">Iniciar sesión</h2>
-
+    <AtlasAuthShell product="Datos" tagline="La información que conecta tu operación."
+      highlights={["Búsqueda y perfil 360 por RUT.", "Bases, segmentos y cobertura de datos.", "Acceso por usuario autorizado."]}
+      description="Ingresa para consultar y gestionar tus bases de datos.">
           {error && (
-            <div className="flex items-center gap-2.5 p-3 rounded-lg bg-red-500/10 border border-red-500/20 mb-5">
-              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-              <p className="text-sm text-red-400">{error}</p>
+            <div className="flex items-center gap-2.5 p-3 rounded-lg bg-danger-bg border border-danger/20 mb-5">
+              <AlertCircle className="w-4 h-4 text-danger flex-shrink-0" />
+              <p role="alert" className="text-sm text-danger">{error}</p>
             </div>
           )}
 
           {!hasSupabasePublicEnv && (
-            <div className="flex items-center gap-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-5">
-              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-              <p className="text-sm text-amber-300">
+            <div className="flex items-center gap-2.5 p-3 rounded-lg bg-warning-bg border border-warning/20 mb-5">
+              <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" />
+              <p className="text-sm text-warning">
                 La app esta desplegada, pero faltan variables publicas de Supabase en Vercel.
               </p>
             </div>
@@ -95,10 +78,11 @@ export default function LoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
+              <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">
                 Email
               </label>
               <input
+                id="email"
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
@@ -110,11 +94,12 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
+              <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1.5">
                 Contraseña
               </label>
               <div className="relative">
                 <input
+                  id="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -126,7 +111,8 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -140,7 +126,7 @@ export default function LoginPage() {
             >
               {loading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-border border-t-border rounded-full animate-spin" />
                   Autenticando...
                 </>
               ) : (
@@ -149,11 +135,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="text-center text-xs text-slate-600 mt-6">
-            Acceso restringido — plataforma interna
-          </p>
-        </div>
-      </div>
-    </div>
+    </AtlasAuthShell>
   )
 }

@@ -35,7 +35,7 @@ export function Pagination({
 
   return (
     <div className="flex items-center justify-between px-1 py-3">
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         {total > 0 ? `${from}–${to} de ${total.toLocaleString('es-CL')}` : 'Sin resultados'}
       </p>
 
@@ -43,7 +43,7 @@ export function Pagination({
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page === 1}
-          className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.06]
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-muted
                      disabled:opacity-30 disabled:cursor-not-allowed transition-all"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -51,15 +51,15 @@ export function Pagination({
 
         {pages.map((p, i) =>
           p === '...' ? (
-            <span key={`ellipsis-${i}`} className="px-2 text-slate-600">…</span>
+            <span key={`ellipsis-${i}`} className="px-2 text-muted-foreground">…</span>
           ) : (
             <button
               key={p}
               onClick={() => onPageChange(p as number)}
               className={`w-7 h-7 rounded-md text-xs font-medium transition-all ${
                 p === page
-                  ? 'bg-brand-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-surface-muted'
               }`}
             >
               {p}
@@ -70,7 +70,7 @@ export function Pagination({
         <button
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.06]
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-muted
                      disabled:opacity-30 disabled:cursor-not-allowed transition-all"
         >
           <ChevronRight className="w-4 h-4" />
