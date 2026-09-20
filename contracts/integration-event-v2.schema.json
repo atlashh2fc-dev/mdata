@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:geimser:contract:integration-event-batch:v2",
   "title": "Geimser Integration Event Batch v2",
-  "x-contract-version": "2.0.0",
+  "x-contract-version": "2.1.0",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "items"],
@@ -22,11 +22,37 @@
     "event": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_id", "event_type", "event_source", "subject", "external_key", "occurred_at", "data_schema", "tenant_id", "entity_version", "correlation_id", "causation_id", "payload"],
+      "required": [
+        "event_id",
+        "event_type",
+        "event_source",
+        "subject",
+        "external_key",
+        "occurred_at",
+        "data_schema",
+        "tenant_id",
+        "entity_version",
+        "correlation_id",
+        "causation_id",
+        "payload"
+      ],
       "properties": {
         "event_id": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "event_type": { "enum": ["intelligence.decision.v1", "engagement.event.v1", "integration.canary.v1"] },
-        "event_source": { "enum": ["urn:geimser:atlas2", "urn:geimser:atlas-lead", "urn:geimser:bigdata"] },
+        "event_type": {
+          "enum": [
+            "intelligence.decision.v1",
+            "engagement.event.v1",
+            "operation.feedback.v1",
+            "integration.canary.v1"
+          ]
+        },
+        "event_source": {
+          "enum": [
+            "urn:geimser:atlas2",
+            "urn:geimser:atlas-lead",
+            "urn:geimser:bigdata"
+          ]
+        },
         "subject": { "type": "string", "minLength": 1, "maxLength": 500 },
         "external_key": { "type": "string", "minLength": 1, "maxLength": 500 },
         "occurred_at": { "type": "string", "format": "date-time" },
@@ -34,8 +60,53 @@
         "tenant_id": { "type": "string", "minLength": 1, "maxLength": 100 },
         "entity_version": { "type": "integer", "minimum": 1 },
         "correlation_id": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "causation_id": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }] },
+        "causation_id": {
+          "anyOf": [
+            { "type": "string", "minLength": 1, "maxLength": 200 },
+            { "type": "null" }
+          ]
+        },
         "payload": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "event_type": { "const": "engagement.event.v1" } },
+            "required": ["event_type"]
+          },
+          "then": {
+            "properties": { "payload": { "$ref": "#/$defs/engagementPayload" } }
+          }
+        }
+      ]
+    },
+    "engagementPayload": {
+      "type": "object",
+      "required": ["external_campaign_key"],
+      "properties": {
+        "external_campaign_key": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "email": { "type": "string", "maxLength": 500 },
+        "sent": { "type": ["boolean", "integer", "string"] },
+        "delivered": { "type": ["boolean", "integer", "string"] },
+        "opened": { "type": ["boolean", "integer", "string"] },
+        "clicked": { "type": ["boolean", "integer", "string"] },
+        "bounced": { "type": ["boolean", "integer", "string"] },
+        "complained": { "type": ["boolean", "integer", "string"] },
+        "unsubscribed": { "type": ["boolean", "integer", "string"] },
+        "delivery_id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "message_id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "message_subject": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "company_name": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "contact_name": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "phone": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "country": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "source_lead_id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "event_kind": {
+          "enum": ["sent", "delivered", "opened", "clicked", "bounced", "complained", "unsubscribed"]
+        },
+        "event_semantics": { "enum": ["atomic_event", "cumulative_snapshot"] },
+        "link_url": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "provider_event_id": { "type": "string", "minLength": 1, "maxLength": 500 }
       }
     }
   }
