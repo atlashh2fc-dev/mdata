@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "test:integration-reliability": "npx --yes tsx --test lib/services/atlas-lead-bridge.test.ts lib/services/integration-health.test.ts scripts/commercial-outbox/outbox-utils.test.mjs",
+    "test:integration-reliability": "npx --yes tsx --test lib/services/atlas-lead-bridge.test.ts lib/services/atlas-ficha-rut.test.ts lib/services/integration-health.test.ts scripts/commercial-outbox/outbox-utils.test.mjs",
     "ops:export:csv": "node --env-file=.env.local scripts/master-sync/export-mysql-to-csv.mjs",
     "ops:load:csv": "node --env-file=.env.local scripts/master-sync/load-csv-to-postgres.mjs",
     "ops:sync:master": "node --env-file=.env.local scripts/master-sync/sync-master-data.mjs",
