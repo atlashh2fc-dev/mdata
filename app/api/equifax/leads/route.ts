@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/db/supabase'
 import { generateEquifaxLeads, previewEquifaxLeadScenarios, previewFreshEquifaxUniverse } from '@/lib/services/equifax-bdd'
-import { getEquifaxRunActionFeed, pushEquifaxRunToCrm } from '@/lib/services/equifax-crm'
+import { getEquifaxRunActionFeed } from '@/lib/services/equifax-crm'
 import type { EquifaxLeadGenerationParams, EquifaxUniverseProgress } from '@/types/equifax'
 
 export const runtime = 'nodejs'
@@ -61,21 +61,10 @@ export async function POST(req: NextRequest) {
         : 'preview'
 
     if (action === 'push_to_crm') {
-      if (!body?.run_id || typeof body.run_id !== 'string') {
-        return NextResponse.json({ error: 'run_id es requerido' }, { status: 400 })
-      }
-
-      const data = await pushEquifaxRunToCrm(body.run_id, {
-        allowed_temperatures: Array.isArray(body?.allowed_temperatures) ? body.allowed_temperatures : undefined,
-        min_lead_score: body?.min_lead_score,
-        min_contact_probability: body?.min_contact_probability,
-        min_purchase_probability: body?.min_purchase_probability,
-        exclude_existing_customers: body?.exclude_existing_customers === true,
-        exclude_active_crm_targets: body?.exclude_active_crm_targets !== false,
-        exclude_recent_crm_days: body?.exclude_recent_crm_days,
-        max_leads: body?.max_leads ?? null,
-      })
-      return NextResponse.json({ success: true, data })
+      return NextResponse.json(
+        { error: 'El envío directo al CRM (Atlas 1) fue retirado. Exporta el CSV para cargarlo en Atlas 2.0.' },
+        { status: 410 }
+      )
     }
 
     const params: EquifaxLeadGenerationParams = {

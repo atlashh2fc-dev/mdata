@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { NextRequest, NextResponse } from 'next/server'
 import { Client } from 'pg'
 import { runGuardedHeavyJob } from '@/lib/services/heavy-job-guard.mjs'
@@ -8,11 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const execFileAsync = promisify(execFile)
-const SYNC_MAX_BUFFER = 1024 * 1024 * 4
 const ROUTE_BUDGET_MS = 270000
-const PRIMARY_SYNC_TIMEOUT_MS = 90000
-const FALLBACK_SYNC_TIMEOUT_MS = 45000
 const ROUTE_CLOSE_RESERVE_MS = 15000
 
 let refreshPromise: ReturnType<typeof refreshBaseContact> | null = null
@@ -31,21 +25,6 @@ function hasOpsSecret(req: NextRequest) {
     req.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
 
   return Boolean(candidate && candidate === expected)
-}
-
-function parseLastJsonObject(value: string) {
-  const matches = value.match(/\{[\s\S]*?\}(?=\s*$|\s*\n)/g)
-  if (!matches?.length) return null
-
-  for (let index = matches.length - 1; index >= 0; index -= 1) {
-    try {
-      return JSON.parse(matches[index])
-    } catch {
-      // Continue scanning older JSON blocks.
-    }
-  }
-
-  return null
 }
 
 function getPostgresConnectionString() {
@@ -92,7 +71,6 @@ async function refreshBaseContact() {
       {
         forceOutsideWindow: false,
         telemetryResult: (value: {
-          sync: { stdout?: string; stderr?: string }
           dataset: unknown
           empresas_master_crm: unknown
           elapsed_ms: number
@@ -100,50 +78,11 @@ async function refreshBaseContact() {
           dataset: value.dataset,
           empresas_master_crm: value.empresas_master_crm,
           elapsed_ms: value.elapsed_ms,
-          sync_stdout_bytes: Buffer.byteLength(value.sync.stdout ?? ''),
-          sync_stderr_bytes: Buffer.byteLength(value.sync.stderr ?? ''),
         }),
       },
       async ({ assertMayContinue }: { assertMayContinue: () => Promise<void> }) => {
-        const syncEnv = {
-          ...process.env,
-          // El fallback directo no debe disparar otro refresh pesado dentro del
-          // mismo pipeline; el refresh protegido ocurre una sola vez más abajo.
-          REGISTRO_INTEL_SKIP_DERIVED_REFRESH: 'true',
-        }
-        const sync = await execFileAsync(
-          'npm',
-          ['run', 'ops:sync:crm-feedback'],
-          {
-            cwd: process.cwd(),
-            env: syncEnv,
-            maxBuffer: SYNC_MAX_BUFFER,
-            timeout: PRIMARY_SYNC_TIMEOUT_MS,
-          }
-        ).catch(async error => {
-          const message = error instanceof Error ? error.message : String(error)
-          const stderr =
-            typeof error === 'object' && error && 'stderr' in error
-              ? String((error as { stderr?: unknown }).stderr ?? '')
-              : ''
-          const detail = `${message}\n${stderr}`
-
-          if (!/statement timeout|canceling statement due to statement timeout|57014/i.test(detail)) {
-            throw error
-          }
-
-          return execFileAsync(
-            'npm',
-            ['run', 'ops:sync:crm-feedback:direct'],
-            {
-              cwd: process.cwd(),
-              env: syncEnv,
-              maxBuffer: SYNC_MAX_BUFFER,
-              timeout: FALLBACK_SYNC_TIMEOUT_MS,
-            }
-          )
-        })
-
+        // El sync de feedback desde Atlas 1 (registro-intel) fue retirado:
+        // el pipeline solo recalcula los datasets derivados locales.
         await assertMayContinue()
         await setStatementBudget(client, startedAt, 135000)
         const { rows: datasetRows } = await client.query(
@@ -157,7 +96,6 @@ async function refreshBaseContact() {
         )
 
         return {
-          sync,
           dataset: datasetRows[0]?.result ?? null,
           empresas_master_crm: crmRows[0]?.result ?? null,
           elapsed_ms: Date.now() - startedAt,
@@ -198,8 +136,6 @@ export async function GET(req: NextRequest) {
       data: {
         dataset: pipeline.dataset,
         empresas_master_crm: pipeline.empresas_master_crm,
-        crm_sync: parseLastJsonObject(pipeline.sync.stdout),
-        stderr: pipeline.sync.stderr?.trim() || null,
         elapsed_ms: pipeline.elapsed_ms,
       },
     })

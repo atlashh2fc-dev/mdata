@@ -16,8 +16,8 @@ const DRY_RUN = process.argv.includes('--dry-run')
 const BATCH_SIZE = Number(process.argv.find(arg => arg.startsWith('--batch-size='))?.split('=')[1] ?? 500)
 const SOURCE_NAME = 'geimser_mkt_7245_resultado'
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.REGISTRO_INTEL_SUPABASE_URL
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || process.env.REGISTRO_INTEL_SERVICE_ROLE_KEY
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   throw new Error('Faltan SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY para cargar datos.')

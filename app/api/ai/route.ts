@@ -4,8 +4,6 @@ import { getDashboardKPIs } from '@/lib/services/dashboard'
 import { createSegmento } from '@/lib/services/segmentos'
 import { FILTER_FIELDS, type FilterCondition, type FilterOperator, type SegmentFilter } from '@/types'
 import { search, SafeSearchType } from 'duck-duck-scrape'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { Pool, type PoolClient } from 'pg'
 
 export const runtime = 'nodejs'
@@ -14,7 +12,6 @@ export const maxDuration = 300
 
 const INCEPTION_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
 const INCEPTION_KEY = process.env.INCEPTION_API_KEY
-const CRM_SYNC_MAX_BUFFER = 1024 * 1024 * 4
 const DEFAULT_CRM_FRESH_MINUTES = 180
 const DEFAULT_SAMPLE_LIMIT = 20
 const MAX_SAMPLE_LIMIT = 100
@@ -38,8 +35,6 @@ const ALLOWED_SEGMENT_OPERATORS = new Set<FilterOperator>([
   'contains',
   'starts_with',
 ])
-
-const execFileAsync = promisify(execFile)
 
 type ToolCall = {
   id: string
@@ -91,10 +86,6 @@ type AssistantAgentResult = {
 }
 
 let pool: Pool | null = null
-let crmSyncPromise: Promise<{
-  stdout: string
-  stderr: string
-}> | null = null
 
 function getPostgresConnectionString() {
   const connectionString = process.env.POSTGRES_URL_NON_POOLING
@@ -260,58 +251,16 @@ async function getCrmFreshness(maxFreshMinutes = DEFAULT_CRM_FRESH_MINUTES): Pro
   })
 }
 
-function parseLastJsonObject(output: string) {
-  const matches = output.match(/\{[\s\S]*\}/g)
-  if (!matches?.length) return null
-
-  for (let i = matches.length - 1; i >= 0; i -= 1) {
-    try {
-      return JSON.parse(matches[i])
-    } catch {
-      // Keep scanning older blocks.
-    }
-  }
-
-  return null
-}
-
+// El sync de feedback venía de Atlas 1 (registro-intel), que fue dado de baja.
+// Esta herramienta solo informa la frescura de los datos locales.
 async function ensureCrmFresh(maxFreshMinutes = DEFAULT_CRM_FRESH_MINUTES) {
   const before = await getCrmFreshness(maxFreshMinutes)
-  if (before.is_fresh) {
-    return {
-      ok: true,
-      refreshed: false,
-      reason: `CRM sincronizado hace ${Math.round(before.age_minutes ?? 0)} minutos.`,
-      before,
-      after: before,
-    }
-  }
-
-  if (!crmSyncPromise) {
-    crmSyncPromise = execFileAsync(
-      'npm',
-      ['run', 'ops:sync:crm-feedback'],
-      {
-        cwd: process.cwd(),
-        env: process.env,
-        maxBuffer: CRM_SYNC_MAX_BUFFER,
-        timeout: 240000,
-      }
-    ).finally(() => {
-      crmSyncPromise = null
-    }) as Promise<{ stdout: string; stderr: string }>
-  }
-
-  const { stdout, stderr } = await crmSyncPromise
-
-  const after = await getCrmFreshness(maxFreshMinutes)
   return {
     ok: true,
-    refreshed: true,
+    refreshed: false,
+    reason: 'El sync con Atlas 1 (registro-intel) fue retirado; se informan los datos locales disponibles.',
     before,
-    after,
-    sync_result: parseLastJsonObject(stdout),
-    stderr: stderr?.trim() || null,
+    after: before,
   }
 }
 
@@ -1257,7 +1206,7 @@ ${JSON.stringify(stats, null, 2)}
         type: 'function',
         function: {
           name: 'ensureCrmFresh',
-          description: 'Valida si el CRM local esta actualizado y, solo cuando el usuario lo pidio explicitamente, ejecuta el sync desde registro_intel/crm_feedback_export_v1 y refresca scoring CRM.',
+          description: 'Informa que tan actualizado esta el feedback CRM local (ultimo sync historico, ultimo feedback y ultimo refresco de scoring). No ejecuta sincronizaciones: el sync con Atlas 1 fue retirado.',
           parameters: {
             type: 'object',
             properties: {

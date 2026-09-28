@@ -14,11 +14,6 @@ import type {
 } from '@/types'
 import { normalizeRut } from '@/lib/utils/rut'
 import { Pool } from 'pg'
-import {
-  activeCrmLeadToContactDetails,
-  enrichPersonaWithActiveCrmLead,
-  getActiveCrmLeadByRut,
-} from '@/lib/services/crm-active-leads'
 
 // Columnas permitidas para ordenar (usan los nombres de la vista)
 const PERSONA_SORT_FIELDS = new Set([
@@ -1106,8 +1101,7 @@ export async function getPersonaByRut(rut: string): Promise<PersonaView | null> 
     .single()
 
   if (error || !data) return null
-  const persona = await enrichPersonaIdentityFromSources(data as PersonaView)
-  return enrichPersonaWithActiveCrmLead(persona)
+  return enrichPersonaIdentityFromSources(data as PersonaView)
 }
 
 /**
@@ -1119,39 +1113,10 @@ export async function getPersonaDetail360(rut: string): Promise<PersonaDetail360
   const rutKey = normalizeRutKey(rut)
   if (!rutid || !rutKey) return null
 
-  const [pgDetail, activeLead] = await Promise.all([
-    getPersonaDetailFromPostgres(rutid, rutKey),
-    getActiveCrmLeadByRut(rutid),
-  ])
+  const pgDetail = await getPersonaDetailFromPostgres(rutid, rutKey)
+  if (pgDetail) return pgDetail
 
-  if (pgDetail) {
-    const activeContacts = activeCrmLeadToContactDetails(activeLead)
-    const existingKeys = new Set(
-      pgDetail.contact_points.map(point => `${point.contact_type}:${point.contact_value}`)
-    )
-
-    return {
-      ...pgDetail,
-      contact_points: [
-        ...pgDetail.contact_points,
-        ...activeContacts.filter(point => !existingKeys.has(`${point.contact_type}:${point.contact_value}`)),
-      ],
-    }
-  }
-
-  const supabaseDetail = await getPersonaDetailFromSupabase(rutid)
-  const activeContacts = activeCrmLeadToContactDetails(activeLead)
-  const existingKeys = new Set(
-    supabaseDetail.contact_points.map(point => `${point.contact_type}:${point.contact_value}`)
-  )
-
-  return {
-    ...supabaseDetail,
-    contact_points: [
-      ...supabaseDetail.contact_points,
-      ...activeContacts.filter(point => !existingKeys.has(`${point.contact_type}:${point.contact_value}`)),
-    ],
-  }
+  return getPersonaDetailFromSupabase(rutid)
 }
 
 /**

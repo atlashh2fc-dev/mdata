@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@supabase/supabase-js'
 import { db, hasSupabaseAdminEnv } from '@/lib/db/supabase'
 import { analyzeWithAI } from '@/lib/services/ai'
 import type {
@@ -25,7 +24,6 @@ const BASELINE_EVENT_LIMIT = 50000
 const ACTIVE_CAMPAIGN_LIMIT = 8
 const LEAD_LIMIT = 18
 const TOP_SCORE_CANDIDATES = 48
-const CRM_ACTIONABLE_TARGET_LIMIT = 200
 
 type FeedbackRow = {
   id: string
@@ -82,13 +80,6 @@ type PersonaLite = {
   comuna_canonica: string | null
 }
 
-type CrmActiveTargetRow = {
-  rutid: string
-  campaign_name: string | null
-  current_priority_score: number | null
-  updated_at: string | null
-}
-
 function hoursAgo(hours: number): Date {
   return new Date(Date.now() - hours * 60 * 60 * 1000)
 }
@@ -107,16 +98,6 @@ function toHourKey(value: Date): string {
 
 function normalizeCampaignName(value?: string | null): string {
   return value?.trim() || 'Sin campaña'
-}
-
-function normalizeRutid(value?: string | null): string | null {
-  if (!value) return null
-
-  const compact = value.toUpperCase().replace(/[^0-9K]/g, '')
-  if (!compact) return null
-
-  const trimmed = compact.replace(/^0+/, '')
-  return trimmed || null
 }
 
 function normalizeChannel(value?: string | null): string {
@@ -531,57 +512,6 @@ async function fetchPersonas(rutids: string[]): Promise<Map<string, PersonaLite>
   return personas
 }
 
-function getCrmOperationalClient() {
-  const url = process.env.REGISTRO_INTEL_SUPABASE_URL
-  const key =
-    process.env.REGISTRO_INTEL_SERVICE_ROLE_KEY ||
-    process.env.REGISTRO_INTEL_SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !key) return null
-
-  return createClient(url, key, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  })
-}
-
-async function fetchCrmActiveTargets(rutids: string[]): Promise<Map<string, CrmActiveTargetRow>> {
-  const normalizedRutids = [...new Set(
-    rutids
-      .map(rutid => normalizeRutid(rutid))
-      .filter((rutid): rutid is string => Boolean(rutid))
-  )]
-
-  if (!normalizedRutids.length) return new Map()
-
-  const crm = getCrmOperationalClient()
-  if (!crm) return new Map()
-
-  const { data, error } = await crm
-    .from('commercial_brain_active_targets_v1')
-    .select('rutid,campaign_name,current_priority_score,updated_at')
-    .in('rutid', normalizedRutids)
-    .order('current_priority_score', { ascending: false })
-    .order('updated_at', { ascending: false })
-    .limit(CRM_ACTIONABLE_TARGET_LIMIT)
-
-  if (error) {
-    console.error('[fetchCrmActiveTargets]', error)
-    return new Map()
-  }
-
-  const targetMap = new Map<string, CrmActiveTargetRow>()
-  for (const row of (data ?? []) as CrmActiveTargetRow[]) {
-    const normalizedRutid = normalizeRutid(row.rutid)
-    if (!normalizedRutid || targetMap.has(normalizedRutid)) continue
-    targetMap.set(normalizedRutid, row)
-  }
-
-  return targetMap
-}
-
 function buildSegmentInsights(
   events: FeedbackEvent[],
   personas: Map<string, PersonaLite>,
@@ -684,11 +614,7 @@ async function buildLeadActions(activeCampaigns: CampaignHealthCard[]): Promise<
   if (!scoreRows.length) return []
 
   const rutids = scoreRows.map(row => row.rutid)
-  const [personas, crmTargets] = await Promise.all([
-    fetchPersonas(rutids),
-    fetchCrmActiveTargets(rutids),
-  ])
-  const actionableMode = crmTargets.size > 0
+  const personas = await fetchPersonas(rutids)
 
   const [matchedHistory, directHistory] = await Promise.all([
     db
@@ -720,10 +646,6 @@ async function buildLeadActions(activeCampaigns: CampaignHealthCard[]): Promise<
   const healthiestCampaign = activeCampaigns.find(campaign => campaign.severity === 'healthy') ?? activeCampaigns[0] ?? null
 
   const leads: Array<LeadActionItem | null> = scoreRows.map(score => {
-    const normalizedRutid = normalizeRutid(score.rutid)
-    const crmTarget = normalizedRutid ? crmTargets.get(normalizedRutid) : null
-    if (actionableMode && !crmTarget) return null
-
     const persona = personas.get(score.rutid)
     const history = historyMap.get(score.rutid) ?? []
     const recentAttempts = history.filter(event => event.managedAtDate >= hoursAgo(72)).length
@@ -731,8 +653,7 @@ async function buildLeadActions(activeCampaigns: CampaignHealthCard[]): Promise<
       event => event.managedAtDate >= daysAgo(7) && event.outcome === 'no_contact'
     ).length
     const positiveEvents = history.filter(event => event.effectiveContact || event.interested || event.sale)
-    const lastCampaign = crmTarget?.campaign_name
-      ?? positiveEvents[0]?.campaignName
+    const lastCampaign = positiveEvents[0]?.campaignName
       ?? history[0]?.campaignName
       ?? healthiestCampaign?.campaign_name
       ?? null
@@ -741,8 +662,7 @@ async function buildLeadActions(activeCampaigns: CampaignHealthCard[]): Promise<
       (score.best_channel === healthiestCampaign?.top_channel ? 20 : 0) +
       (history.length ? safeRate(positiveEvents.length, history.length) : 15) +
       (healthiestCampaign?.severity === 'healthy' ? 15 : 0) +
-      (score.best_contact_hour === new Date().getHours() ? 10 : 0) +
-      (crmTarget ? 12 : 0)
+      (score.best_contact_hour === new Date().getHours() ? 10 : 0)
     ), 0, 100)
     const contactProbability = clamp(round(score.contactability_score - fatigueScore * 0.18 + operationalAffinity * 0.12), 0, 100)
     const conversionProbability = clamp(round(score.purchase_propensity_score - fatigueScore * 0.1 + operationalAffinity * 0.08), 0, 100)
@@ -759,7 +679,6 @@ async function buildLeadActions(activeCampaigns: CampaignHealthCard[]): Promise<
       conversionProbability >= 65 ? 'conversion-alta' : 'conversion-media',
       fatigueScore >= 55 ? 'fatiga-alta' : 'fatiga-controlada',
       score.feedback_coverage ? 'feedback-real' : 'sin-feedback',
-      crmTarget ? 'crm-activo' : 'crm-pendiente',
     ]
 
     return {
